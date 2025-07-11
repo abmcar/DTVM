@@ -7,6 +7,7 @@
 #include "utils/statistics.h"
 #include "zetaengine.h"
 #include <CLI/CLI.hpp>
+#include <evm/interpreter.h>
 #include <unistd.h>
 
 #ifdef ZEN_ENABLE_BUILTIN_WASI
@@ -65,7 +66,8 @@ int main(int argc, char *argv[]) {
     return exitMain(EXIT_FAILURE);
   }
 
-  std::string WasmFilename;
+  std::string Filename;
+  InputFormat format;
   std::string FuncName;
   std::string EntryHint;
   std::vector<std::string> Args;
@@ -77,6 +79,11 @@ int main(int argc, char *argv[]) {
   uint32_t NumExtraExecutions = 0;
   RuntimeConfig Config;
   bool EnableBenchmark = false;
+
+  const std::unordered_map<std::string, InputFormat> FormatMap = {
+      {"wasm", InputFormat::WASM},
+      {"evm", InputFormat::EVM},
+  };
 
   const std::unordered_map<std::string, RunMode> ModeMap = {
       {"interpreter", RunMode::InterpMode},
@@ -91,8 +98,9 @@ int main(int argc, char *argv[]) {
   };
 
   try {
-    CLIParser->add_option("WASM_FILE", WasmFilename, "WASM filename")
-        ->required();
+    CLIParser->add_option("IN_FILE", Filename, "Input filename")->required();
+    CLIParser->add_option("--format", format, "Input format")
+        ->transform(CLI::CheckedTransformer(FormatMap, CLI::ignore_case));
     CLIParser->add_option("-m,--mode", Config.Mode, "Running mode")
         ->transform(CLI::CheckedTransformer(ModeMap, CLI::ignore_case));
     CLIParser->add_option("-f,--function", FuncName, "Entry function name");
@@ -149,6 +157,13 @@ int main(int argc, char *argv[]) {
     return exitMain(EXIT_FAILURE);
   }
 
+  /// ================ Basic evm interpreter ================
+
+  if (format == InputFormat::EVM) {
+    // TODO))
+    assert(false);
+  }
+
   /// ================ Create ZetaEngine runtime ================
 
   std::unique_ptr<Runtime> RT = Runtime::newRuntime(Config);
@@ -160,7 +175,7 @@ int main(int argc, char *argv[]) {
   /// ================ Load WASI module ================
 
 #ifdef ZEN_ENABLE_BUILTIN_WASI
-  RT->setWASIArgs(WasmFilename, Args);
+  RT->setWASIArgs(Filename, Args);
   RT->setWASIEnvs(Envs);
   RT->setWASIDirs(Dirs);
   HostModule *WASIMod = LOAD_HOST_MODULE(RT, zen::host, wasi_snapshot_preview1);
@@ -193,7 +208,7 @@ int main(int argc, char *argv[]) {
   /// ================ Load user's module ================
 
   const auto &ActualEntryHint = !EntryHint.empty() ? EntryHint : FuncName;
-  MayBe<Module *> ModRet = RT->loadModule(WasmFilename, ActualEntryHint);
+  MayBe<Module *> ModRet = RT->loadModule(Filename, ActualEntryHint);
   if (!ModRet) {
     const Error &Err = ModRet.getError();
     ZEN_ASSERT(!Err.isEmpty());
@@ -225,8 +240,8 @@ int main(int argc, char *argv[]) {
 
 #ifdef ZEN_ENABLE_EVMABI_TEST
   std::vector<uint8_t> WasmFileBytecode;
-  if (!zen::utils::readBinaryFile(WasmFilename, WasmFileBytecode)) {
-    SIMPLE_LOG_ERROR("failed to read wasm file %s", WasmFilename.c_str());
+  if (!zen::utils::readBinaryFile(Filename, WasmFileBytecode)) {
+    SIMPLE_LOG_ERROR("failed to read wasm file %s", Filename.c_str());
     return exitMain(EXIT_FAILURE, RT.get());
   }
   auto EVMAbiMockCtx = zen::host::EVMAbiMockContext::create(WasmFileBytecode);
@@ -265,14 +280,14 @@ int main(int argc, char *argv[]) {
   if (NumExtraCompilations + NumExtraExecutions > 0) {
     CodeHolderUniquePtr Code;
     try {
-      Code = CodeHolder::newFileCodeHolder(*RT, WasmFilename);
+      Code = CodeHolder::newFileCodeHolder(*RT, Filename);
     } catch (const std::exception &e) {
       SIMPLE_LOG_ERROR("failed to load module: %s", e.what());
       return exitMain(EXIT_FAILURE, RT.get());
     }
     for (uint32_t I = 0; I < NumExtraCompilations; ++I) {
       // Use new filename to avoid cache based on filename
-      std::string NewWasmName = WasmFilename + std::to_string(I);
+      std::string NewWasmName = Filename + std::to_string(I);
       MayBe<Module *> TestModRet =
           RT->loadModule(NewWasmName, Code->getData(), Code->getSize());
       ZEN_ASSERT(TestModRet);

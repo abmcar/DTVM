@@ -134,6 +134,7 @@ add_subdirectory(action)
 add_subdirectory(entrypoint)
 add_subdirectory(runtime)
 add_subdirectory(utils)
+add_subdirectory(evm)
 
 add_library(
   dtvmcore STATIC
@@ -143,6 +144,7 @@ add_library(
   $<TARGET_OBJECTS:platform>
   $<TARGET_OBJECTS:runtime>
   $<TARGET_OBJECTS:utils>
+  $<TARGET_OBJECTS:evm>
   zetaengine-c.cpp
 )
 if(NOT ZEN_ENABLE_SGX)

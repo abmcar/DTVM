@@ -53,6 +53,11 @@ enum LabelType {
   LABEL_FUNCTION,
 };
 
+enum class InputFormat {
+  WASM = 0,
+  EVM,
+};
+
 enum class RunMode {
   InterpMode = 0,
   SinglepassMode = 1,

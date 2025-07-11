@@ -14,13 +14,18 @@ class CodeHolder : public RuntimeObject<CodeHolder> {
   friend class RuntimeObjectDestroyer;
 
 public:
-  enum class HolderKind { kFile, kRawData };
+  enum class HolderKind { kFile, kRawData, kEVMBytecode };
 
   static CodeHolderUniquePtr newFileCodeHolder(Runtime &RT,
                                                const std::string &Filename);
 
   static CodeHolderUniquePtr newRawDataCodeHolder(Runtime &RT, const void *Data,
                                                   size_t Size);
+  // Add EVM-specific constructor
+  static CodeHolderUniquePtr newEVMBytecodeHolder(Runtime &RT, const void *Data,
+                                                  size_t Size);
+  // Check if it's EVM bytecode
+  bool isEVMBytecode() const { return Kind == HolderKind::kEVMBytecode; }
 
   HolderKind getKind() const { return Kind; }
 
@@ -37,6 +42,8 @@ private:
   void releaseFileCodeHolder();
 
   void releaseRawDataCodeHolder();
+
+  void releaseEVMBytecodeHolder();
 
   HolderKind Kind;
 
