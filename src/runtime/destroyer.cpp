@@ -9,7 +9,6 @@
 #include "runtime/isolation.h"
 #include "runtime/module.h"
 #include "runtime/symbol_wrapper.h"
-#include "evm/interpreter.h"
 
 namespace zen::runtime {
 
@@ -58,12 +57,6 @@ template <> void RuntimeObjectDestroyer::operator()(action::InterpStack *Ptr) {
 template <> void RuntimeObjectDestroyer::operator()(SymbolWrapper *Ptr) {
   Runtime *RT = Ptr->getRuntime();
   Ptr->~SymbolWrapper();
-  RT->deallocate(Ptr);
-}
-
-template <> void RuntimeObjectDestroyer::operator()(zen::evm::InterpreterStack *Ptr) {
-  Runtime *RT = Ptr->getRuntime();
-  Ptr->~InterpreterStack();
   RT->deallocate(Ptr);
 }
 

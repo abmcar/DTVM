@@ -8,9 +8,8 @@
 
 namespace zen::evm {
 
-// EVM 指令枚举（仅列出核心指令，后续可补充 TODO）
 enum class Opcode : uint8_t {
-  // 0x0 系
+  // 0x0
   STOP        = 0x00,
   ADD         = 0x01,
   MUL         = 0x02,
@@ -24,7 +23,7 @@ enum class Opcode : uint8_t {
   EXP         = 0x0A,
   SIGNEXTEND  = 0x0B,
 
-  // 0x10 系
+  // 0x10
   LT          = 0x10,
   GT          = 0x11,
   SLT         = 0x12,
@@ -36,31 +35,34 @@ enum class Opcode : uint8_t {
   XOR         = 0x18,
   NOT         = 0x19,
   BYTE        = 0x1A,
+  SHL         = 0x1B,
+  SHR         = 0x1C,
+  SAR         = 0x1D,
 
-  // 0x30 系（环境信息，示例）
+  // 0x30
   ADDRESS     = 0x30,
   BALANCE     = 0x31,
   ORIGIN      = 0x32,
   CALLER      = 0x33,
   CALLVALUE   = 0x34,
   CALLDATALOAD= 0x35,
-  // ... TODO: 继续补充其余指令
+  // TODO))
 
-  // PUSH 系列占用 0x60~0x7F，单独处理
+
   POP         = 0x50,
   MLOAD       = 0x51,
   MSTORE      = 0x52,
   RETURN      = 0xF3,
 
-  // PUSH 系列：仅列出首尾，以便后续范围判断
+
   PUSH1       = 0x60,
   PUSH32      = 0x7F,
 
-  // DUP 系列
+
   DUP1        = 0x80,
   DUP16       = 0x8F,
 
-  // SWAP 系列
+
   SWAP1       = 0x90,
   SWAP16      = 0x9F,
 };

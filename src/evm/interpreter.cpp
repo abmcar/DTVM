@@ -5,103 +5,157 @@
 #include "evm/opcode.h"
 
 #include "common/errors.h"
-#include <cstring>
-#include <array>
-#include <utility>
 #include "runtime/instance.h"
+#include "uint256_t.h"
+#include <array>
+#include <cstring>
+#include <utility>
 
 namespace {
-// 简易 256 位加法（小端字节数组），忽略溢出进位
-static zen::evm::UInt256 addUInt256(const zen::evm::UInt256 &A,
-                                    const zen::evm::UInt256 &B) {
-  zen::evm::UInt256 Res{};
-  uint16_t Carry = 0;
+static std::array<uint8_t, 32> uint256ToBytes(const uint256_t &value) {
+  std::array<uint8_t, 32> bytes{};
   for (size_t i = 0; i < 32; ++i) {
-    uint16_t Sum = static_cast<uint16_t>(A.Bytes[i]) +
-                   static_cast<uint16_t>(B.Bytes[i]) + Carry;
-    Res.Bytes[i] = static_cast<uint8_t>(Sum & 0xFF);
-    Carry = Sum >> 8;
+    bytes[i] = static_cast<uint8_t>((value >> (8 * (31 - i))) & 0xFF);
   }
-  // 溢出进位被丢弃（EVM 语义是 mod 2^256）
-  return Res;
+  return bytes;
 }
+
+static uint256_t bytesToUInt256(const std::array<uint8_t, 32> &bytes) {
+  uint256_t value = 0;
+  for (size_t i = 0; i < 32; ++i) {
+    value = (value << 8) | bytes[i];
+  }
+  return value;
+}
+
+static uint256_t littleEndianToUInt256(const uint8_t *bytes, size_t numBytes) {
+  uint256_t value = 0;
+  for (size_t i = 0; i < numBytes && i < 32; ++i) {
+    value |= (uint256_t(bytes[i]) << (8 * i));
+  }
+  return value;
+}
+
+static int cmpInt256(const uint256_t &A, const uint256_t &B) {
+  bool signA = (A >> 255) & 1;
+  bool signB = (B >> 255) & 1;
+
+  if (signA != signB) {
+    return signA ? -1 : 1;
+  }
+
+  if (A < B)
+    return -1;
+  if (A > B)
+    return 1;
+  return 0;
+}
+
+
+static uint64_t uint256ToUint64(const uint256_t &value) {
+  return static_cast<uint64_t>(value & 0xFFFFFFFFFFFFFFFFULL);
+}
+
+static uint256_t signedDiv(const uint256_t &A, const uint256_t &B) {
+  if (B == 0) {
+    return uint256_t(0);
+  }
+  
+  bool signA = (A >> 255) & 1;
+  bool signB = (B >> 255) & 1;
+  
+  uint256_t absA = signA ? (~A + 1) : A;
+  uint256_t absB = signB ? (~B + 1) : B;
+  
+  uint256_t result = absA / absB;
+  
+  if (signA != signB) {
+    result = ~result + 1;
+  }
+  
+  return result;
+}
+
+static uint256_t signedMod(const uint256_t &A, const uint256_t &B) {
+  if (B == 0) {
+    return uint256_t(0);
+  }
+  
+  bool signA = (A >> 255) & 1;
+  bool signB = (B >> 255) & 1;
+  
+  uint256_t absA = signA ? (~A + 1) : A;
+  uint256_t absB = signB ? (~B + 1) : B;
+  
+  uint256_t result = absA % absB;
+  
+  if (signA) {
+    result = ~result + 1;
+  }
+  
+  return result;
+}
+
+static uint256_t quickPow(uint256_t base, uint256_t exp) {
+  uint256_t result = 1;
+  while (exp > 0) {
+    if (exp & 1) {
+      result *= base;
+    }
+    base *= base;
+    exp >>= 1;
+  }
+  return result;
+}
+
 } // namespace
 
 using namespace zen;
 using namespace zen::evm;
 using namespace zen::runtime;
 
-/* =============================
- * InterpreterExecContext 实现
- * ============================= */
 
-EVMFrame *InterpreterExecContext::allocFrame(FunctionInstance *FuncInst) {
+
+EVMFrame *InterpreterExecContext::allocFrame() {
   auto *Frame = new EVMFrame();
-  Frame->FuncInst = FuncInst;
 
-  // 从 FunctionInstance 获取 EVM 字节码入口与大小
-  if (FuncInst) {
-    Frame->Pc = FuncInst->CodePtr;
-    Frame->CodeEnd = FuncInst->CodePtr + FuncInst->CodeSize;
-  }
-
-  Frame->GasLeft = 0; // TODO: 依据上层调用指定 Gas
-
+  Frame->GasLeft = 0;
   Frame->PrevFrame = CurFrame;
-
   setCurFrame(Frame);
   return Frame;
 }
 
 void InterpreterExecContext::freeFrame(EVMFrame *Frame) {
-  if (!Frame) return;
+  if (!Frame)
+    return;
   setCurFrame(Frame->PrevFrame);
   delete Frame;
 }
-
-/* =============================
- * BaseInterpreter 实现
- * ============================= */
 
 void BaseInterpreter::interpret() {
   EVMFrame *Frame = Context.getCurFrame();
   ZEN_ASSERT(Frame && "Interpreter requires a valid initial frame");
 
-  // 主解释循环
-  while (true) {
-    const uint8_t *CodeEnd = Frame->CodeEnd;
-    const uint8_t *&PcRef = Frame->Pc; // 引用当前帧的 PC
+  while (Frame->Pc < Frame->Bytecode.size()) {
+    uint8_t OpcodeByte = Frame->Bytecode[Frame->Pc];
+    Opcode Op = static_cast<Opcode>(OpcodeByte);
 
-    if (PcRef >= CodeEnd) {
-      // 正常执行到字节码末尾，相当于 STOP
+    switch (Op) {
+    case Opcode::STOP:
       Context.freeFrame(Frame);
       if (Context.getCurFrame() == nullptr) {
         return;
       }
       Frame = Context.getCurFrame();
       continue;
-    }
-
-    Opcode Op = static_cast<Opcode>(*PcRef++);
-
-    switch (Op) {
-    case Opcode::STOP: {
-      // EVM STOP - 结束当前调用
-      Context.freeFrame(Frame);
-      if (Context.getCurFrame() == nullptr) {
-        return; // 最外层结束
-      }
-      Frame = Context.getCurFrame();
-      continue; // 继续解释上层帧
-    }
 
     case Opcode::ADD: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      zen::evm::UInt256 B = Frame->pop();
-      zen::evm::UInt256 A = Frame->pop();
-      zen::evm::UInt256 C = addUInt256(A, B);
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t C = A + B;
       Frame->push(C);
       break;
     }
@@ -110,87 +164,328 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      zen::evm::UInt256 B = Frame->pop();
-      zen::evm::UInt256 A = Frame->pop();
-      // A - B (mod 2^256)
-      zen::evm::UInt256 Res{};
-      int16_t Borrow = 0;
-      for (size_t i = 0; i < 32; ++i) {
-        int16_t Diff = static_cast<int16_t>(A.Bytes[i]) -
-                       static_cast<int16_t>(B.Bytes[i]) - Borrow;
-        if (Diff < 0) {
-          Diff += 256;
-          Borrow = 1;
-        } else {
-          Borrow = 0;
-        }
-        Res.Bytes[i] = static_cast<uint8_t>(Diff & 0xFF);
-      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = A - B;
       Frame->push(Res);
       break;
     }
 
     case Opcode::MUL: {
-      // 极简实现：仅处理低 128 位，或用库。暂简单按字节乘法 (naive 256-bit)
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      zen::evm::UInt256 B = Frame->pop();
-      zen::evm::UInt256 A = Frame->pop();
-      zen::evm::UInt256 Res{};
-      // 基于 16 进制乘法 (学校小学算法)
-      uint16_t Temp[64] = {0}; // 512-bit 中间结果，低字节在索引低
-      for (size_t i = 0; i < 32; ++i) {
-        for (size_t j = 0; j < 32; ++j) {
-          size_t k = i + j;
-          uint16_t P = static_cast<uint16_t>(A.Bytes[i]) * static_cast<uint16_t>(B.Bytes[j]);
-          uint16_t Carry = P;
-          size_t idx = k;
-          while (Carry) {
-            uint16_t Sum = Temp[idx] + Carry;
-            Temp[idx] = Sum & 0xFF;
-            Carry = Sum >> 8;
-            ++idx;
-          }
-        }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = A * B;
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::DIV: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      // 模 2^256，只取前 32 字节
-      for (size_t i = 0; i < 32; ++i) {
-        Res.Bytes[i] = static_cast<uint8_t>(Temp[i]);
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Q = (B == 0) ? uint256_t(0) : A / B;
+      Frame->push(Q);
+      break;
+    }
+
+    case Opcode::MOD: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t R = (B == 0) ? uint256_t(0) : A % B;
+      Frame->push(R);
+      break;
+    }
+
+    case Opcode::AND: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = A & B;
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::EQ: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = (A == B) ? uint256_t(1) : uint256_t(0);
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::ISZERO: {
+      if (Frame->stackHeight() < 1) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t V = Frame->pop();
+      uint256_t Res = (V == 0) ? uint256_t(1) : uint256_t(0);
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::LT: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = (A < B) ? uint256_t(1) : uint256_t(0);
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::GT: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = (A > B) ? uint256_t(1) : uint256_t(0);
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::SLT: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = (cmpInt256(A, B) < 0) ? uint256_t(1) : uint256_t(0);
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::SGT: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = (cmpInt256(A, B) > 0) ? uint256_t(1) : uint256_t(0);
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::ADDMOD: {
+      if (Frame->stackHeight() < 3) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t C = Frame->pop();
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res =
+          (C == 0) ? uint256_t(0) : (A + B) % C;
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::MULMOD: {
+      if (Frame->stackHeight() < 3) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t C = Frame->pop();
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res =
+          (C == 0) ? uint256_t(0) : (A * B) % C;
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::EXP: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = quickPow(A, B);
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::SDIV: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = signedDiv(A, B);
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::SMOD: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = signedMod(A, B);
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::OR: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = A | B;
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::XOR: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t B = Frame->pop();
+      uint256_t A = Frame->pop();
+      uint256_t Res = A ^ B;
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::NOT: {
+      if (Frame->stackHeight() < 1) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t V = Frame->pop();
+      uint256_t Res = ~V;
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::BYTE: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t I = Frame->pop(); 
+      uint256_t Val = Frame->pop();
+      
+      uint256_t Res = 0;
+      if (I < 32) {
+        uint8_t byte_val = static_cast<uint8_t>((Val >> (8 * (31 - I))) & 0xFF);
+        Res = uint256_t(byte_val);
       }
       Frame->push(Res);
       break;
     }
 
-    case Opcode::POP: {
-      if (Frame->stackHeight() < 1) {
+    case Opcode::SHL: {
+      if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      (void)Frame->pop();
+      uint256_t Shift = Frame->pop();
+      uint256_t Value = Frame->pop();
+      
+      uint256_t Res = 0;
+      if (Shift < 256) {
+        Res = Value << Shift;
+      }
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::SHR: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t Shift = Frame->pop();
+      uint256_t Value = Frame->pop();
+      
+      uint256_t Res = 0;
+      if (Shift < 256) {
+        Res = Value >> Shift;
+      }
+      Frame->push(Res);
+      break;
+    }
+
+    case Opcode::SAR: {
+      if (Frame->stackHeight() < 2) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      uint256_t Shift = Frame->pop();
+      uint256_t Value = Frame->pop();
+      
+      uint256_t Res = 0;
+      if (Shift < 256) {
+        bool isNegative = (Value >> 255) & 1;
+        Res = Value >> Shift;
+        
+        if (isNegative && Shift > 0) {
+          uint256_t mask = (uint256_t(1) << (256 - Shift)) - 1;
+          mask = ~mask;
+          Res |= mask;
+        }
+      } else {
+        bool isNegative = (Value >> 255) & 1;
+        Res = isNegative ? uint256_t(-1) : uint256_t(0);
+      }
+      Frame->push(Res);
       break;
     }
 
     case Opcode::MSTORE: {
-      // 期望栈顶顺序：offset, value
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      UInt256 OffsetVal = Frame->pop();
-      UInt256 Value = Frame->pop();
-      // 仅使用低 64 位作为偏移
-      uint64_t Offset = 0;
-      for (int i = 7; i >= 0; --i) {
-        Offset = (Offset << 8) | OffsetVal.Bytes[i];
+      uint256_t OffsetVal = Frame->pop();
+      uint256_t Value = Frame->pop();
+
+      uint64_t Offset = uint256ToUint64(OffsetVal);
+      if (Offset > UINT32_MAX) {
+        throw common::getError(common::ErrorCode::IntegerOverflow);
       }
-      size_t Off = static_cast<size_t>(Offset);
-      size_t NeedSize = Off + 32;
-      if (Frame->Memory.size() < NeedSize) {
-        Frame->Memory.resize(NeedSize, 0);
+
+      std::array<uint8_t, 32> valueBytes = uint256ToBytes(Value);
+      uint64_t reqSize = Offset + 32;
+      if (reqSize > Frame->Memory.size()) {
+        Frame->Memory.resize(reqSize, 0);
       }
-      // 将 Value (小端) 转为大端写入
-      for (size_t i = 0; i < 32; ++i) {
-        Frame->Memory[Off + i] = Value.Bytes[31 - i];
+      std::memcpy(Frame->Memory.data() + Offset, valueBytes.data(), 32);
+      break;
+    }
+
+    case Opcode::MLOAD: {
+      if (Frame->stackHeight() < 1) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
+      uint256_t OffsetVal = Frame->pop();
+      uint256_t SizeVal = Frame->pop();
+      uint64_t Offset = uint256ToUint64(OffsetVal);
+      uint64_t Size = uint256ToUint64(SizeVal);
+
+      if (Offset > UINT32_MAX || Size > UINT32_MAX) {
+        throw common::getError(common::ErrorCode::IntegerOverflow);
+      }
+
+      uint64_t reqSize = Offset + 32;
+      if (reqSize > Frame->Memory.size()) {
+        Frame->Memory.resize(reqSize, 0);
+      }
+
+      std::array<uint8_t, 32> valueBytes{};
+      std::memcpy(valueBytes.data(), Frame->Memory.data() + Offset, 32);
+
+      uint256_t Value = bytesToUInt256(valueBytes);
+      Frame->push(Value);
       break;
     }
 
@@ -198,77 +493,75 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      UInt256 OffsetVal = Frame->pop();
-      UInt256 SizeVal = Frame->pop();
-      uint64_t Offset = 0;
-      uint64_t Size = 0;
-      for (int i = 7; i >= 0; --i) {
-        Offset = (Offset << 8) | OffsetVal.Bytes[i];
-        Size = (Size << 8) | SizeVal.Bytes[i];
-      }
-      size_t Off = static_cast<size_t>(Offset);
-      size_t Len = static_cast<size_t>(Size);
-      if (Off + Len > Frame->Memory.size()) {
-        // 超界视为 0 填充
-        Frame->Memory.resize(Off + Len, 0);
-      }
-      std::vector<uint8_t> Ret(Frame->Memory.begin() + Off, Frame->Memory.begin() + Off + Len);
-      Context.setReturnData(std::move(Ret));
+      uint256_t OffsetVal = Frame->pop();
+      uint256_t SizeVal = Frame->pop();
+      uint64_t Offset = uint256ToUint64(OffsetVal);
+      uint64_t Size = uint256ToUint64(SizeVal);
 
-      // 与 STOP 类似：结束当前调用
+      if (Offset > UINT32_MAX || Size > UINT32_MAX) {
+        throw common::getError(common::ErrorCode::IntegerOverflow);
+      }
+
+      uint64_t reqSize = Offset + Size;
+      if (reqSize > Frame->Memory.size()) {
+        Frame->Memory.resize(reqSize, 0);
+      }
+
+      std::vector<uint8_t> returnData(Frame->Memory.begin() + Offset,
+                                      Frame->Memory.begin() + Offset + Size);
+      Context.setReturnData(std::move(returnData));
+
       Context.freeFrame(Frame);
       if (Context.getCurFrame() == nullptr) {
-        return; // 顶层返回
+        return;
       }
       Frame = Context.getCurFrame();
-      continue;
+      break;
     }
 
-    default: {
-      uint8_t RawOp = static_cast<uint8_t>(Op);
+    case Opcode::POP: {
+      if (Frame->stackHeight() < 1) {
+        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
+      }
+      Frame->pop();
+      break;
+    }
 
-      // PUSH1 ~ PUSH32 处理
-      if (RawOp >= 0x60 && RawOp <= 0x7F) {
-        uint8_t NumBytes = RawOp - 0x5F; // 1..32
-        if (PcRef + NumBytes > CodeEnd) {
+    default:
+      if (OpcodeByte >= 0x60 && OpcodeByte <= 0x7F) {
+        // PUSH1 ~ PUSH32
+        uint32_t NumBytes = OpcodeByte - 0x60 + 1;
+        if (Frame->Pc + NumBytes >= Frame->Bytecode.size()) {
           throw common::getError(common::ErrorCode::UnexpectedEnd);
         }
-        zen::evm::UInt256 Val{};
-        // 读取大端立即数，转成小端字节存储
-        for (uint8_t i = 0; i < NumBytes; ++i) {
-          Val.Bytes[i] = *(PcRef + NumBytes - 1 - i);
-        }
-        PcRef += NumBytes;
+        uint256_t Val = littleEndianToUInt256(Frame->Bytecode.data() + Frame->Pc + 1, NumBytes);
         Frame->push(Val);
+        Frame->Pc += NumBytes;
         break;
-      }
-
-      // DUP1~DUP16
-      if (RawOp >= 0x80 && RawOp <= 0x8F) {
-        uint8_t N = RawOp - 0x7F; // 1..16
+      } else if (OpcodeByte >= 0x80 && OpcodeByte <= 0x8F) {
+        // DUP1 ~ DUP16
+        uint32_t N = OpcodeByte - 0x80 + 1;
         if (Frame->stackHeight() < N) {
           throw common::getError(common::ErrorCode::UnexpectedNumArgs);
         }
-        zen::evm::UInt256 V = Frame->peek(N - 1);
+        uint256_t V = Frame->peek(N - 1);
         Frame->push(V);
         break;
-      }
-
-      // SWAP1~SWAP16
-      if (RawOp >= 0x90 && RawOp <= 0x9F) {
-        uint8_t N = RawOp - 0x8F; // 1..16
-        if (Frame->stackHeight() <= N) {
+      } else if (OpcodeByte >= 0x90 && OpcodeByte <= 0x9F) {
+        // SWAP1 ~ SWAP16
+        uint32_t N = OpcodeByte - 0x90 + 1;
+        if (Frame->stackHeight() < N + 1) {
           throw common::getError(common::ErrorCode::UnexpectedNumArgs);
         }
-        zen::evm::UInt256 &Top = Frame->peek(0);
-        zen::evm::UInt256 &Nth = Frame->peek(N);
+        uint256_t &Top = Frame->peek(0);
+        uint256_t &Nth = Frame->peek(N);
         std::swap(Top, Nth);
         break;
+      } else {
+        throw common::getError(common::ErrorCode::UnsupportedOpcode);
       }
+    }
 
-      // Fallback：未识别指令
-      throw common::getError(common::ErrorCode::UnsupportedOpcode);
-    }
-    }
+    Frame->Pc++;
   }
-} 
+}
