@@ -4,7 +4,7 @@
 #include "evm/interpreter.h"
 
 #include "common/errors.h"
-#include "evm/opcode.h"
+#include "evmc/instructions.h"
 #include "runtime/instance.h"
 
 namespace {
@@ -131,10 +131,10 @@ void BaseInterpreter::interpret() {
 
   while (Frame->Pc < Frame->Bytecode.size()) {
     uint8_t OpcodeByte = Frame->Bytecode[Frame->Pc];
-    Opcode Op = static_cast<Opcode>(OpcodeByte);
+    evmc_opcode Op = static_cast<evmc_opcode>(OpcodeByte);
 
     switch (Op) {
-    case Opcode::STOP:
+    case evmc_opcode::OP_STOP:
       Context.freeFrame(Frame);
       if (Context.getCurFrame() == nullptr) {
         return;
@@ -142,7 +142,7 @@ void BaseInterpreter::interpret() {
       Frame = Context.getCurFrame();
       continue;
 
-    case Opcode::ADD: {
+    case evmc_opcode::OP_ADD: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -153,7 +153,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::SUB: {
+    case evmc_opcode::OP_SUB: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -164,7 +164,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::MUL: {
+    case evmc_opcode::OP_MUL: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -175,7 +175,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::DIV: {
+    case evmc_opcode::OP_DIV: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -186,7 +186,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::MOD: {
+    case evmc_opcode::OP_MOD: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -197,7 +197,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::AND: {
+    case evmc_opcode::OP_AND: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -208,7 +208,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::EQ: {
+    case evmc_opcode::OP_EQ: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -219,7 +219,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::ISZERO: {
+    case evmc_opcode::OP_ISZERO: {
       if (Frame->stackHeight() < 1) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -229,7 +229,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::LT: {
+    case evmc_opcode::OP_LT: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -240,7 +240,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::GT: {
+    case evmc_opcode::OP_GT: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -251,29 +251,31 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::SLT: {
+    case evmc_opcode::OP_SLT: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
-      intx::uint256 Res = (cmpInt256(A, B) < 0) ? intx::uint256(1) : intx::uint256(0);
+      intx::uint256 Res =
+          (cmpInt256(A, B) < 0) ? intx::uint256(1) : intx::uint256(0);
       Frame->push(Res);
       break;
     }
 
-    case Opcode::SGT: {
+    case evmc_opcode::OP_SGT: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
-      intx::uint256 Res = (cmpInt256(A, B) > 0) ? intx::uint256(1) : intx::uint256(0);
+      intx::uint256 Res =
+          (cmpInt256(A, B) > 0) ? intx::uint256(1) : intx::uint256(0);
       Frame->push(Res);
       break;
     }
 
-    case Opcode::ADDMOD: {
+    case evmc_opcode::OP_ADDMOD: {
       if (Frame->stackHeight() < 3) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -285,7 +287,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::MULMOD: {
+    case evmc_opcode::OP_MULMOD: {
       if (Frame->stackHeight() < 3) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -297,7 +299,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::EXP: {
+    case evmc_opcode::OP_EXP: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -308,7 +310,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::SDIV: {
+    case evmc_opcode::OP_SDIV: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -319,7 +321,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::SMOD: {
+    case evmc_opcode::OP_SMOD: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -329,7 +331,7 @@ void BaseInterpreter::interpret() {
       Frame->push(Res);
       break;
     }
-    case Opcode::SIGNEXTEND: {
+    case evmc_opcode::OP_SIGNEXTEND: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -358,7 +360,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::OR: {
+    case evmc_opcode::OP_OR: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -369,7 +371,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::XOR: {
+    case evmc_opcode::OP_XOR: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -380,7 +382,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::NOT: {
+    case evmc_opcode::OP_NOT: {
       if (Frame->stackHeight() < 1) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -390,7 +392,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::BYTE: {
+    case evmc_opcode::OP_BYTE: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -406,7 +408,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::SHL: {
+    case evmc_opcode::OP_SHL: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -421,7 +423,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::SHR: {
+    case evmc_opcode::OP_SHR: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -436,7 +438,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::SAR: {
+    case evmc_opcode::OP_SAR: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -461,7 +463,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::MSTORE: {
+    case evmc_opcode::OP_MSTORE: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -482,7 +484,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::MLOAD: {
+    case evmc_opcode::OP_MLOAD: {
       if (Frame->stackHeight() < 1) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -506,7 +508,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::RETURN: {
+    case evmc_opcode::OP_RETURN: {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
@@ -536,7 +538,7 @@ void BaseInterpreter::interpret() {
       break;
     }
 
-    case Opcode::POP: {
+    case evmc_opcode::OP_POP: {
       if (Frame->stackHeight() < 1) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
