@@ -147,9 +147,6 @@ add_library(
   $<TARGET_OBJECTS:utils>
   zetaengine-c.cpp
 )
-
-target_link_libraries(dtvmcore PUBLIC uint256_t)
-
 if(NOT ZEN_ENABLE_SGX)
   target_link_libraries(dtvmcore PRIVATE Threads::Threads)
 endif()
