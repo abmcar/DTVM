@@ -1,15 +1,16 @@
-#include "evm/interpreter.h"
-#include "runtime/instance.h"
-#include "runtime/runtime.h"
-#include "utils/others.h"
-#include <cstdlib>
-#include <cstring>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <gtest/gtest.h>
 #include <iostream>
 #include <mutex>
+#include <string>
 #include <vector>
+
+#include <gtest/gtest.h>
+
+#include "evm/interpreter.h"
+#include "runtime/runtime.h"
+#include "utils/others.h"
 
 using namespace zen;
 using namespace zen::evm;
@@ -99,14 +100,21 @@ TEST_P(EVMSampleTest, ExecuteSample) {
     BytecodeBuf.push_back(ByteVal);
   }
 
-  auto RT = Runtime::newRuntime();
+  RuntimeConfig Config;
+  Config.Mode = common::RunMode::InterpMode;
+
+  auto RT = Runtime::newRuntime(Config);
   ASSERT_TRUE(RT != nullptr) << "Failed to create runtime";
 
-  InterpreterExecContext Ctx(nullptr);
+  auto ModRet = RT->loadEVMModule(FilePath);
+  ASSERT_TRUE(ModRet) << "Failed to load module: " << FilePath;
+
+  EVMModule *Mod = *ModRet;
+
+  InterpreterExecContext Ctx(Mod);
 
   EVMFrame *Frame = Ctx.allocFrame();
   ASSERT_NE(Frame, nullptr) << "Failed to allocate EVM frame";
-  Frame->Bytecode = BytecodeBuf;
 
   BaseInterpreter Interpreter(Ctx);
   EXPECT_NO_THROW({ Interpreter.interpret(); });
@@ -131,4 +139,3 @@ TEST_P(EVMSampleTest, ExecuteSample) {
 
 INSTANTIATE_TEST_SUITE_P(EVMSamples, EVMSampleTest,
                          ::testing::ValuesIn(getAllEvmBytecodeFiles()));
-                         
