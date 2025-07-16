@@ -6,10 +6,9 @@
 #include "common/errors.h"
 #include "evm/opcode.h"
 #include "runtime/instance.h"
-#include "uint256_t.h"
 
 namespace {
-static std::array<uint8_t, 32> uint256ToBytes(const uint256_t &Value) {
+static std::array<uint8_t, 32> uint256ToBytes(const intx::uint256 &Value) {
   std::array<uint8_t, 32> Bytes{};
   for (size_t I = 0; I < 32; ++I) {
     Bytes[I] = static_cast<uint8_t>((Value >> (8 * (31 - I))) & 0xFF);
@@ -17,25 +16,25 @@ static std::array<uint8_t, 32> uint256ToBytes(const uint256_t &Value) {
   return Bytes;
 }
 
-static uint256_t bytesToUInt256(const std::array<uint8_t, 32> &Bytes) {
-  uint256_t Value = 0;
+static intx::uint256 bytesToUInt256(const std::array<uint8_t, 32> &Bytes) {
+  intx::uint256 Value = 0;
   for (size_t I = 0; I < 32; ++I) {
     Value = (Value << 8) | Bytes[I];
   }
   return Value;
 }
 
-static uint256_t bigEndianToUInt256(const uint8_t *Bytes, size_t NumBytes) {
-  uint256_t Value = 0;
+static intx::uint256 bigEndianToUInt256(const uint8_t *Bytes, size_t NumBytes) {
+  intx::uint256 Value = 0;
   for (size_t I = 0; I < 32 && I < NumBytes; ++I) {
     Value = (Value << 8) | Bytes[I];
   }
   return Value;
 }
 
-static int cmpInt256(const uint256_t &A, const uint256_t &B) {
-  bool SignA = (A >> 255) & 1;
-  bool SignB = (B >> 255) & 1;
+static int cmpInt256(const intx::uint256 &A, const intx::uint256 &B) {
+  intx::uint256 SignA = (A >> 255) & 1;
+  intx::uint256 SignB = (B >> 255) & 1;
 
   if (SignA != SignB) {
     return SignA ? -1 : 1;
@@ -48,22 +47,22 @@ static int cmpInt256(const uint256_t &A, const uint256_t &B) {
   return 0;
 }
 
-static uint64_t uint256ToUint64(const uint256_t &Value) {
+static uint64_t uint256ToUint64(const intx::uint256 &Value) {
   return static_cast<uint64_t>(Value & 0xFFFFFFFFFFFFFFFFULL);
 }
 
-static uint256_t signedDiv(const uint256_t &A, const uint256_t &B) {
+static intx::uint256 signedDiv(const intx::uint256 &A, const intx::uint256 &B) {
   if (B == 0) {
-    return uint256_t(0);
+    return intx::uint256(0);
   }
 
-  bool SignA = (A >> 255) & 1;
-  bool SignB = (B >> 255) & 1;
+  intx::uint256 SignA = (A >> 255) & 1;
+  intx::uint256 SignB = (B >> 255) & 1;
 
-  uint256_t AbsA = SignA ? (~A + 1) : A;
-  uint256_t AbsB = SignB ? (~B + 1) : B;
+  intx::uint256 AbsA = SignA ? (~A + 1) : A;
+  intx::uint256 AbsB = SignB ? (~B + 1) : B;
 
-  uint256_t Result = AbsA / AbsB;
+  intx::uint256 Result = AbsA / AbsB;
 
   if (SignA != SignB) {
     Result = ~Result + 1;
@@ -72,18 +71,18 @@ static uint256_t signedDiv(const uint256_t &A, const uint256_t &B) {
   return Result;
 }
 
-static uint256_t signedMod(const uint256_t &A, const uint256_t &B) {
+static intx::uint256 signedMod(const intx::uint256 &A, const intx::uint256 &B) {
   if (B == 0) {
-    return uint256_t(0);
+    return intx::uint256(0);
   }
 
-  bool SignA = (A >> 255) & 1;
-  bool SignB = (B >> 255) & 1;
+  intx::uint256 SignA = (A >> 255) & 1;
+  intx::uint256 SignB = (B >> 255) & 1;
 
-  uint256_t AbsA = SignA ? (~A + 1) : A;
-  uint256_t AbsB = SignB ? (~B + 1) : B;
+  intx::uint256 AbsA = SignA ? (~A + 1) : A;
+  intx::uint256 AbsB = SignB ? (~B + 1) : B;
 
-  uint256_t Result = AbsA % AbsB;
+  intx::uint256 Result = AbsA % AbsB;
 
   if (SignA) {
     Result = ~Result + 1;
@@ -92,8 +91,8 @@ static uint256_t signedMod(const uint256_t &A, const uint256_t &B) {
   return Result;
 }
 
-static uint256_t quickPow(uint256_t Base, uint256_t Exp) {
-  uint256_t Result = 1;
+static intx::uint256 quickPow(intx::uint256 Base, intx::uint256 Exp) {
+  intx::uint256 Result = 1;
   while (Exp > 0) {
     if (Exp & 1) {
       Result *= Base;
@@ -147,9 +146,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t C = A + B;
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 C = A + B;
       Frame->push(C);
       break;
     }
@@ -158,9 +157,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = A - B;
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = A - B;
       Frame->push(Res);
       break;
     }
@@ -169,9 +168,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = A * B;
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = A * B;
       Frame->push(Res);
       break;
     }
@@ -180,9 +179,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Q = (B == 0) ? uint256_t(0) : A / B;
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Q = (B == 0) ? intx::uint256(0) : A / B;
       Frame->push(Q);
       break;
     }
@@ -191,9 +190,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t R = (B == 0) ? uint256_t(0) : A % B;
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 R = (B == 0) ? intx::uint256(0) : A % B;
       Frame->push(R);
       break;
     }
@@ -202,9 +201,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = A & B;
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = A & B;
       Frame->push(Res);
       break;
     }
@@ -213,9 +212,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = (A == B) ? uint256_t(1) : uint256_t(0);
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = (A == B) ? intx::uint256(1) : intx::uint256(0);
       Frame->push(Res);
       break;
     }
@@ -224,8 +223,8 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 1) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t V = Frame->pop();
-      uint256_t Res = (V == 0) ? uint256_t(1) : uint256_t(0);
+      intx::uint256 V = Frame->pop();
+      intx::uint256 Res = (V == 0) ? intx::uint256(1) : intx::uint256(0);
       Frame->push(Res);
       break;
     }
@@ -234,9 +233,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = (A < B) ? uint256_t(1) : uint256_t(0);
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = (A < B) ? intx::uint256(1) : intx::uint256(0);
       Frame->push(Res);
       break;
     }
@@ -245,9 +244,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = (A > B) ? uint256_t(1) : uint256_t(0);
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = (A > B) ? intx::uint256(1) : intx::uint256(0);
       Frame->push(Res);
       break;
     }
@@ -256,9 +255,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = (cmpInt256(A, B) < 0) ? uint256_t(1) : uint256_t(0);
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = (cmpInt256(A, B) < 0) ? intx::uint256(1) : intx::uint256(0);
       Frame->push(Res);
       break;
     }
@@ -267,9 +266,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = (cmpInt256(A, B) > 0) ? uint256_t(1) : uint256_t(0);
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = (cmpInt256(A, B) > 0) ? intx::uint256(1) : intx::uint256(0);
       Frame->push(Res);
       break;
     }
@@ -278,10 +277,10 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 3) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t C = Frame->pop();
-      uint256_t Res = (C == 0) ? uint256_t(0) : (A + B) % C;
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 C = Frame->pop();
+      intx::uint256 Res = (C == 0) ? intx::uint256(0) : (A + B) % C;
       Frame->push(Res);
       break;
     }
@@ -290,10 +289,10 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 3) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t C = Frame->pop();
-      uint256_t Res = (C == 0) ? uint256_t(0) : ((A % C) * (B % C)) % C;
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 C = Frame->pop();
+      intx::uint256 Res = (C == 0) ? intx::uint256(0) : ((A % C) * (B % C)) % C;
       Frame->push(Res);
       break;
     }
@@ -302,9 +301,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = quickPow(A, B);
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = quickPow(A, B);
       Frame->push(Res);
       break;
     }
@@ -313,9 +312,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = signedDiv(A, B);
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = signedDiv(A, B);
       Frame->push(Res);
       break;
     }
@@ -324,9 +323,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = signedMod(A, B);
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = signedMod(A, B);
       Frame->push(Res);
       break;
     }
@@ -334,21 +333,21 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t I = Frame->pop();
-      uint256_t V = Frame->pop();
+      intx::uint256 I = Frame->pop();
+      intx::uint256 V = Frame->pop();
 
-      uint256_t Res = V;
+      intx::uint256 Res = V;
       if (I < 32) {
         // Calculate the sign bit position (the highest bit of the Ith byte,
         // i.e., bit 8*I+7)
-        uint256_t SignBitPosition = 8 * I + 7;
+        intx::uint256 SignBitPosition = 8 * I + 7;
 
         // Extract the sign bit
-        bool SignBit = (V & (uint256_t(1) << SignBitPosition)) != 0;
+        bool SignBit = (V & (intx::uint256(1) << SignBitPosition)) != 0;
 
         if (SignBit) {
           // Generate mask: lower I*8 bits are 0, the rest are 1
-          uint256_t Mask = (uint256_t(1) << SignBitPosition) - 1;
+          intx::uint256 Mask = (intx::uint256(1) << SignBitPosition) - 1;
           // Apply mask: extend the sign bit to higher bits
           Res |= ~Mask;
         }
@@ -363,9 +362,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = A | B;
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = A | B;
       Frame->push(Res);
       break;
     }
@@ -374,9 +373,9 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t A = Frame->pop();
-      uint256_t B = Frame->pop();
-      uint256_t Res = A ^ B;
+      intx::uint256 A = Frame->pop();
+      intx::uint256 B = Frame->pop();
+      intx::uint256 Res = A ^ B;
       Frame->push(Res);
       break;
     }
@@ -385,8 +384,8 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 1) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t V = Frame->pop();
-      uint256_t Res = ~V;
+      intx::uint256 V = Frame->pop();
+      intx::uint256 Res = ~V;
       Frame->push(Res);
       break;
     }
@@ -395,13 +394,13 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t I = Frame->pop();
-      uint256_t Val = Frame->pop();
+      intx::uint256 I = Frame->pop();
+      intx::uint256 Val = Frame->pop();
 
-      uint256_t Res = 0;
+      intx::uint256 Res = 0;
       if (I < 32) {
         uint8_t ByteVal = static_cast<uint8_t>((Val >> (8 * (31 - I))) & 0xFF);
-        Res = uint256_t(ByteVal);
+        Res = intx::uint256(ByteVal);
       }
       Frame->push(Res);
       break;
@@ -411,10 +410,10 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t Shift = Frame->pop();
-      uint256_t Value = Frame->pop();
+      intx::uint256 Shift = Frame->pop();
+      intx::uint256 Value = Frame->pop();
 
-      uint256_t Res = 0;
+      intx::uint256 Res = 0;
       if (Shift < 256) {
         Res = Value << Shift;
       }
@@ -426,10 +425,10 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t Shift = Frame->pop();
-      uint256_t Value = Frame->pop();
+      intx::uint256 Shift = Frame->pop();
+      intx::uint256 Value = Frame->pop();
 
-      uint256_t Res = 0;
+      intx::uint256 Res = 0;
       if (Shift < 256) {
         Res = Value >> Shift;
       }
@@ -441,22 +440,22 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t Shift = Frame->pop();
-      uint256_t Value = Frame->pop();
+      intx::uint256 Shift = Frame->pop();
+      intx::uint256 Value = Frame->pop();
 
-      uint256_t Res = 0;
+      intx::uint256 Res = 0;
       if (Shift < 256) {
-        bool IsNegative = (Value >> 255) & 1;
+        intx::uint256 IsNegative = (Value >> 255) & 1;
         Res = Value >> Shift;
 
         if (IsNegative && Shift > 0) {
-          uint256_t Mask = (uint256_t(1) << (256 - Shift)) - 1;
+          intx::uint256 Mask = (intx::uint256(1) << (256 - Shift)) - 1;
           Mask = ~Mask;
           Res |= Mask;
         }
       } else {
-        bool IsNegative = (Value >> 255) & 1;
-        Res = IsNegative ? uint256_t(-1) : uint256_t(0);
+        intx::uint256 IsNegative = (Value >> 255) & 1;
+        Res = IsNegative ? intx::uint256(-1) : intx::uint256(0);
       }
       Frame->push(Res);
       break;
@@ -466,8 +465,8 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t OffsetVal = Frame->pop();
-      uint256_t Value = Frame->pop();
+      intx::uint256 OffsetVal = Frame->pop();
+      intx::uint256 Value = Frame->pop();
 
       uint64_t Offset = uint256ToUint64(OffsetVal);
       if (Offset > UINT32_MAX) {
@@ -487,7 +486,7 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 1) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t OffsetVal = Frame->pop();
+      intx::uint256 OffsetVal = Frame->pop();
       uint64_t Offset = uint256ToUint64(OffsetVal);
 
       if (Offset > UINT32_MAX) {
@@ -502,7 +501,7 @@ void BaseInterpreter::interpret() {
       std::array<uint8_t, 32> ValueBytes{};
       std::memcpy(ValueBytes.data(), Frame->Memory.data() + Offset, 32);
 
-      uint256_t Value = bytesToUInt256(ValueBytes);
+      intx::uint256 Value = bytesToUInt256(ValueBytes);
       Frame->push(Value);
       break;
     }
@@ -511,8 +510,8 @@ void BaseInterpreter::interpret() {
       if (Frame->stackHeight() < 2) {
         throw common::getError(common::ErrorCode::UnexpectedNumArgs);
       }
-      uint256_t OffsetVal = Frame->pop();
-      uint256_t SizeVal = Frame->pop();
+      intx::uint256 OffsetVal = Frame->pop();
+      intx::uint256 SizeVal = Frame->pop();
       uint64_t Offset = uint256ToUint64(OffsetVal);
       uint64_t Size = uint256ToUint64(SizeVal);
 
@@ -552,7 +551,7 @@ void BaseInterpreter::interpret() {
         if (Frame->Pc + NumBytes >= Frame->Bytecode.size()) {
           throw common::getError(common::ErrorCode::UnexpectedEnd);
         }
-        uint256_t Val = bigEndianToUInt256(
+        intx::uint256 Val = bigEndianToUInt256(
             Frame->Bytecode.data() + Frame->Pc + 1, NumBytes);
         Frame->push(Val);
         Frame->Pc += NumBytes;
@@ -563,7 +562,7 @@ void BaseInterpreter::interpret() {
         if (Frame->stackHeight() < N) {
           throw common::getError(common::ErrorCode::UnexpectedNumArgs);
         }
-        uint256_t V = Frame->peek(N - 1);
+        intx::uint256 V = Frame->peek(N - 1);
         Frame->push(V);
         break;
       } else if (OpcodeByte >= 0x90 && OpcodeByte <= 0x9F) {
@@ -572,8 +571,8 @@ void BaseInterpreter::interpret() {
         if (Frame->stackHeight() < N + 1) {
           throw common::getError(common::ErrorCode::UnexpectedNumArgs);
         }
-        uint256_t &Top = Frame->peek(0);
-        uint256_t &Nth = Frame->peek(N);
+        intx::uint256 &Top = Frame->peek(0);
+        intx::uint256 &Nth = Frame->peek(N);
         std::swap(Top, Nth);
         break;
       } else {

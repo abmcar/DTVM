@@ -5,11 +5,11 @@
 #define ZEN_EVM_INTERPRETER_H
 
 #include "common/defines.h"
+#include "intx/intx.hpp"
 #include "runtime/destroyer.h"
 #include "runtime/object.h"
 #include "utils/logging.h"
 
-#include "uint256_t.h"
 #include <array>
 #include <cstdint>
 #include <map>
@@ -29,28 +29,28 @@ namespace evm {
 struct EVMFrame {
   static constexpr size_t MAXSTACK = 1024;
 
-  std::array<uint256_t, MAXSTACK> Stack;
+  std::array<intx::uint256, MAXSTACK> Stack;
   std::vector<uint8_t> Bytecode;
   std::vector<uint8_t> Memory;
-  std::map<uint256_t, uint256_t> Storage;
+  std::map<intx::uint256, intx::uint256> Storage;
 
   size_t Sp;
   uint64_t GasLeft;
   uint64_t Pc;
   EVMFrame *PrevFrame;
-  uint256_t Value;
+  intx::uint256 Value;
 
-  inline void push(const uint256_t &V) {
+  inline void push(const intx::uint256 &V) {
     ZEN_ASSERT(Sp < MAXSTACK && "EVM data stack overflow");
     Stack[Sp++] = V;
   }
 
-  inline uint256_t pop() {
+  inline intx::uint256 pop() {
     ZEN_ASSERT(Sp > 0 && "EVM data stack underflow");
     return Stack[--Sp];
   }
 
-  inline uint256_t &peek(size_t Index = 0) {
+  inline intx::uint256 &peek(size_t Index = 0) {
     ZEN_ASSERT(Index < Sp && "peek out of range");
     return Stack[Sp - 1 - Index];
   }
