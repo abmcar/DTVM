@@ -6,24 +6,15 @@
 
 #include "common/defines.h"
 #include "intx/intx.hpp"
-#include "runtime/destroyer.h"
-#include "runtime/object.h"
 #include "runtime/evm_module.h"
 #include "utils/logging.h"
 
 #include <array>
 #include <cstdint>
 #include <map>
-#include <memory>
 #include <vector>
 
 namespace zen {
-
-namespace runtime {
-struct FunctionInstance;
-class Instance;
-class Runtime;
-} // namespace runtime
 
 namespace evm {
 
@@ -34,11 +25,11 @@ struct EVMFrame {
   std::vector<uint8_t> Memory;
   std::map<intx::uint256, intx::uint256> Storage;
 
-  size_t Sp;
-  uint64_t GasLeft;
-  uint64_t Pc;
-  EVMFrame *PrevFrame;
-  intx::uint256 Value;
+  size_t Sp = 0;
+  uint64_t GasLeft = 0;
+  uint64_t Pc = 0;
+  EVMFrame *PrevFrame = nullptr;
+  intx::uint256 Value = 0;
 
   inline void push(const intx::uint256 &V) {
     ZEN_ASSERT(Sp < MAXSTACK && "EVM data stack overflow");
