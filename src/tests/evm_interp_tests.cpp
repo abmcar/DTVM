@@ -21,10 +21,10 @@ std::vector<std::string> getAllEvmBytecodeFiles() {
   std::vector<std::string> Files;
   std::filesystem::path DirPath =
       std::filesystem::path(__FILE__).parent_path() /
-      std::filesystem::path("../../tests/evm_bytecode");
+      std::filesystem::path("../../tests/evm_asm");
 
   if (!std::filesystem::exists(DirPath)) {
-    std::cerr << "EVM bytecode directory does not exist: " << DirPath.string()
+    std::cerr << "tests/evm_asm does not exist: " << DirPath.string()
               << std::endl;
     return Files;
   }
@@ -36,6 +36,12 @@ std::vector<std::string> getAllEvmBytecodeFiles() {
   }
 
   std::sort(Files.begin(), Files.end());
+
+  if (Files.empty()) {
+    std::cerr << "No EVM hex files found in tests/evm_asm, "
+              << "maybe you should convert the asm to hex first" << std::endl;
+  }
+
   return Files;
 }
 
@@ -125,3 +131,4 @@ TEST_P(EVMSampleTest, ExecuteSample) {
 
 INSTANTIATE_TEST_SUITE_P(EVMSamples, EVMSampleTest,
                          ::testing::ValuesIn(getAllEvmBytecodeFiles()));
+                         
