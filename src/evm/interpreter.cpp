@@ -7,6 +7,11 @@
 #include "evmc/instructions.h"
 #include "runtime/instance.h"
 
+#define EVM_STACK_CHECK(FramePtr, N)                                           \
+  if ((FramePtr)->stackHeight() < (N)) {                                       \
+    throw common::getError(common::ErrorCode::UnexpectedNumArgs);              \
+  }
+
 namespace {
 static std::array<uint8_t, 32> uint256ToBytes(const intx::uint256 &Value) {
   std::array<uint8_t, 32> Bytes{};
@@ -148,9 +153,7 @@ void BaseInterpreter::interpret() {
       continue;
 
     case evmc_opcode::OP_ADD: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 C = A + B;
@@ -159,9 +162,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_SUB: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = A - B;
@@ -170,9 +171,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_MUL: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = A * B;
@@ -181,9 +180,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_DIV: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Q = (B == 0) ? intx::uint256(0) : A / B;
@@ -192,9 +189,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_MOD: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 R = (B == 0) ? intx::uint256(0) : A % B;
@@ -203,9 +198,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_AND: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = A & B;
@@ -214,9 +207,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_EQ: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = (A == B) ? intx::uint256(1) : intx::uint256(0);
@@ -225,9 +216,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_ISZERO: {
-      if (Frame->stackHeight() < 1) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 1);
       intx::uint256 V = Frame->pop();
       intx::uint256 Res = (V == 0) ? intx::uint256(1) : intx::uint256(0);
       Frame->push(Res);
@@ -235,9 +224,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_LT: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = (A < B) ? intx::uint256(1) : intx::uint256(0);
@@ -246,9 +233,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_GT: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = (A > B) ? intx::uint256(1) : intx::uint256(0);
@@ -257,9 +242,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_SLT: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res =
@@ -269,9 +252,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_SGT: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res =
@@ -281,9 +262,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_ADDMOD: {
-      if (Frame->stackHeight() < 3) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 3);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 C = Frame->pop();
@@ -293,9 +272,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_MULMOD: {
-      if (Frame->stackHeight() < 3) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 3);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 C = Frame->pop();
@@ -305,9 +282,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_EXP: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = quickPow(A, B);
@@ -316,9 +291,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_SDIV: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = signedDiv(A, B);
@@ -327,9 +300,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_SMOD: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = signedMod(A, B);
@@ -337,9 +308,7 @@ void BaseInterpreter::interpret() {
       break;
     }
     case evmc_opcode::OP_SIGNEXTEND: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 I = Frame->pop();
       intx::uint256 V = Frame->pop();
 
@@ -366,9 +335,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_OR: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = A | B;
@@ -377,9 +344,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_XOR: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 Res = A ^ B;
@@ -388,9 +353,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_NOT: {
-      if (Frame->stackHeight() < 1) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 1);
       intx::uint256 V = Frame->pop();
       intx::uint256 Res = ~V;
       Frame->push(Res);
@@ -398,9 +361,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_BYTE: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 I = Frame->pop();
       intx::uint256 Val = Frame->pop();
 
@@ -414,9 +375,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_SHL: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 Shift = Frame->pop();
       intx::uint256 Value = Frame->pop();
 
@@ -429,9 +388,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_SHR: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 Shift = Frame->pop();
       intx::uint256 Value = Frame->pop();
 
@@ -444,9 +401,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_SAR: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 Shift = Frame->pop();
       intx::uint256 Value = Frame->pop();
 
@@ -469,9 +424,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_MSTORE: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 OffsetVal = Frame->pop();
       intx::uint256 Value = Frame->pop();
 
@@ -490,9 +443,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_MLOAD: {
-      if (Frame->stackHeight() < 1) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 1);
       intx::uint256 OffsetVal = Frame->pop();
       uint64_t Offset = uint256ToUint64(OffsetVal);
 
@@ -514,9 +465,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_RETURN: {
-      if (Frame->stackHeight() < 2) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 2);
       intx::uint256 OffsetVal = Frame->pop();
       intx::uint256 SizeVal = Frame->pop();
       uint64_t Offset = uint256ToUint64(OffsetVal);
@@ -544,9 +493,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_POP: {
-      if (Frame->stackHeight() < 1) {
-        throw common::getError(common::ErrorCode::UnexpectedNumArgs);
-      }
+      EVM_STACK_CHECK(Frame, 1);
       Frame->pop();
       break;
     }
