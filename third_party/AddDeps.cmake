@@ -92,3 +92,27 @@ if(ZEN_ENABLE_SPEC_TEST)
     rapidjson INTERFACE ${rapidjson_SOURCE_DIR}/include
   )
 endif()
+
+FetchContent_Declare(
+  uint128_t
+  GIT_REPOSITORY https://github.com/calccrypto/uint128_t.git
+  GIT_TAG master
+  GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(uint128_t)
+
+FetchContent_Declare(
+  uint256_t
+  GIT_REPOSITORY https://github.com/calccrypto/uint256_t.git
+  GIT_TAG master
+  GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(uint256_t)
+
+add_library(
+  uint256_t STATIC ${uint128_t_SOURCE_DIR}/uint128_t.cpp
+                   ${uint256_t_SOURCE_DIR}/uint256_t.cpp
+)
+target_include_directories(
+  uint256_t PUBLIC ${uint128_t_SOURCE_DIR} ${uint256_t_SOURCE_DIR}
+)
