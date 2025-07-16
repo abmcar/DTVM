@@ -129,8 +129,13 @@ void BaseInterpreter::interpret() {
   EVMFrame *Frame = Context.getCurFrame();
   ZEN_ASSERT(Frame && "Interpreter requires a valid initial frame");
 
-  while (Frame->Pc < Frame->Bytecode.size()) {
-    uint8_t OpcodeByte = Frame->Bytecode[Frame->Pc];
+  const EVMModule *Mod = Context.getModule();
+
+  size_t CodeSize = Mod->CodeSize;
+  uint8_t *Code = Mod->Code;
+
+  while (Frame->Pc < CodeSize) {
+    uint8_t OpcodeByte = Code[Frame->Pc];
     evmc_opcode Op = static_cast<evmc_opcode>(OpcodeByte);
 
     switch (Op) {
@@ -550,11 +555,10 @@ void BaseInterpreter::interpret() {
       if (OpcodeByte >= 0x60 && OpcodeByte <= 0x7F) {
         // PUSH1 ~ PUSH32
         uint32_t NumBytes = OpcodeByte - 0x60 + 1;
-        if (Frame->Pc + NumBytes >= Frame->Bytecode.size()) {
+        if (Frame->Pc + NumBytes >= CodeSize) {
           throw common::getError(common::ErrorCode::UnexpectedEnd);
         }
-        intx::uint256 Val = bigEndianToUInt256(
-            Frame->Bytecode.data() + Frame->Pc + 1, NumBytes);
+        intx::uint256 Val = bigEndianToUInt256(Code + Frame->Pc + 1, NumBytes);
         Frame->push(Val);
         Frame->Pc += NumBytes;
         break;

@@ -8,6 +8,7 @@
 #include "intx/intx.hpp"
 #include "runtime/destroyer.h"
 #include "runtime/object.h"
+#include "runtime/evm_module.h"
 #include "utils/logging.h"
 
 #include <array>
@@ -30,7 +31,6 @@ struct EVMFrame {
   static constexpr size_t MAXSTACK = 1024;
 
   std::array<intx::uint256, MAXSTACK> Stack;
-  std::vector<uint8_t> Bytecode;
   std::vector<uint8_t> Memory;
   std::map<intx::uint256, intx::uint256> Storage;
 
@@ -60,12 +60,12 @@ struct EVMFrame {
 
 class InterpreterExecContext {
 private:
-  runtime::Instance *ModInst;
+  runtime::EVMModule *Mod;
   EVMFrame *CurFrame;
 
 public:
-  InterpreterExecContext(runtime::Instance *Inst)
-      : ModInst(Inst), CurFrame(nullptr) {}
+  InterpreterExecContext(runtime::EVMModule *Mod)
+      : Mod(Mod), CurFrame(nullptr) {}
 
   EVMFrame *allocFrame();
   void freeFrame(EVMFrame *Frame);
@@ -73,7 +73,7 @@ public:
   EVMFrame *getCurFrame() { return CurFrame; }
   void setCurFrame(EVMFrame *Frame) { CurFrame = Frame; }
 
-  runtime::Instance *getInstance() { return ModInst; }
+  runtime::EVMModule *getModule() { return Mod; }
 
 private:
   std::vector<uint8_t> ReturnData;
