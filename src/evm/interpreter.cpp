@@ -409,12 +409,14 @@ void BaseInterpreter::interpret() {
       }
 
       uint64_t ReqSize = Offset + 32;
+      // TODO: use EVMMemory class in the future
       if (ReqSize > Frame->Memory.size()) {
         Frame->Memory.resize(ReqSize, 0);
       }
 
       uint8_t ValueBytes[32];
       intx::be::store(ValueBytes, Value);
+      // TODO: use EVMMemory class in the future
       std::memcpy(Frame->Memory.data() + Offset, ValueBytes, 32);
       break;
     }
@@ -429,11 +431,13 @@ void BaseInterpreter::interpret() {
       }
 
       uint64_t ReqSize = Offset + 32;
+      // TODO: use EVMMemory class in the future
       if (ReqSize > Frame->Memory.size()) {
         Frame->Memory.resize(ReqSize, 0);
       }
 
       uint8_t ValueBytes[32];
+      // TODO: use EVMMemory class in the future
       std::memcpy(ValueBytes, Frame->Memory.data() + Offset, 32);
 
       intx::uint256 Value = intx::be::load<intx::uint256>(ValueBytes);
@@ -453,10 +457,11 @@ void BaseInterpreter::interpret() {
       }
 
       uint64_t ReqSize = Offset + Size;
+      // TODO: use EVMMemory class in the future
       if (ReqSize > Frame->Memory.size()) {
         Frame->Memory.resize(ReqSize, 0);
       }
-
+      // TODO: use EVMMemory class in the future
       std::vector<uint8_t> ReturnData(Frame->Memory.begin() + Offset,
                                       Frame->Memory.begin() + Offset + Size);
       Context.setReturnData(std::move(ReturnData));
