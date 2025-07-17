@@ -28,7 +28,6 @@ struct EVMFrame {
   size_t Sp = 0;
   uint64_t GasLeft = 0;
   uint64_t Pc = 0;
-  EVMFrame *PrevFrame = nullptr;
   intx::uint256 Value = 0;
 
   inline void push(const intx::uint256 &V) {
@@ -52,17 +51,20 @@ struct EVMFrame {
 class InterpreterExecContext {
 private:
   runtime::EVMModule *Mod;
-  EVMFrame *CurFrame;
+  std::vector<EVMFrame> FrameStack;
 
 public:
-  InterpreterExecContext(runtime::EVMModule *Mod)
-      : Mod(Mod), CurFrame(nullptr) {}
+  InterpreterExecContext(runtime::EVMModule *Mod) : Mod(Mod) {}
 
   EVMFrame *allocFrame();
-  void freeFrame(EVMFrame *Frame);
+  void freeBackFrame();
 
-  EVMFrame *getCurFrame() { return CurFrame; }
-  void setCurFrame(EVMFrame *Frame) { CurFrame = Frame; }
+  EVMFrame *getCurFrame() {
+    if (FrameStack.empty()) {
+      return nullptr;
+    }
+    return &FrameStack.back();
+  }
 
   runtime::EVMModule *getModule() { return Mod; }
 

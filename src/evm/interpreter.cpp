@@ -115,22 +115,29 @@ using namespace zen::evm;
 using namespace zen::runtime;
 
 EVMFrame *InterpreterExecContext::allocFrame() {
-  auto *Frame = new EVMFrame();
+  FrameStack.emplace_back();
 
-  Frame->GasLeft = 0;
-  Frame->PrevFrame = CurFrame;
-  setCurFrame(Frame);
-  return Frame;
+  EVMFrame &Frame = FrameStack.back();
+  Frame.GasLeft = 0;
+
+  return &Frame;
 }
 
-void InterpreterExecContext::freeFrame(EVMFrame *Frame) {
-  if (!Frame)
+// We only need to free the last frame (top of the stack),
+// since EVM's control flow is purely stack-based.
+void InterpreterExecContext::freeBackFrame() {
+  if (FrameStack.empty())
     return;
-  setCurFrame(Frame->PrevFrame);
-  delete Frame;
+
+  FrameStack.pop_back();
+
+  if (FrameStack.empty()) {
+    return;
+  }
 }
 
 void BaseInterpreter::interpret() {
+  Context.allocFrame();
   EVMFrame *Frame = Context.getCurFrame();
   ZEN_ASSERT(Frame && "Interpreter requires a valid initial frame");
 
@@ -145,11 +152,11 @@ void BaseInterpreter::interpret() {
 
     switch (Op) {
     case evmc_opcode::OP_STOP:
-      Context.freeFrame(Frame);
-      if (Context.getCurFrame() == nullptr) {
+      Context.freeBackFrame();
+      Frame = Context.getCurFrame();
+      if (!Frame) {
         return;
       }
-      Frame = Context.getCurFrame();
       continue;
 
     case evmc_opcode::OP_ADD: {
@@ -484,11 +491,11 @@ void BaseInterpreter::interpret() {
                                       Frame->Memory.begin() + Offset + Size);
       Context.setReturnData(std::move(ReturnData));
 
-      Context.freeFrame(Frame);
-      if (Context.getCurFrame() == nullptr) {
+      Context.freeBackFrame();
+      Frame = Context.getCurFrame();
+      if (!Frame) {
         return;
       }
-      Frame = Context.getCurFrame();
       break;
     }
 
