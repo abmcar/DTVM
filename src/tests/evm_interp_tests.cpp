@@ -82,7 +82,7 @@ TEST_P(EVMSampleTest, ExecuteSample) {
 
   std::string Hex;
   Fin >> Hex;
-  Hex = zen::utils::trimString(Hex);
+  zen::utils::trimString(Hex);
   std::vector<uint8_t> BytecodeBuf = zen::utils::fromHex(Hex);
 
   RuntimeConfig Config;
