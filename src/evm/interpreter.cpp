@@ -10,29 +10,6 @@
   }
 
 namespace {
-static intx::uint256 bigEndianToUInt256(const uint8_t *Bytes, size_t NumBytes) {
-  intx::uint256 Value = 0;
-  for (size_t I = 0; I < 32 && I < NumBytes; ++I) {
-    Value = (Value << 8) | Bytes[I];
-  }
-  return Value;
-}
-
-static int cmpInt256(const intx::uint256 &A, const intx::uint256 &B) {
-  intx::uint256 SignA = (A >> 255) & 1;
-  intx::uint256 SignB = (B >> 255) & 1;
-
-  if (SignA != SignB) {
-    return SignA ? -1 : 1;
-  }
-
-  if (A < B)
-    return -1;
-  if (A > B)
-    return 1;
-  return 0;
-}
-
 static uint64_t uint256ToUint64(const intx::uint256 &Value) {
   return static_cast<uint64_t>(Value & 0xFFFFFFFFFFFFFFFFULL);
 }
@@ -111,10 +88,6 @@ void InterpreterExecContext::freeBackFrame() {
     return;
 
   FrameStack.pop_back();
-
-  if (FrameStack.empty()) {
-    return;
-  }
 }
 
 void BaseInterpreter::interpret() {
@@ -232,8 +205,7 @@ void BaseInterpreter::interpret() {
       EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
-      intx::uint256 Res =
-          (cmpInt256(A, B) < 0) ? intx::uint256(1) : intx::uint256(0);
+      intx::uint256 Res = intx::slt(A, B);
       Frame->push(Res);
       break;
     }
@@ -242,8 +214,7 @@ void BaseInterpreter::interpret() {
       EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
-      intx::uint256 Res =
-          (cmpInt256(A, B) > 0) ? intx::uint256(1) : intx::uint256(0);
+      intx::uint256 Res = intx::slt(B, A);
       Frame->push(Res);
       break;
     }
@@ -424,7 +395,7 @@ void BaseInterpreter::interpret() {
       if (ReqSize > Frame->Memory.size()) {
         Frame->Memory.resize(ReqSize, 0);
       }
-      
+
       uint8_t ValueBytes[32];
       intx::be::store(ValueBytes, Value);
       std::memcpy(Frame->Memory.data() + Offset, ValueBytes, 32);
@@ -494,7 +465,11 @@ void BaseInterpreter::interpret() {
         if (Frame->Pc + NumBytes >= CodeSize) {
           throw common::getError(common::ErrorCode::UnexpectedEnd);
         }
-        intx::uint256 Val = bigEndianToUInt256(Code + Frame->Pc + 1, NumBytes);
+        uint8_t ValueBytes[32];
+        memset(ValueBytes, 0, sizeof(ValueBytes));
+        std::memcpy(ValueBytes + (32 - NumBytes), Code + Frame->Pc + 1,
+                    NumBytes);
+        intx::uint256 Val = intx::be::load<intx::uint256>(ValueBytes);
         Frame->push(Val);
         Frame->Pc += NumBytes;
         break;
