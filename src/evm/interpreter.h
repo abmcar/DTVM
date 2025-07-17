@@ -31,17 +31,23 @@ struct EVMFrame {
   intx::uint256 Value = 0;
 
   inline void push(const intx::uint256 &V) {
-    ZEN_ASSERT(Sp < MAXSTACK && "EVM data stack overflow");
+    if (Sp >= MAXSTACK) {
+      throw getError(common::ErrorCode::EVMDataStackOverflow);
+    }
     Stack[Sp++] = V;
   }
 
   inline intx::uint256 pop() {
-    ZEN_ASSERT(Sp > 0 && "EVM data stack underflow");
+    if (Sp <= 0) {
+      throw getError(common::ErrorCode::EVMDataStackUnderflow);
+    }
     return Stack[--Sp];
   }
 
   inline intx::uint256 &peek(size_t Index = 0) {
-    ZEN_ASSERT(Index < Sp && "peek out of range");
+    if (Index >= Sp) {
+      throw getError(common::ErrorCode::EVMDataStackPeekOutRange);
+    }
     return Stack[Sp - 1 - Index];
   }
 

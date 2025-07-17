@@ -120,7 +120,6 @@ void InterpreterExecContext::freeBackFrame() {
 void BaseInterpreter::interpret() {
   Context.allocFrame();
   EVMFrame *Frame = Context.getCurFrame();
-  ZEN_ASSERT(Frame && "Interpreter requires a valid initial frame");
 
   const EVMModule *Mod = Context.getModule();
 
