@@ -54,28 +54,20 @@ void appendResult(const std::string &SampleName, const std::string &HexRet) {
 }
 
 std::string readAnswerFile(const std::string &FilePath) {
-  std::string::size_type SepPos = FilePath.find_last_of("/\\");
-  std::string DirPath = (SepPos == std::string::npos)
-                            ? std::string()
-                            : FilePath.substr(0, SepPos + 1);
-
-  std::string FileName =
-      (SepPos == std::string::npos) ? FilePath : FilePath.substr(SepPos + 1);
-
-  std::string::size_type DotPos = FileName.find('.');
-  std::string BaseName =
-      (DotPos == std::string::npos) ? FileName : FileName.substr(0, DotPos);
-
-  std::string AnswerPath = DirPath + BaseName + ".answer";
-
-  std::ifstream Fin(AnswerPath);
-  if (!Fin) {
-    return "";
-  }
-
-  std::string Answer;
-  Fin >> Answer;
-  return Answer;
+    std::filesystem::path filePath(FilePath);
+    
+    // 使用filesystem API替代手动解析
+    std::filesystem::path answerPath = filePath.parent_path() / (filePath.stem().string() + ".answer");
+    
+    // 读取文件内容
+    std::ifstream Fin(answerPath);
+    if (!Fin) {
+        return "";
+    }
+    
+    std::string Answer;
+    Fin >> Answer;
+    return Answer;
 }
 
 } // namespace
@@ -90,15 +82,8 @@ TEST_P(EVMSampleTest, ExecuteSample) {
 
   std::string Hex;
   Fin >> Hex;
-  ASSERT_FALSE(Hex.empty()) << "Test file is empty: " << FilePath;
-  ASSERT_EQ(Hex.size() % 2, 0u) << "Bytecode length is not even: " << FilePath;
-
-  std::vector<uint8_t> BytecodeBuf;
-  for (size_t I = 0; I < Hex.size(); I += 2) {
-    uint8_t ByteVal =
-        static_cast<uint8_t>(std::stoul(Hex.substr(I, 2), nullptr, 16));
-    BytecodeBuf.push_back(ByteVal);
-  }
+  Hex = zen::utils::trimString(Hex);
+  std::vector<uint8_t> BytecodeBuf = zen::utils::fromHex(Hex);
 
   RuntimeConfig Config;
   Config.Mode = common::RunMode::InterpMode;
