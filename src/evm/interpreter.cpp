@@ -5,7 +5,9 @@
 
 #include "common/errors.h"
 #include "evmc/instructions.h"
+#include "intx/intx.hpp"
 #include "runtime/instance.h"
+#include <cstdint>
 
 #define EVM_STACK_CHECK(FramePtr, N)                                           \
   if ((FramePtr)->stackHeight() < (N)) {                                       \
@@ -13,22 +15,6 @@
   }
 
 namespace {
-static std::array<uint8_t, 32> uint256ToBytes(const intx::uint256 &Value) {
-  std::array<uint8_t, 32> Bytes{};
-  for (size_t I = 0; I < 32; ++I) {
-    Bytes[I] = static_cast<uint8_t>((Value >> (8 * (31 - I))) & 0xFF);
-  }
-  return Bytes;
-}
-
-static intx::uint256 bytesToUInt256(const std::array<uint8_t, 32> &Bytes) {
-  intx::uint256 Value = 0;
-  for (size_t I = 0; I < 32; ++I) {
-    Value = (Value << 8) | Bytes[I];
-  }
-  return Value;
-}
-
 static intx::uint256 bigEndianToUInt256(const uint8_t *Bytes, size_t NumBytes) {
   intx::uint256 Value = 0;
   for (size_t I = 0; I < 32 && I < NumBytes; ++I) {
@@ -440,12 +426,14 @@ void BaseInterpreter::interpret() {
         throw common::getError(common::ErrorCode::IntegerOverflow);
       }
 
-      std::array<uint8_t, 32> ValueBytes = uint256ToBytes(Value);
       uint64_t ReqSize = Offset + 32;
       if (ReqSize > Frame->Memory.size()) {
         Frame->Memory.resize(ReqSize, 0);
       }
-      std::memcpy(Frame->Memory.data() + Offset, ValueBytes.data(), 32);
+      
+      uint8_t ValueBytes[32];
+      intx::be::store(ValueBytes, Value);
+      std::memcpy(Frame->Memory.data() + Offset, ValueBytes, 32);
       break;
     }
 
@@ -463,10 +451,10 @@ void BaseInterpreter::interpret() {
         Frame->Memory.resize(ReqSize, 0);
       }
 
-      std::array<uint8_t, 32> ValueBytes{};
-      std::memcpy(ValueBytes.data(), Frame->Memory.data() + Offset, 32);
+      uint8_t ValueBytes[32];
+      std::memcpy(ValueBytes, Frame->Memory.data() + Offset, 32);
 
-      intx::uint256 Value = bytesToUInt256(ValueBytes);
+      intx::uint256 Value = intx::be::load<intx::uint256>(ValueBytes);
       Frame->push(Value);
       break;
     }
