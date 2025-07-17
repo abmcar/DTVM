@@ -54,20 +54,22 @@ void appendResult(const std::string &SampleName, const std::string &HexRet) {
 }
 
 std::string readAnswerFile(const std::string &FilePath) {
-    std::filesystem::path filePath(FilePath);
-    
-    // 使用filesystem API替代手动解析
-    std::filesystem::path answerPath = filePath.parent_path() / (filePath.stem().string() + ".answer");
-    
-    // 读取文件内容
-    std::ifstream Fin(answerPath);
-    if (!Fin) {
-        return "";
-    }
-    
-    std::string Answer;
-    Fin >> Answer;
-    return Answer;
+  std::filesystem::path InputFilePath(FilePath);
+
+  // Use filesystem API instead of manual path parsing
+  std::filesystem::path AnswerPath =
+      InputFilePath.parent_path() /
+      (InputFilePath.stem().stem().string() + ".answer");
+
+  // Read file content
+  std::ifstream Fin(AnswerPath);
+  if (!Fin) {
+    return "";
+  }
+
+  std::string Answer;
+  Fin >> Answer;
+  return Answer;
 }
 
 } // namespace
@@ -83,7 +85,8 @@ TEST_P(EVMSampleTest, ExecuteSample) {
   std::string Hex;
   Fin >> Hex;
   zen::utils::trimString(Hex);
-  std::vector<uint8_t> BytecodeBuf = zen::utils::fromHex(Hex);
+  auto BytecodeBuf = zen::utils::fromHex(Hex);
+  ASSERT_TRUE(BytecodeBuf) << "Failed to convert hex to bytecode";
 
   RuntimeConfig Config;
   Config.Mode = common::RunMode::InterpMode;
@@ -115,7 +118,7 @@ TEST_P(EVMSampleTest, ExecuteSample) {
         << "Test: " << std::filesystem::path(FilePath).filename().string()
         << "\nExpected: " << ExpectedAnswer << "\nActual:   " << HexRet;
   } else {
-    std::cout << "No answer file found for: " << FilePath << std::endl;
+    ASSERT_TRUE(false) << "No answer file found for: " << FilePath;
   }
 
   EXPECT_EQ(Ctx.getCurFrame(), nullptr)
