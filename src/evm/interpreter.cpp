@@ -224,7 +224,15 @@ void BaseInterpreter::interpret() {
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 C = Frame->pop();
-      intx::uint256 Res = (C == 0) ? intx::uint256(0) : (A + B) % C;
+      intx::uint256 Res;
+      if (C == 0) {
+        Res = intx::uint256(0);
+      } else {
+        // Promote to 512-bit to safely perform addition
+        intx::uint512 Sum = intx::uint512(A) + intx::uint512(B);
+        intx::uint512 Mod = Sum % intx::uint512(C);
+        Res = static_cast<intx::uint256>(Mod);
+      }
       Frame->push(Res);
       break;
     }
@@ -234,7 +242,16 @@ void BaseInterpreter::interpret() {
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 C = Frame->pop();
-      intx::uint256 Res = (C == 0) ? intx::uint256(0) : ((A % C) * (B % C)) % C;
+      intx::uint256 Res;
+      if (C == 0) {
+        Res = intx::uint256(0);
+      } else {
+        // Promote to 512-bit to safely perform multiplication
+        intx::uint512 A512 = intx::uint512(A) % intx::uint512(C);
+        intx::uint512 B512 = intx::uint512(B) % intx::uint512(C);
+        intx::uint512 Mod = (A512 * B512) % intx::uint512(C);
+        Res = static_cast<intx::uint256>(Mod);
+      }
       Frame->push(Res);
       break;
     }
