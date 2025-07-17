@@ -2,12 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "evm/interpreter.h"
-
-#include "common/errors.h"
 #include "evmc/instructions.h"
-#include "intx/intx.hpp"
-#include "runtime/instance.h"
-#include <cstdint>
 
 #define EVM_STACK_CHECK(FramePtr, N)                                           \
   if ((FramePtr)->stackHeight() < (N)) {                                       \
