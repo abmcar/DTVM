@@ -166,7 +166,7 @@ void handleOP_SIGNEXTEND(EVMFrame* Frame) {
     intx::uint256 V = Frame->pop();
 
     intx::uint256 Res = V;
-    if (I < 32) {
+    if (I < 31) {
     // Calculate the sign bit position (the highest bit of the Ith byte,
     // i.e., bit 8*I+7)
     intx::uint256 SignBitPosition = 8 * I + 7;
