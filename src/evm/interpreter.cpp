@@ -54,18 +54,6 @@ static intx::uint256 signedMod(const intx::uint256 &A, const intx::uint256 &B) {
   return Result;
 }
 
-static intx::uint256 quickPow(intx::uint256 Base, intx::uint256 Exp) {
-  intx::uint256 Result = 1;
-  while (Exp > 0) {
-    if (Exp & 1) {
-      Result *= Base;
-    }
-    Base *= Base;
-    Exp >>= 1;
-  }
-  return Result;
-}
-
 } // namespace
 
 using namespace zen;
@@ -224,15 +212,7 @@ void BaseInterpreter::interpret() {
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 C = Frame->pop();
-      intx::uint256 Res;
-      if (C == 0) {
-        Res = intx::uint256(0);
-      } else {
-        // Promote to 512-bit to safely perform addition
-        intx::uint512 Sum = intx::uint512(A) + intx::uint512(B);
-        intx::uint512 Mod = Sum % intx::uint512(C);
-        Res = static_cast<intx::uint256>(Mod);
-      }
+      intx::uint256 Res = (C == 0) ? intx::uint256(0) : intx::addmod(A, B, C);
       Frame->push(Res);
       break;
     }
@@ -242,25 +222,16 @@ void BaseInterpreter::interpret() {
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
       intx::uint256 C = Frame->pop();
-      intx::uint256 Res;
-      if (C == 0) {
-        Res = intx::uint256(0);
-      } else {
-        // Promote to 512-bit to safely perform multiplication
-        intx::uint512 A512 = intx::uint512(A) % intx::uint512(C);
-        intx::uint512 B512 = intx::uint512(B) % intx::uint512(C);
-        intx::uint512 Mod = (A512 * B512) % intx::uint512(C);
-        Res = static_cast<intx::uint256>(Mod);
-      }
+      intx::uint256 Res = (C == 0) ? intx::uint256(0) : intx::mulmod(A, B, C);
       Frame->push(Res);
       break;
     }
 
     case evmc_opcode::OP_EXP: {
       EVM_STACK_CHECK(Frame, 2);
-      intx::uint256 A = Frame->pop();
-      intx::uint256 B = Frame->pop();
-      intx::uint256 Res = quickPow(A, B);
+      intx::uint256 Base = Frame->pop();
+      intx::uint256 Exp = Frame->pop();
+      intx::uint256 Res = intx::exp(Base, Exp);
       Frame->push(Res);
       break;
     }
