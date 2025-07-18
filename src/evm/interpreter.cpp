@@ -14,46 +14,6 @@ static uint64_t uint256ToUint64(const intx::uint256 &Value) {
   return static_cast<uint64_t>(Value & 0xFFFFFFFFFFFFFFFFULL);
 }
 
-static intx::uint256 signedDiv(const intx::uint256 &A, const intx::uint256 &B) {
-  if (B == 0) {
-    return intx::uint256(0);
-  }
-
-  intx::uint256 SignA = (A >> 255) & 1;
-  intx::uint256 SignB = (B >> 255) & 1;
-
-  intx::uint256 AbsA = SignA ? (~A + 1) : A;
-  intx::uint256 AbsB = SignB ? (~B + 1) : B;
-
-  intx::uint256 Result = AbsA / AbsB;
-
-  if (SignA != SignB) {
-    Result = ~Result + 1;
-  }
-
-  return Result;
-}
-
-static intx::uint256 signedMod(const intx::uint256 &A, const intx::uint256 &B) {
-  if (B == 0) {
-    return intx::uint256(0);
-  }
-
-  intx::uint256 SignA = (A >> 255) & 1;
-  intx::uint256 SignB = (B >> 255) & 1;
-
-  intx::uint256 AbsA = SignA ? (~A + 1) : A;
-  intx::uint256 AbsB = SignB ? (~B + 1) : B;
-
-  intx::uint256 Result = AbsA % AbsB;
-
-  if (SignA) {
-    Result = ~Result + 1;
-  }
-
-  return Result;
-}
-
 } // namespace
 
 using namespace zen;
@@ -240,7 +200,7 @@ void BaseInterpreter::interpret() {
       EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
-      intx::uint256 Res = signedDiv(A, B);
+      intx::uint256 Res = (B == 0) ? intx::uint256(0) : intx::sdivrem(A, B).quot;
       Frame->push(Res);
       break;
     }
@@ -249,7 +209,7 @@ void BaseInterpreter::interpret() {
       EVM_STACK_CHECK(Frame, 2);
       intx::uint256 A = Frame->pop();
       intx::uint256 B = Frame->pop();
-      intx::uint256 Res = signedMod(A, B);
+      intx::uint256 Res = (B == 0) ? intx::uint256(0) : intx::sdivrem(A, B).rem;
       Frame->push(Res);
       break;
     }
