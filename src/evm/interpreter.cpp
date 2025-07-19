@@ -304,6 +304,42 @@ void handleOpMLOAD(EVMFrame *Frame) {
   intx::uint256 Value = intx::be::load<intx::uint256>(ValueBytes);
   Frame->push(Value);
 }
+bool handleOpJUMP(EVMFrame *Frame, const uint8_t *Code, const size_t CodeSize) {
+  EVM_STACK_CHECK(Frame, 1);
+  // We can assume that valid destination can't greater than uint64_t
+  uint64_t Dest = uint256ToUint64(Frame->pop());
+
+  if (Dest >= CodeSize) {
+    throw common::getError(common::ErrorCode::EVMControlFlowJumpOutRange);
+  }
+  if (static_cast<evmc_opcode>(Code[Dest]) != evmc_opcode::OP_JUMPDEST) {
+    throw common::getError(common::ErrorCode::EVMControlFlowInvalidJumpDest);
+  }
+
+  Frame->Pc = Dest;
+  return true;
+}
+bool handleOpJUMPI(EVMFrame *Frame, const uint8_t *Code,
+                   const size_t CodeSize) {
+  EVM_STACK_CHECK(Frame, 2);
+  // We can assume that valid destination can't greater than uint64_t
+  uint64_t Dest = uint256ToUint64(Frame->pop());
+  intx::uint256 Cond = Frame->pop();
+
+  if (!Cond) {
+    return false;
+  }
+  if (Dest >= CodeSize) {
+    throw common::getError(common::ErrorCode::EVMControlFlowJumpOutRange);
+  }
+  if (static_cast<evmc_opcode>(Code[Dest]) != evmc_opcode::OP_JUMPDEST) {
+    throw common::getError(common::ErrorCode::EVMControlFlowInvalidJumpDest);
+  }
+
+  Frame->Pc = Dest;
+  return true;
+}
+void handleOpPC(EVMFrame *Frame) { Frame->push(intx::uint256(Frame->Pc)); }
 void handleOpRETURN(InterpreterExecContext &Context, EVMFrame *Frame) {
   EVM_STACK_CHECK(Frame, 2);
   intx::uint256 OffsetVal = Frame->pop();
@@ -375,6 +411,7 @@ void BaseInterpreter::interpret() {
   while (Frame->Pc < CodeSize) {
     uint8_t OpcodeByte = Code[Frame->Pc];
     evmc_opcode Op = static_cast<evmc_opcode>(OpcodeByte);
+    bool IsJumpSuccess = false;
 
     switch (Op) {
     case evmc_opcode::OP_STOP:
@@ -519,6 +556,25 @@ void BaseInterpreter::interpret() {
       break;
     }
 
+    case evmc_opcode::OP_JUMP: {
+      IsJumpSuccess = handleOpJUMP(Frame, Mod->Code, Mod->CodeSize);
+      break;
+    }
+
+    case evmc_opcode::OP_JUMPI: {
+      IsJumpSuccess = handleOpJUMPI(Frame, Mod->Code, Mod->CodeSize);
+      break;
+    }
+
+    case evmc_opcode::OP_PC: {
+      handleOpPC(Frame);
+      break;
+    }
+
+    case evmc_opcode::OP_JUMPDEST: {
+      break;
+    }
+
     case evmc_opcode::OP_RETURN: {
       handleOpRETURN(Context, Frame);
       Frame = Context.getCurFrame();
@@ -553,6 +609,10 @@ void BaseInterpreter::interpret() {
       } else {
         throw common::getError(common::ErrorCode::UnsupportedOpcode);
       }
+    }
+
+    if (IsJumpSuccess) {
+      continue;
     }
 
     Frame->Pc++;
