@@ -168,8 +168,10 @@ DEFINE_ERROR(Execution,     None,   EVMDataStackUnderflow,        "EVM data stac
 DEFINE_ERROR(Execution,     None,   EVMDataStackPeekOutRange,     "peek out of range")
 
 // EVM Error: About EVM Intrepreter control flow
-DEFINE_ERROR(Execution, None, EVMControlFlowInvalidJumpDest,      "invalid jump destination")
-DEFINE_ERROR(Execution, None, EVMControlFlowJumpOutRange,         "jump destination out of range")
+DEFINE_ERROR(Execution, None, EVMInvalidJumpDest,                 "invalid jump destination")
+DEFINE_ERROR(Execution, None, EVMJumpDestOutOfRange,              "jump destination out of range")
+DEFINE_ERROR(Execution, None, EVMInvalidInstruction,              "invalid instruction")
+
 #endif
 
 #ifdef DEFINE_DWASM_ERROR

@@ -310,10 +310,10 @@ bool handleOpJUMP(EVMFrame *Frame, const uint8_t *Code, const size_t CodeSize) {
   uint64_t Dest = uint256ToUint64(Frame->pop());
 
   if (Dest >= CodeSize) {
-    throw common::getError(common::ErrorCode::EVMControlFlowJumpOutRange);
+    throw common::getError(common::ErrorCode::EVMJumpDestOutOfRange);
   }
   if (static_cast<evmc_opcode>(Code[Dest]) != evmc_opcode::OP_JUMPDEST) {
-    throw common::getError(common::ErrorCode::EVMControlFlowInvalidJumpDest);
+    throw common::getError(common::ErrorCode::EVMInvalidJumpDest);
   }
 
   Frame->Pc = Dest;
@@ -330,10 +330,10 @@ bool handleOpJUMPI(EVMFrame *Frame, const uint8_t *Code,
     return false;
   }
   if (Dest >= CodeSize) {
-    throw common::getError(common::ErrorCode::EVMControlFlowJumpOutRange);
+    throw common::getError(common::ErrorCode::EVMJumpDestOutOfRange);
   }
   if (static_cast<evmc_opcode>(Code[Dest]) != evmc_opcode::OP_JUMPDEST) {
-    throw common::getError(common::ErrorCode::EVMControlFlowInvalidJumpDest);
+    throw common::getError(common::ErrorCode::EVMInvalidJumpDest);
   }
 
   Frame->Pc = Dest;
@@ -588,6 +588,10 @@ void BaseInterpreter::interpret() {
       EVM_STACK_CHECK(Frame, 1);
       Frame->pop();
       break;
+    }
+
+    case evmc_opcode::OP_INVALID: {
+      throw common::getError(common::ErrorCode::EVMInvalidInstruction);
     }
 
     default:
