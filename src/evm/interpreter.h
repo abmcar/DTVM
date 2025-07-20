@@ -5,6 +5,7 @@
 #define ZEN_EVM_INTERPRETER_H
 
 #include "common/defines.h"
+#include "evmc/evmc.h"
 #include "intx/intx.hpp"
 #include "runtime/evm_module.h"
 #include "utils/logging.h"
@@ -60,6 +61,8 @@ class InterpreterExecContext {
 private:
   runtime::EVMModule *Mod;
   std::vector<EVMFrame> FrameStack;
+  evmc_status_code Status = EVMC_SUCCESS;
+  std::vector<uint8_t> ReturnData;
 
 public:
   InterpreterExecContext(runtime::EVMModule *Mod) : Mod(Mod) {}
@@ -76,10 +79,9 @@ public:
 
   runtime::EVMModule *getModule() { return Mod; }
 
-private:
-  std::vector<uint8_t> ReturnData;
+  evmc_status_code getStatus() const { return Status; }
+  void setStatus(evmc_status_code Status) { this->Status = Status; }
 
-public:
   const std::vector<uint8_t> &getReturnData() const { return ReturnData; }
   void setReturnData(std::vector<uint8_t> Data) {
     ReturnData = std::move(Data);

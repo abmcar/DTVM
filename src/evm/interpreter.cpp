@@ -361,6 +361,31 @@ void handleOpRETURN(InterpreterExecContext &Context, EVMFrame *Frame) {
                                   Frame->Memory.begin() + Offset + Size);
   Context.setReturnData(std::move(ReturnData));
 
+  Context.setStatus(EVMC_SUCCESS);
+  Context.freeBackFrame();
+}
+// TODO: implement host storage revert in the future
+void handleOpREVERT(InterpreterExecContext &Context, EVMFrame *Frame) {
+  EVM_STACK_CHECK(Frame, 2);
+  intx::uint256 OffsetVal = Frame->pop();
+  intx::uint256 SizeVal = Frame->pop();
+  uint64_t Offset = uint256ToUint64(OffsetVal);
+  uint64_t Size = uint256ToUint64(SizeVal);
+
+  if (Offset > UINT32_MAX || Size > UINT32_MAX) {
+    throw common::getError(common::ErrorCode::IntegerOverflow);
+  }
+
+  uint64_t ReqSize = Offset + Size;
+  // TODO: use EVMMemory class in the future
+  if (ReqSize > Frame->Memory.size()) {
+    Frame->Memory.resize(ReqSize, 0);
+  }
+  std::vector<uint8_t> RevertData(Frame->Memory.begin() + Offset,
+                                  Frame->Memory.begin() + Offset + Size);
+
+  Context.setStatus(EVMC_REVERT);
+  Context.setReturnData(std::move(RevertData));
   Context.freeBackFrame();
 }
 void handleOpPUSH(EVMFrame *Frame, uint8_t OpcodeByte, const uint8_t *Code,
@@ -577,6 +602,15 @@ void BaseInterpreter::interpret() {
 
     case evmc_opcode::OP_RETURN: {
       handleOpRETURN(Context, Frame);
+      Frame = Context.getCurFrame();
+      if (!Frame) {
+        return;
+      }
+      break;
+    }
+
+    case evmc_opcode::OP_REVERT: {
+      handleOpREVERT(Context, Frame);
       Frame = Context.getCurFrame();
       if (!Frame) {
         return;
