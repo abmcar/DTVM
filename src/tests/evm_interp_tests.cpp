@@ -46,13 +46,6 @@ std::vector<std::string> getAllEvmBytecodeFiles() {
   return Files;
 }
 
-void appendResult(const std::string &SampleName, const std::string &HexRet) {
-  static std::mutex Mtx;
-  std::lock_guard<std::mutex> Guard(Mtx);
-  std::ofstream Fout("evm_results.txt", std::ios::app);
-  Fout << SampleName << ": " << HexRet << '\n';
-}
-
 std::string readAnswerFile(const std::string &FilePath) {
   std::filesystem::path InputFilePath(FilePath);
 
@@ -78,6 +71,9 @@ class EVMSampleTest : public ::testing::TestWithParam<std::string> {};
 
 TEST_P(EVMSampleTest, ExecuteSample) {
   const std::string &FilePath = GetParam();
+
+  ASSERT_NE(FilePath, "NoEvmHexFiles")
+      << "No EVM hex files found, should convert easm to hex first";
 
   std::ifstream Fin(FilePath);
   ASSERT_TRUE(Fin.is_open()) << "Failed to open test file: " << FilePath;
@@ -106,7 +102,6 @@ TEST_P(EVMSampleTest, ExecuteSample) {
 
   const auto &Ret = Ctx.getReturnData();
   std::string HexRet = zen::utils::toHex(Ret.data(), Ret.size());
-  appendResult(std::filesystem::path(FilePath).filename().string(), HexRet);
 
   // Read expected answer
   std::string ExpectedAnswer = readAnswerFile(FilePath);
@@ -122,5 +117,11 @@ TEST_P(EVMSampleTest, ExecuteSample) {
       << "Frame should be deallocated after execution";
 }
 
-INSTANTIATE_TEST_SUITE_P(EVMSamples, EVMSampleTest,
-                         ::testing::ValuesIn(getAllEvmBytecodeFiles()));
+// if there is no evm files, we add a special string to make the test run and
+// handle it in the test case
+auto EvmFiles = getAllEvmBytecodeFiles();
+INSTANTIATE_TEST_SUITE_P(
+    EVMSamples, EVMSampleTest,
+    ::testing::ValuesIn(EvmFiles.empty()
+                            ? std::vector<std::string>{"NoEvmHexFiles"}
+                            : EvmFiles));
