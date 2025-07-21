@@ -24,7 +24,7 @@ EVMFrame *InterpreterExecContext::allocFrame() {
   FrameStack.emplace_back();
 
   EVMFrame &Frame = FrameStack.back();
-  Frame.GasLeft = 200000; 
+  Frame.GasLeft = 200000;
 
   return &Frame;
 }
