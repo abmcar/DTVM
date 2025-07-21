@@ -1,4 +1,3 @@
-// Example 1
 PUSH2 0xFFFF
 PUSH1 0x00
 MSTORE8

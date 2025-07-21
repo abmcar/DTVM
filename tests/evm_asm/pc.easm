@@ -1,4 +1,4 @@
-//return 4
+//return 2 pc(0)+2=2
 PC
 PUSH1 0x02
 ADD
