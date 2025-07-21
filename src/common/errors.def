@@ -172,6 +172,9 @@ DEFINE_ERROR(Execution, None, EVMInvalidJumpDest,                 "invalid jump 
 DEFINE_ERROR(Execution, None, EVMJumpDestOutOfRange,              "jump destination out of range")
 DEFINE_ERROR(Execution, None, EVMInvalidInstruction,              "invalid instruction")
 
+// EVM Error: get EVM opcode gastable
+DEFINE_ERROR(Execution, None, EVMMetricsTableMissing,    "metrics table missing") 
+
 #endif
 
 #ifdef DEFINE_DWASM_ERROR
