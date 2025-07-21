@@ -24,7 +24,7 @@ EVMFrame *InterpreterExecContext::allocFrame() {
   FrameStack.emplace_back();
 
   EVMFrame &Frame = FrameStack.back();
-  Frame.GasLeft = 0;
+  Frame.GasLeft = 200000; 
 
   return &Frame;
 }
@@ -39,6 +39,20 @@ void InterpreterExecContext::freeBackFrame() {
 }
 
 namespace {
+
+int64_t
+getGasCost(enum evmc_opcode code,
+           enum evmc_revision revision = EVMC_SHANGHAI) { // EVMC_SHANGHAI = 11
+  // 获取指定 EVM 版本的指令指标表
+  const struct evmc_instruction_metrics *metrics_table =
+      evmc_get_instruction_metrics_table(revision);
+
+  if (metrics_table == nullptr) {
+    return -1;
+  }
+  int16_t gas_cost = metrics_table[code].gas_cost;
+  return gas_cost;
+}
 // Opcode processing function
 void handleOpADD(EVMFrame *Frame) {
   EVM_STACK_CHECK(Frame, 2);
@@ -282,6 +296,25 @@ void handleOpMSTORE(EVMFrame *Frame) {
   // TODO: use EVMMemory class in the future
   std::memcpy(Frame->Memory.data() + Offset, ValueBytes, 32);
 }
+void handleOpMSTORE8(EVMFrame *Frame) {
+  EVM_STACK_CHECK(Frame, 2);
+  intx::uint256 OffsetVal = Frame->pop();
+  intx::uint256 Value = Frame->pop();
+
+  uint64_t Offset = uint256ToUint64(OffsetVal);
+  if (Offset > UINT32_MAX) {
+    throw common::getError(common::ErrorCode::IntegerOverflow);
+  }
+
+  uint64_t ReqSize = Offset + 1;
+  // TODO: use EVMMemory class in the future
+  if (ReqSize > Frame->Memory.size()) {
+    Frame->Memory.resize(ReqSize, 0);
+  }
+  uint8_t ByteValue = static_cast<uint8_t>(Value & intx::uint256{0xFF});
+  Frame->Memory[Offset] = ByteValue;
+}
+
 void handleOpMLOAD(EVMFrame *Frame) {
   EVM_STACK_CHECK(Frame, 1);
   intx::uint256 OffsetVal = Frame->pop();
@@ -340,6 +373,18 @@ bool handleOpJUMPI(EVMFrame *Frame, const uint8_t *Code,
   return true;
 }
 void handleOpPC(EVMFrame *Frame) { Frame->push(intx::uint256(Frame->Pc)); }
+void handleOpMSize(EVMFrame *Frame) {
+  // Return the current memory size in bytes
+  intx::uint256 MemSize = Frame->Memory.size();
+  Frame->push(MemSize);
+}
+void handleOpGAS(EVMFrame *Frame) {
+  Frame->push(intx::uint256(Frame->GasLeft - getGasCost(evmc_opcode::OP_GAS)));
+}
+
+void handleOpGASLIMIT(EVMFrame *Frame) {
+  Frame->push(intx::uint256(Frame->GasLimit));
+}
 void handleOpRETURN(InterpreterExecContext &Context, EVMFrame *Frame) {
   EVM_STACK_CHECK(Frame, 2);
   intx::uint256 OffsetVal = Frame->pop();
@@ -576,6 +621,10 @@ void BaseInterpreter::interpret() {
       break;
     }
 
+    case evmc_opcode::OP_MSTORE8: {
+      handleOpMSTORE8(Frame);
+      break;
+    }
     case evmc_opcode::OP_MLOAD: {
       handleOpMLOAD(Frame);
       break;
@@ -595,8 +644,21 @@ void BaseInterpreter::interpret() {
       handleOpPC(Frame);
       break;
     }
+    case evmc_opcode::OP_MSIZE: {
+      handleOpMSize(Frame);
+      break;
+    }
 
     case evmc_opcode::OP_JUMPDEST: {
+      break;
+    }
+
+    case evmc_opcode::OP_GAS: {
+      handleOpGAS(Frame);
+      break;
+    }
+    case evmc_opcode::OP_GASLIMIT: {
+      handleOpGASLIMIT(Frame);
       break;
     }
 
@@ -652,7 +714,7 @@ void BaseInterpreter::interpret() {
     if (IsJumpSuccess) {
       continue;
     }
-
+    Frame->GasLeft -= getGasCost(Op);
     Frame->Pc++;
   }
 }
