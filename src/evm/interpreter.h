@@ -4,7 +4,6 @@
 #ifndef ZEN_EVM_INTERPRETER_H
 #define ZEN_EVM_INTERPRETER_H
 
-#include "common/defines.h"
 #include "evmc/evmc.h"
 #include "intx/intx.hpp"
 #include "runtime/evm_module.h"
