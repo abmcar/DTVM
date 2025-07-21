@@ -35,7 +35,7 @@ struct EVMFrame {
 
   size_t Sp = 0;
   uint64_t GasLeft = 0;
-  uint64_t GasLimit = 0xFFFFFFFFFFFF;
+  uint64_t GasLimit = 0;
   uint64_t Pc = 0;
   intx::uint256 Value = 0;
 
@@ -73,7 +73,7 @@ private:
 public:
   InterpreterExecContext(runtime::EVMInstance *Inst) : Inst(Inst) {}
 
-  EVMFrame *allocFrame();
+  EVMFrame *allocFrame(uint64_t GasLimit = 0);
   void freeBackFrame();
 
   EVMFrame *getCurFrame() {
