@@ -175,6 +175,9 @@ DEFINE_ERROR(Execution, None, EVMInvalidInstruction,              "invalid instr
 // EVM Error: get EVM opcode gastable
 DEFINE_ERROR(Execution, None, EVMMetricsTableMissing,    "metrics table missing") 
 
+// EVM Error: About Gas
+DEFINE_ERROR(Execution, None, EVMOutOfGas,               "out of gas") 
+
 #endif
 
 #ifdef DEFINE_DWASM_ERROR
