@@ -301,6 +301,8 @@ public:
       Instance &Inst, uint32_t FuncIdx, const std::vector<TypedValue> &Args,
       std::vector<common::TypedValue> &Results) noexcept;
 
+  void callEVMInInterpMode(EVMInstance &Inst, std::vector<uint8_t> &Result);
+
   /* **************** [End] Runtime Tool Methods  **************** */
 private:
   Runtime(const RuntimeConfig &Configuration)

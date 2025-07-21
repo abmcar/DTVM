@@ -193,6 +193,12 @@ int main(int argc, char *argv[]) {
     }
     EVMInstance *Inst = *InstRet;
 
+    std::vector<uint8_t> Result;
+    RT->callEVMInInterpMode(*Inst, Result);
+
+    std::string output = zen::utils::toHex(Result.data(), Result.size());
+    std::cout << "output: 0x" << output << std::endl;
+
     if (!RT->unloadEVMModule(Mod)) {
       ZEN_LOG_ERROR("failed to unload EVM module");
       return exitMain(EXIT_FAILURE, RT.get());
