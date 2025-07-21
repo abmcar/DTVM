@@ -41,17 +41,17 @@ void InterpreterExecContext::freeBackFrame() {
 namespace {
 
 int64_t
-getGasCost(enum evmc_opcode code,
-           enum evmc_revision revision = EVMC_SHANGHAI) { // EVMC_SHANGHAI = 11
+getGasCost(enum evmc_opcode Code,
+           enum evmc_revision Revision = EVMC_SHANGHAI) { // EVMC_SHANGHAI = 11
   // Get the instruction index table for the specified EVM version
-  const struct evmc_instruction_metrics *metrics_table =
-      evmc_get_instruction_metrics_table(revision);
+  const struct evmc_instruction_metrics *MetricsTable =
+      evmc_get_instruction_metrics_table(Revision);
 
-  if (metrics_table == nullptr) {
+  if (MetricsTable == nullptr) {
     throw common::getError(common::ErrorCode::EVMMetricsTableMissing);
   }
-  int16_t gas_cost = metrics_table[code].gas_cost;
-  return gas_cost;
+  int16_t GasCost = MetricsTable[Code].gas_cost;
+  return GasCost;
 }
 // Opcode processing function
 void handleOpADD(EVMFrame *Frame) {
