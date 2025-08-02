@@ -30,7 +30,7 @@ struct EVMFrame {
   std::vector<uint8_t> Memory;
   // TODO: use EVMHost in the future
   std::map<intx::uint256, intx::uint256> Storage;
-  const evmc_message *Msg = nullptr;
+  evmc_message Msg = {};
   evmc::Host *Host = nullptr;
   evmc_revision Rev = DEFAULT_REVISION;
   evmc_tx_context MTx = {};
@@ -66,12 +66,12 @@ struct EVMFrame {
 
   inline size_t stackHeight() const { return Sp; }
 
-  const evmc_tx_context &get_tx_context() noexcept {
+  const evmc_tx_context &getTxContext() noexcept {
     if (INTX_UNLIKELY(MTx.block_timestamp == 0))
       MTx = Host->get_tx_context();
     return MTx;
   }
-  bool isStaticMode() const { return (Msg->flags & EVMC_STATIC) != 0; }
+  bool isStaticMode() const { return (Msg.flags & EVMC_STATIC) != 0; }
 };
 
 class InterpreterExecContext {
@@ -97,6 +97,20 @@ public:
   }
 
   runtime::EVMInstance *getInstance() { return Inst; }
+
+  void setMessage(evmc_message &Msg) {
+    if (FrameStack.empty()) {
+      throw getError(common::ErrorCode::EVMStackUnderflow);
+    }
+    FrameStack.back().Msg = Msg;
+  }
+  void setCallData(const std::vector<uint8_t> &Data) {
+    if (FrameStack.empty()) {
+      throw getError(common::ErrorCode::EVMStackUnderflow);
+    }
+    FrameStack.back().Msg.input_data = Data.data();
+    FrameStack.back().Msg.input_size = Data.size();
+  }
 
   evmc_status_code getStatus() const { return Status; }
   void setStatus(evmc_status_code Status) { this->Status = Status; }

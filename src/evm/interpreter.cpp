@@ -20,6 +20,14 @@ EVMFrame *InterpreterExecContext::allocFrame(uint64_t GasLimit) {
   Frame.GasLimit = GasLimit;
   Frame.GasLeft = GasLimit;
 
+  Frame.Msg.kind = EVMC_CALL;
+  Frame.Msg.flags = 0;
+  Frame.Msg.depth = 0;
+  Frame.Msg.gas = Frame.GasLeft;
+  Frame.Msg.recipient = {};
+  Frame.Msg.value = intx::be::store<evmc::bytes32>(Frame.Value);
+  Frame.Msg.code_address = {};
+
   return &Frame;
 }
 
@@ -33,7 +41,10 @@ void InterpreterExecContext::freeBackFrame() {
 }
 
 void BaseInterpreter::interpret() {
-  Context.allocFrame(Context.getInstance()->getGas());
+  if (!Context.getCurFrame()) {
+    Context.allocFrame(Context.getInstance()->getGas());
+  }
+
   EVMFrame *Frame = Context.getCurFrame();
 
   Context.setStatus(EVMC_SUCCESS);
@@ -44,6 +55,8 @@ void BaseInterpreter::interpret() {
 
   size_t CodeSize = Mod->CodeSize;
   uint8_t *Code = Mod->Code;
+
+  Frame->Host = Context.getInstance()->getRuntime()->getEVMHost();
 
   while (Frame->Pc < CodeSize) {
     uint8_t OpcodeByte = Code[Frame->Pc];
@@ -417,6 +430,11 @@ void BaseInterpreter::interpret() {
       if (!Frame) {
         return;
       }
+      break;
+    }
+
+    case evmc_opcode::OP_PUSH0: { // PUSH0 (EIP-3855)
+      Frame->push(0);
       break;
     }
 
