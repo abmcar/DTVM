@@ -46,12 +46,12 @@ bool hexEquals(const std::string &Hex1, const std::string &Hex2) {
 }
 
 std::string computeFunctionSelector(const std::string &FunctionSig) {
-  std::vector<uint8_t> InputBytes(FunctionSig.begin(), FunctionSig.end());
+  const std::vector<uint8_t> InputBytes(FunctionSig.begin(), FunctionSig.end());
 
-  std::vector<uint8_t> Hash = zen::host::evm::crypto::keccak256(InputBytes);
+  const std::vector<uint8_t> Hash = host::evm::crypto::keccak256(InputBytes);
 
   if (Hash.size() >= 4) {
-    return zen::utils::toHex(Hash.data(), 4);
+    return utils::toHex(Hash.data(), 4);
   }
 
   return "";
@@ -112,8 +112,8 @@ loadAllSolcContractData(const std::string &JsonPath) {
     const auto &ContractInfo = ContractEntry.value;
 
     std::string ContractName = ContractFullName;
-    size_t ColonPos = ContractFullName.find(':');
-    if (ColonPos != std::string::npos) {
+    if (size_t ColonPos = ContractFullName.find(':');
+        ContractFullName.find(':') != std::string::npos) {
       ContractName = ContractFullName.substr(ColonPos + 1);
     }
 
@@ -152,9 +152,10 @@ std::vector<SolidityContractTestData> getAllSolidityContractTests() {
       std::filesystem::path TestCasesFile = ContractDir / "test_cases.json";
 
       std::string FolderName = ContractDir.filename().string();
-      std::filesystem::path SolcJsonFile = ContractDir / (FolderName + ".json");
 
-      if (std::filesystem::exists(SolcJsonFile) &&
+      if (std::filesystem::path SolcJsonFile =
+              ContractDir / (FolderName + ".json");
+          std::filesystem::exists(SolcJsonFile) &&
           std::filesystem::exists(TestCasesFile)) {
         SolidityContractTestData ContractTest;
         ContractTest.ContractPath = ContractDir.string();
@@ -165,8 +166,7 @@ std::vector<SolidityContractTestData> getAllSolidityContractTests() {
           continue;
         }
 
-        std::ifstream File(TestCasesFile);
-        if (File.is_open()) {
+        if (std::ifstream File(TestCasesFile); File.is_open()) {
           rapidjson::IStreamWrapper Isw(File);
           rapidjson::Document Doc;
           Doc.ParseStream(Isw);
@@ -259,7 +259,7 @@ std::vector<SolidityContractTestData> getAllSolidityContractTests() {
 } // namespace
 
 class SolidityContractTest
-    : public ::testing::TestWithParam<SolidityContractTestData> {};
+    : public testing::TestWithParam<SolidityContractTestData> {};
 
 TEST_P(SolidityContractTest, ExecuteContractSequence) {
   const auto &ContractTest = GetParam();
@@ -280,52 +280,52 @@ TEST_P(SolidityContractTest, ExecuteContractSequence) {
   std::map<std::string, ContractInstance> DeployedContracts;
 
   // Step 1: Deploy all specified contracts
-  for (const std::string &ContractName : ContractTest.DeployContracts) {
-    auto ContractIt = ContractTest.ContractDataMap.find(ContractName);
+  for (const std::string &NowContractName : ContractTest.DeployContracts) {
+    auto ContractIt = ContractTest.ContractDataMap.find(NowContractName);
     ASSERT_NE(ContractIt, ContractTest.ContractDataMap.end())
-        << "Contract not found: " << ContractName;
+        << "Contract not found: " << NowContractName;
 
-    const auto &ContractData = ContractIt->second;
+    const auto &[ContractAddress, ContractData] = *ContractIt;
 
     if (Debug)
-      std::cout << "Deploying contract: " << ContractName << std::endl;
+      std::cout << "Deploying contract: " << NowContractName << std::endl;
 
     ASSERT_FALSE(ContractData.DeployBytecode.empty())
-        << "Deploy bytecode is empty for " << ContractName;
+        << "Deploy bytecode is empty for " << NowContractName;
 
-    auto DeployBytecode = zen::utils::fromHex(ContractData.DeployBytecode);
+    auto DeployBytecode = utils::fromHex(ContractData.DeployBytecode);
     ASSERT_TRUE(DeployBytecode) << "Failed to convert deploy hex to bytecode";
 
     std::string TempDeployPath = createTempHexFile(
-        ContractTest.ContractPath, "temp_deploy_" + ContractName,
+        ContractTest.ContractPath, "temp_deploy_" + NowContractName,
         ContractData.DeployBytecode);
 
     auto DeployModRet = RT->loadEVMModule(TempDeployPath);
     ASSERT_TRUE(DeployModRet)
-        << "Failed to load deploy module for " << ContractName;
+        << "Failed to load deploy module for " << NowContractName;
 
     EVMModule *DeployMod = *DeployModRet;
     Isolation *DeployIso = RT->createManagedIsolation();
     ASSERT_TRUE(DeployIso) << "Failed to create deploy isolation for "
-                           << ContractName;
+                           << NowContractName;
 
     auto DeployInstRet = DeployIso->createEVMInstance(*DeployMod, GasLimit);
     ASSERT_TRUE(DeployInstRet)
-        << "Failed to create deploy instance for " << ContractName;
+        << "Failed to create deploy instance for " << NowContractName;
 
     EVMInstance *DeployInst = *DeployInstRet;
     InterpreterExecContext DeployCtx(DeployInst);
     BaseInterpreter DeployInterpreter(DeployCtx);
 
     EXPECT_NO_THROW({ DeployInterpreter.interpret(); })
-        << "Deploy failed for " << ContractName;
+        << "Deploy failed for " << NowContractName;
 
     const auto &DeployResult = DeployCtx.getReturnData();
     ASSERT_FALSE(DeployResult.empty())
-        << "Deploy should return runtime code for " << ContractName;
+        << "Deploy should return runtime code for " << NowContractName;
 
     std::string DeployResultHex =
-        zen::utils::toHex(DeployResult.data(), DeployResult.size());
+        utils::toHex(DeployResult.data(), DeployResult.size());
 
     if (Debug) {
       std::cout << "Deploy result hex: " << DeployResultHex << std::endl;
@@ -334,34 +334,35 @@ TEST_P(SolidityContractTest, ExecuteContractSequence) {
     }
 
     ASSERT_TRUE(hexEquals(DeployResultHex, ContractData.RuntimeBytecode))
-        << "Deploy result does not match runtime bytecode for " << ContractName;
+        << "Deploy result does not match runtime bytecode for "
+        << NowContractName;
 
     std::string TempRuntimePath =
         createTempHexFile(ContractTest.ContractPath,
-                          "temp_runtime_" + ContractName, DeployResultHex);
+                          "temp_runtime_" + NowContractName, DeployResultHex);
 
     auto CallModRet = RT->loadEVMModule(TempRuntimePath);
     ASSERT_TRUE(CallModRet)
-        << "Failed to load runtime module for " << ContractName;
+        << "Failed to load runtime module for " << NowContractName;
 
     EVMModule *CallMod = *CallModRet;
     Isolation *CallIso = RT->createManagedIsolation();
     ASSERT_TRUE(CallIso) << "Failed to create runtime isolation for "
-                         << ContractName;
+                         << NowContractName;
 
     auto CallInstRet = CallIso->createEVMInstance(*CallMod, GasLimit);
     ASSERT_TRUE(CallInstRet)
-        << "Failed to create runtime instance for " << ContractName;
+        << "Failed to create runtime instance for " << NowContractName;
 
     EVMInstance *CallInst = *CallInstRet;
 
-    DeployedContracts[ContractName] = {CallInst};
+    DeployedContracts[NowContractName] = {CallInst};
 
     std::filesystem::remove(TempDeployPath);
     std::filesystem::remove(TempRuntimePath);
 
     if (Debug)
-      std::cout << "✓ Contract " << ContractName << " deployed successfully"
+      std::cout << "✓ Contract " << NowContractName << " deployed successfully"
                 << std::endl;
   }
 
@@ -385,9 +386,9 @@ TEST_P(SolidityContractTest, ExecuteContractSequence) {
     ASSERT_FALSE(TestCase.Calldata.empty())
         << "Calldata must be provided for test: " << TestCase.Name;
 
-    auto Calldata = zen::utils::fromHex(TestCase.Calldata);
+    auto Calldata = utils::fromHex(TestCase.Calldata);
     ASSERT_TRUE(Calldata) << "Failed to convert calldata to bytes";
-    std::vector<uint8_t> CalldataVec(Calldata->begin(), Calldata->end());
+    std::vector CalldataVec(Calldata->begin(), Calldata->end());
 
     CallCtx.allocFrame(GasLimit);
     CallCtx.setCallData(CalldataVec);
@@ -397,8 +398,7 @@ TEST_P(SolidityContractTest, ExecuteContractSequence) {
         << "Function call failed: " << TestCase.Function;
 
     const auto &CallResult = CallCtx.getReturnData();
-    std::string ResultHex =
-        zen::utils::toHex(CallResult.data(), CallResult.size());
+    std::string ResultHex = utils::toHex(CallResult.data(), CallResult.size());
 
     if (Debug) {
       if (!TestCase.Function.empty()) {
@@ -426,7 +426,7 @@ TEST_P(SolidityContractTest, ExecuteContractSequence) {
 
 struct SolidityTestNameGenerator {
   std::string operator()(
-      const ::testing::TestParamInfo<SolidityContractTestData> &Info) const {
+      const testing::TestParamInfo<SolidityContractTestData> &Info) const {
     const auto &ContractTest = Info.param;
     std::string ContractName =
         std::filesystem::path(ContractTest.ContractPath).filename().string();
