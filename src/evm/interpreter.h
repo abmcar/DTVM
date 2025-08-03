@@ -28,8 +28,8 @@ struct EVMFrame {
   // TODO: use EVMMemory class in the future
   std::array<intx::uint256, MAXSTACK> Stack;
   std::vector<uint8_t> Memory;
-  // TODO: use EVMHost in the future
-  std::map<intx::uint256, intx::uint256> Storage;
+
+  std::vector<uint8_t> CallData;
   std::unique_ptr<evmc_message> Msg;
   evmc::Host *Host = nullptr;
   evmc_revision Rev = DEFAULT_REVISION;
@@ -108,8 +108,9 @@ public:
     if (FrameStack.empty()) {
       throw getError(common::ErrorCode::EVMStackUnderflow);
     }
-    FrameStack.back().Msg->input_data = Data.data();
-    FrameStack.back().Msg->input_size = Data.size();
+    FrameStack.back().CallData = std::move(Data);
+    FrameStack.back().Msg->input_data = FrameStack.back().CallData.data();
+    FrameStack.back().Msg->input_size = FrameStack.back().CallData.size();
   }
 
   evmc_status_code getStatus() const { return Status; }
