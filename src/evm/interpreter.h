@@ -66,7 +66,7 @@ struct EVMFrame {
       MTx = Host->get_tx_context();
     return MTx;
   }
-  bool isStaticMode() const { return (Msg.flags & EVMC_STATIC) != 0; }
+  bool isStaticMode() const { return (Msg->flags & EVMC_STATIC) != 0; }
 };
 
 class InterpreterExecContext {
