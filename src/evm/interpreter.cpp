@@ -56,14 +56,14 @@ EVMFrame *InterpreterExecContext::allocFrame() {
 
   EVMFrame &Frame = FrameStack.back();
 
-  Frame.GasLimit = 1000000;
-  Frame.GasLeft = 1000000;
+  Frame.GasLimit = Inst->getGas();
+  Frame.GasLeft = Inst->getGas();
 
   evmc_message Msg = {
       .kind = EVMC_CALL,
       .flags = 0,
       .depth = 0,
-      .gas = 1000000,
+      .gas = (long)Inst->getGas(),
   };
 
   Frame.Msg = std::make_unique<evmc_message>(Msg);
