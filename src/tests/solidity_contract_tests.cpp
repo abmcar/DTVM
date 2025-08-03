@@ -317,6 +317,14 @@ TEST_P(SolidityContractTest, ExecuteContractSequence) {
     InterpreterExecContext DeployCtx(DeployInst);
     BaseInterpreter DeployInterpreter(DeployCtx);
 
+    evmc_message Msg = {
+        .kind = EVMC_CREATE,
+        .flags = 0,
+        .depth = 0,
+        .gas = (long)GasLimit,
+    };
+    DeployCtx.allocFrame(&Msg);
+
     EXPECT_NO_THROW({ DeployInterpreter.interpret(); })
         << "Deploy failed for " << NowContractName;
 

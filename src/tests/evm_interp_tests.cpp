@@ -111,6 +111,9 @@ TEST_P(EVMSampleTest, ExecuteSample) {
   InterpreterExecContext Ctx(Inst);
 
   BaseInterpreter Interpreter(Ctx);
+
+  Ctx.allocFrame();
+
   EXPECT_NO_THROW({ Interpreter.interpret(); });
 
   const auto &Ret = Ctx.getReturnData();

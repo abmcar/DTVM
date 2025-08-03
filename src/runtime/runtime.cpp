@@ -655,6 +655,7 @@ void Runtime::callEVMInInterpMode(EVMInstance &Inst,
                                   std::vector<uint8_t> &Result) {
   evm::InterpreterExecContext Ctx(&Inst);
   evm::BaseInterpreter Interpreter(Ctx);
+  Ctx.allocFrame(); // TODO: use the correct message
   Interpreter.interpret();
   Result = Ctx.getReturnData();
 }

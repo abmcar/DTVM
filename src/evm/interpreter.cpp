@@ -49,6 +49,28 @@ EVMFrame *InterpreterExecContext::allocFrame(evmc_message *Msg) {
   return &Frame;
 }
 
+// This is a mock function for testing,
+// we should not use it in real-world scenarios.
+EVMFrame *InterpreterExecContext::allocFrame() {
+  FrameStack.emplace_back();
+
+  EVMFrame &Frame = FrameStack.back();
+
+  Frame.GasLimit = 1000000;
+  Frame.GasLeft = 1000000;
+
+  evmc_message Msg = {
+      .kind = EVMC_CALL,
+      .flags = 0,
+      .depth = 0,
+      .gas = 1000000,
+  };
+
+  Frame.Msg = std::make_unique<evmc_message>(Msg);
+
+  return &Frame;
+}
+
 // We only need to free the last frame (top of the stack),
 // since EVM's control flow is purely stack-based.
 void InterpreterExecContext::freeBackFrame() {
@@ -59,17 +81,9 @@ void InterpreterExecContext::freeBackFrame() {
 }
 
 void BaseInterpreter::interpret() {
-  if (!Context.getCurFrame()) {
-    evmc_message Msg = {
-        .kind = EVMC_CALL,
-        .flags = 0,
-        .depth = 0,
-        .gas = (long)Context.getInstance()->getGas(),
-    };
-    Context.allocFrame(&Msg);
-  }
-
   EVMFrame *Frame = Context.getCurFrame();
+
+  EVM_FRAME_CHECK(Frame);
 
   Context.setStatus(EVMC_SUCCESS);
 
