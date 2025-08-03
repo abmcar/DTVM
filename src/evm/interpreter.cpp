@@ -13,7 +13,11 @@ using namespace zen::runtime;
 using zen::common::ErrorCode;
 using zen::common::getError;
 
-EVMFrame *InterpreterExecContext::allocFrame(uint64_t GasLimit) {
+EVMFrame *InterpreterExecContext::allocFrame(
+    uint64_t GasLimit, evmc_call_kind Kind, uint32_t Flags, int32_t Depth,
+    int64_t Gas, evmc::address Recipient, evmc::address Sender,
+    std::vector<uint8_t> CallData, evmc_bytes32 Salt, intx::uint256 Value,
+    evmc::address CodeAddress, const uint8_t *Code, size_t CodeSize) {
   FrameStack.emplace_back();
 
   EVMFrame &Frame = FrameStack.back();
@@ -21,6 +25,17 @@ EVMFrame *InterpreterExecContext::allocFrame(uint64_t GasLimit) {
   Frame.GasLeft = GasLimit;
 
   Frame.Msg = std::make_unique<evmc_message>();
+  Frame.Msg->kind = Kind;
+  Frame.Msg->flags = Flags;
+  Frame.Msg->depth = Depth;
+  Frame.Msg->gas = Gas;
+  Frame.Msg->recipient = Recipient;
+  Frame.Msg->sender = Sender;
+  Frame.Msg->input_data = CallData.data();
+  Frame.Msg->input_size = CallData.size();
+  Frame.Msg->code_address = CodeAddress;
+  Frame.Msg->code = Code;
+  Frame.Msg->code_size = CodeSize;
 
   return &Frame;
 }
@@ -36,7 +51,7 @@ void InterpreterExecContext::freeBackFrame() {
 
 void BaseInterpreter::interpret() {
   if (!Context.getCurFrame()) {
-    Context.allocFrame(Context.getInstance()->getGas());
+    Context.allocFrame();
   }
 
   EVMFrame *Frame = Context.getCurFrame();
