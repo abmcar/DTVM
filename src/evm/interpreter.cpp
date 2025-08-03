@@ -14,10 +14,9 @@ using zen::common::ErrorCode;
 using zen::common::getError;
 
 EVMFrame *InterpreterExecContext::allocFrame(
-    uint64_t GasLimit, evmc_call_kind Kind, uint32_t Flags, int32_t Depth,
-    int64_t Gas, evmc::address Recipient, evmc::address Sender,
-    std::vector<uint8_t> CallData, evmc_bytes32 Salt, intx::uint256 Value,
-    evmc::address CodeAddress, const uint8_t *Code, size_t CodeSize) {
+    evmc_message *ParentMsg, uint64_t GasLimit, evmc_call_kind Kind,
+    evmc::address Recipient, evmc::address Sender,
+    std::vector<uint8_t> CallData, intx::uint256 Value) {
   FrameStack.emplace_back();
 
   EVMFrame &Frame = FrameStack.back();
@@ -26,16 +25,26 @@ EVMFrame *InterpreterExecContext::allocFrame(
 
   Frame.Msg = std::make_unique<evmc_message>();
   Frame.Msg->kind = Kind;
-  Frame.Msg->flags = Flags;
-  Frame.Msg->depth = Depth;
-  Frame.Msg->gas = Gas;
+  Frame.Msg->flags = ParentMsg->flags;
+  Frame.Msg->depth = ParentMsg->depth + 1;
+  Frame.Msg->gas = GasLimit;
+  Frame.Msg->value = intx::be::store<evmc::bytes32>(Value);
   Frame.Msg->recipient = Recipient;
   Frame.Msg->sender = Sender;
   Frame.Msg->input_data = CallData.data();
   Frame.Msg->input_size = CallData.size();
-  Frame.Msg->code_address = CodeAddress;
-  Frame.Msg->code = Code;
-  Frame.Msg->code_size = CodeSize;
+
+  return &Frame;
+}
+
+EVMFrame *InterpreterExecContext::allocFrame(evmc_message *Msg) {
+  FrameStack.emplace_back();
+
+  EVMFrame &Frame = FrameStack.back();
+  Frame.GasLimit = Msg->gas;
+  Frame.GasLeft = Msg->gas;
+
+  Frame.Msg = std::make_unique<evmc_message>(*Msg);
 
   return &Frame;
 }
@@ -51,7 +60,13 @@ void InterpreterExecContext::freeBackFrame() {
 
 void BaseInterpreter::interpret() {
   if (!Context.getCurFrame()) {
-    Context.allocFrame();
+    evmc_message Msg = {
+        .kind = EVMC_CALL,
+        .flags = 0,
+        .depth = 0,
+        .gas = (long)Context.getInstance()->getGas(),
+    };
+    Context.allocFrame(&Msg);
   }
 
   EVMFrame *Frame = Context.getCurFrame();

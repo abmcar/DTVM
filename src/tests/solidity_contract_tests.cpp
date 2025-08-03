@@ -387,11 +387,16 @@ TEST_P(SolidityContractTest, ExecuteContractSequence) {
         << "Calldata must be provided for test: " << TestCase.Name;
 
     auto Calldata = utils::fromHex(TestCase.Calldata);
-    ASSERT_TRUE(Calldata) << "Failed to convert calldata to bytes";
-    std::vector CalldataVec(Calldata->begin(), Calldata->end());
 
-    CallCtx.allocFrame(GasLimit);
-    CallCtx.setCallData(CalldataVec);
+    evmc_message Msg = {
+        .kind = EVMC_CALL,
+        .flags = 0,
+        .depth = 0,
+        .gas = (long)GasLimit,
+        .input_data = Calldata->data(),
+        .input_size = Calldata->size(),
+    };
+    CallCtx.allocFrame(&Msg);
 
     BaseInterpreter CallInterpreter(CallCtx);
     EXPECT_NO_THROW({ CallInterpreter.interpret(); })

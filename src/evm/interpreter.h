@@ -84,14 +84,11 @@ public:
 
   InterpreterExecContext(runtime::EVMInstance *Inst) : Inst(Inst) {}
 
-  EVMFrame *allocFrame(uint64_t GasLimit = 1000000,
-                       evmc_call_kind Kind = EVMC_CALL, uint32_t Flags = 0,
-                       int32_t Depth = 0, int64_t Gas = 0,
-                       evmc::address Recipient = {}, evmc::address Sender = {},
-                       std::vector<uint8_t> CallData = {},
-                       evmc_bytes32 Salt = {}, intx::uint256 Value = 0,
-                       evmc::address CodeAddress = {},
-                       const uint8_t *Code = nullptr, size_t CodeSize = 0);
+  EVMFrame *allocFrame(evmc_message *ParentMsg, uint64_t GasLimit,
+                       evmc_call_kind Kind, evmc::address Recipient,
+                       evmc::address Sender, std::vector<uint8_t> CallData,
+                       intx::uint256 Value);
+  EVMFrame *allocFrame(evmc_message *Msg);
   void freeBackFrame();
 
   EVMFrame *getCurFrame() {
