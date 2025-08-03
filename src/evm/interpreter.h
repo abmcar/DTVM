@@ -110,7 +110,7 @@ public:
     if (FrameStack.empty()) {
       throw getError(common::ErrorCode::EVMStackUnderflow);
     }
-    FrameStack.back().CallData = std::move(Data);
+    FrameStack.back().CallData = Data;
     FrameStack.back().Msg->input_data = FrameStack.back().CallData.data();
     FrameStack.back().Msg->input_size = FrameStack.back().CallData.size();
   }
