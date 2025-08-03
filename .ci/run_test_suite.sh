@@ -79,7 +79,7 @@ export PATH=$PATH:$PWD/build
 CMAKE_OPTIONS_ORIGIN="$CMAKE_OPTIONS"
 
 ./tools/easm2bytecode.sh ./tests/evm_asm ./tests/evm_asm
-pip install solc
+pip install solc-select
 ./tools/solc_batch_compile.sh
 
 for STACK_TYPE in ${STACK_TYPES[@]}; do
