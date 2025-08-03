@@ -87,6 +87,7 @@ public:
                        evmc::address Sender, std::vector<uint8_t> CallData,
                        intx::uint256 Value);
   EVMFrame *allocFrame(evmc_message *Msg);
+  EVMFrame *allocFrame();
   void freeBackFrame();
 
   EVMFrame *getCurFrame() {
