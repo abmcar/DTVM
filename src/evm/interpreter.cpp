@@ -20,13 +20,7 @@ EVMFrame *InterpreterExecContext::allocFrame(uint64_t GasLimit) {
   Frame.GasLimit = GasLimit;
   Frame.GasLeft = GasLimit;
 
-  Frame.Msg.kind = EVMC_CALL;
-  Frame.Msg.flags = 0;
-  Frame.Msg.depth = 0;
-  Frame.Msg.gas = Frame.GasLeft;
-  Frame.Msg.recipient = {};
-  Frame.Msg.value = intx::be::store<evmc::bytes32>(Frame.Value);
-  Frame.Msg.code_address = {};
+  Frame.Msg = std::make_unique<evmc_message>();
 
   return &Frame;
 }

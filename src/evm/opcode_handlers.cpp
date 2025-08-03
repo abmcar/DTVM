@@ -309,7 +309,7 @@ void SarHandler::doExecute() {
 void AddressHandler::doExecute() {
   auto *Frame = getFrame();
   EVM_FRAME_CHECK(Frame);
-  Frame->push(intx::be::load<intx::uint256>(Frame->Msg.recipient));
+  Frame->push(intx::be::load<intx::uint256>(Frame->Msg->recipient));
 }
 
 void BalanceHandler::doExecute() {
@@ -340,12 +340,12 @@ void OriginHandler::doExecute() {
 void CallerHandler::doExecute() {
   auto *Frame = getFrame();
   EVM_FRAME_CHECK(Frame);
-  Frame->push(intx::be::load<intx::uint256>(Frame->Msg.sender));
+  Frame->push(intx::be::load<intx::uint256>(Frame->Msg->sender));
 }
 void CallValueHandler::doExecute() {
   auto *Frame = getFrame();
   EVM_FRAME_CHECK(Frame);
-  Frame->push(intx::be::load<intx::uint256>(Frame->Msg.value));
+  Frame->push(intx::be::load<intx::uint256>(Frame->Msg->value));
 }
 void CallDataLoadHandler::doExecute() {
   auto *Frame = getFrame();
@@ -354,14 +354,14 @@ void CallDataLoadHandler::doExecute() {
   intx::uint256 OffsetVal = Frame->pop();
   uint64_t Offset = uint256ToUint64(OffsetVal);
 
-  if (Offset >= Frame->Msg.input_size) {
+  if (Offset >= Frame->Msg->input_size) {
     Frame->push(intx::uint256(0));
     return;
   }
 
   uint8_t DataBytes[32] = {0};
-  std::memcpy(DataBytes, Frame->Msg.input_data + Offset,
-              std::min<size_t>(32, Frame->Msg.input_size - Offset));
+  std::memcpy(DataBytes, Frame->Msg->input_data + Offset,
+              std::min<size_t>(32, Frame->Msg->input_size - Offset));
 
   intx::uint256 Value = intx::be::load<intx::uint256>(DataBytes);
   Frame->push(Value);
@@ -369,7 +369,7 @@ void CallDataLoadHandler::doExecute() {
 void CallDataSizeHandler::doExecute() {
   auto *Frame = getFrame();
   EVM_FRAME_CHECK(Frame);
-  Frame->push(intx::uint256(Frame->Msg.input_size));
+  Frame->push(intx::uint256(Frame->Msg->input_size));
 }
 void CallDataCopyHandler::doExecute() {
   auto *Frame = getFrame();
@@ -389,12 +389,12 @@ void CallDataCopyHandler::doExecute() {
   uint64_t Offset = uint256ToUint64(OffsetVal);
   uint64_t Size = uint256ToUint64(SizeVal);
 
-  auto Src = Frame->Msg.input_size < Offset ? Frame->Msg.input_size : Offset;
-  auto CopySize = std::min(Size, Frame->Msg.input_size - Src);
+  auto Src = Frame->Msg->input_size < Offset ? Frame->Msg->input_size : Offset;
+  auto CopySize = std::min(Size, Frame->Msg->input_size - Src);
 
   // Copy data to memory
   if (CopySize > 0) {
-    std::memcpy(Frame->Memory.data() + DestOffset, Frame->Msg.input_data + Src,
+    std::memcpy(Frame->Memory.data() + DestOffset, Frame->Msg->input_data + Src,
                 CopySize);
   }
   if (Size > CopySize) {
@@ -634,7 +634,7 @@ void SelfBalanceHandler::doExecute() {
   auto *Frame = getFrame();
   EVM_FRAME_CHECK(Frame);
   Frame->push(intx::be::load<intx::uint256>(
-      Frame->Host->get_balance(Frame->Msg.recipient)));
+      Frame->Host->get_balance(Frame->Msg->recipient)));
 }
 void BaseFeeHandler::doExecute() {
   auto *Frame = getFrame();
@@ -650,13 +650,13 @@ void SLoadHandler::doExecute() {
   intx::uint256 Key = Frame->pop();
   const auto KeyAddr = intx::be::store<evmc::bytes32>(Key);
   if (Frame->Rev >= EVMC_BERLIN &&
-      Frame->Host->access_account(Frame->Msg.recipient) == EVMC_ACCESS_COLD) {
+      Frame->Host->access_account(Frame->Msg->recipient) == EVMC_ACCESS_COLD) {
     EVM_REQUIRE(Frame->GasLeft >= ADDITIONAL_COLD_ACCOUNT_ACCESS_COST,
                 EVMOutOfGas);
     Frame->GasLeft -= ADDITIONAL_COLD_ACCOUNT_ACCESS_COST;
   }
   intx::uint256 Value = intx::be::load<intx::uint256>(
-      Frame->Host->get_storage(Frame->Msg.recipient, KeyAddr));
+      Frame->Host->get_storage(Frame->Msg->recipient, KeyAddr));
   Frame->push(Value);
 }
 void SStoreHandler::doExecute() {
@@ -670,11 +670,11 @@ void SStoreHandler::doExecute() {
 
   const auto GasCostCold =
       (Frame->Rev >= EVMC_BERLIN &&
-       Frame->Host->access_account(Frame->Msg.recipient) == EVMC_ACCESS_COLD)
+       Frame->Host->access_account(Frame->Msg->recipient) == EVMC_ACCESS_COLD)
           ? COLD_SLOAD_COST
           : 0;
   const auto Status =
-      Frame->Host->set_storage(Frame->Msg.recipient, Key, Value);
+      Frame->Host->set_storage(Frame->Msg->recipient, Key, Value);
 
   const auto [GasCostWarm, GasReFund] = SstoreCosts[Frame->Rev][Status];
 
@@ -983,13 +983,13 @@ void CreateHandler::doExecute() {
     return;
   }
 
-  if (Frame->Msg.depth >= 1024) {
+  if (Frame->Msg->depth >= 1024) {
     Context->setStatus(EVMC_SUCCESS); // "Light" failure
     return;
   }
 
   if (intx::be::load<intx::uint256>(
-          Frame->Host->get_balance(Frame->Msg.recipient)) < Value) {
+          Frame->Host->get_balance(Frame->Msg->recipient)) < Value) {
     Context->setStatus(EVMC_SUCCESS); // "Light" failure
     return;
   }
@@ -1001,9 +1001,9 @@ void CreateHandler::doExecute() {
   }
 
   evmc_message NewMsg{.kind = evmc_call_kind::EVMC_CREATE,
-                      .depth = Frame->Msg.depth + 1,
+                      .depth = Frame->Msg->depth + 1,
                       .gas = Frame->GasLeft,
-                      .sender = Frame->Msg.sender,
+                      .sender = Frame->Msg->sender,
                       .input_data =
                           Frame->Memory.data() + uint256ToUint64(CodeOffset),
                       .input_size = uint256ToUint64(CodeSizeVal),
@@ -1073,13 +1073,13 @@ void CallHandler::doExecute() {
     }
   }
 
-  if (Frame->Msg.depth >= 1024) {
+  if (Frame->Msg->depth >= 1024) {
     Context->setStatus(EVMC_SUCCESS); // "Light" failure
     return;
   }
 
   if (NeedValue and intx::be::load<intx::uint256>(Frame->Host->get_balance(
-                        Frame->Msg.recipient)) < Value) {
+                        Frame->Msg->recipient)) < Value) {
     Context->setStatus(EVMC_SUCCESS); // "Light" failure
     return;
   }
@@ -1095,18 +1095,18 @@ void CallHandler::doExecute() {
   evmc_message NewMsg{
       .kind = static_cast<evmc_call_kind>(OpCode),
       .flags = (OpCode == evmc_opcode::OP_STATICCALL) ? uint32_t{EVMC_STATIC}
-                                                      : Frame->Msg.flags,
-      .depth = Frame->Msg.depth + 1,
+                                                      : Frame->Msg->flags,
+      .depth = Frame->Msg->depth + 1,
       .gas = static_cast<int64_t>(Gas),
       .recipient = (OpCode == OP_CALL or OpCode == OP_STATICCALL)
                        ? Dest
-                       : Frame->Msg.recipient,
-      .sender = (OpCode == OP_DELEGATECALL) ? Frame->Msg.sender
-                                            : Frame->Msg.recipient,
+                       : Frame->Msg->recipient,
+      .sender = (OpCode == OP_DELEGATECALL) ? Frame->Msg->sender
+                                            : Frame->Msg->recipient,
       .input_data = Frame->Memory.data() + uint256ToUint64(InputOffset),
       .input_size = uint256ToUint64(InputSize),
       .value = (OpCode == OP_DELEGATECALL)
-                   ? Frame->Msg.value
+                   ? Frame->Msg->value
                    : intx::be::store<evmc::bytes32>(Value),
       .code_address = Dest,
   };
@@ -1202,7 +1202,7 @@ void LogHandler::doExecute() {
     Topics[I] = intx::be::store<evmc::bytes32>(Topic);
   }
 
-  Frame->Host->emit_log(Frame->Msg.recipient, Frame->Memory.data() + Offset,
+  Frame->Host->emit_log(Frame->Msg->recipient, Frame->Memory.data() + Offset,
                         Size, Topics, NumTopics);
 }
 
@@ -1238,7 +1238,7 @@ void SelfDestructHandler::doExecute() {
     }
   }
 
-  Frame->Host->selfdestruct(Frame->Msg.recipient, Beneficiary);
+  Frame->Host->selfdestruct(Frame->Msg->recipient, Beneficiary);
 
   uint64_t RemainingGas = Frame->GasLeft;
   Context->freeBackFrame();
