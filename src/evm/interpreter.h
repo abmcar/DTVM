@@ -23,8 +23,6 @@ class EVMInstance;
 namespace evm {
 
 struct EVMFrame {
-  static constexpr size_t MAXSTACK = 1024;
-
   // TODO: use EVMMemory class in the future
   std::array<intx::uint256, MAXSTACK> Stack;
   std::vector<uint8_t> Memory;

@@ -983,7 +983,7 @@ void CreateHandler::doExecute() {
     return;
   }
 
-  if (Frame->Msg->depth >= 1024) {
+  if (Frame->Msg->depth >= MAXSTACK) {
     Context->setStatus(EVMC_SUCCESS); // "Light" failure
     return;
   }
@@ -1073,7 +1073,7 @@ void CallHandler::doExecute() {
     }
   }
 
-  if (Frame->Msg->depth >= 1024) {
+  if (Frame->Msg->depth >= MAXSTACK) {
     Context->setStatus(EVMC_SUCCESS); // "Light" failure
     return;
   }
