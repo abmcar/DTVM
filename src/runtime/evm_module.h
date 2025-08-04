@@ -1,3 +1,6 @@
+// Copyright (C) 2025 the DTVM authors. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 #include "evmc/evmc.hpp"
 #include "runtime/module.h"
 

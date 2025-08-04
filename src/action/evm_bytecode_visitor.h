@@ -1,17 +1,19 @@
-// Copyright (C) 2021-2025 the DTVM authors. All Rights Reserved.
+// Copyright (C) 2025 the DTVM authors. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
+
+#ifndef ZEN_ACTION_EVM_BYTECODE_VISITOR_H
+#define ZEN_ACTION_EVM_BYTECODE_VISITOR_H
 
 #include "compiler/evm_frontend/evm_mir_compiler.h"
 #include "evmc/evmc.h"
 #include "evmc/instructions.h"
-#include "intx/intx.hpp"
 
 namespace COMPILER {
 
 template <typename IRBuilder> class EVMByteCodeVisitor {
   typedef typename IRBuilder::CompilerContext CompilerContext;
   typedef typename IRBuilder::Operand Operand;
-  typedef typename IRBuilder::template EVMEvalStack<Operand> EVMEvalStack;
+  typedef VMEvalStack<Operand> EvalStack;
 
 public:
   EVMByteCodeVisitor(IRBuilder &Builder, CompilerContext *Ctx)
@@ -27,7 +29,7 @@ public:
   }
 
 private:
-  void push(Operand Opnd) { Stack.push(Opnd); }
+  void push(const Operand &Opnd) { Stack.push(Opnd); }
 
   Operand pop() {
     ZEN_ASSERT(!Stack.empty());
@@ -35,8 +37,6 @@ private:
     Builder.releaseOperand(Opnd);
     return Opnd;
   }
-
-  Operand peek(size_t Index = 0) { return Stack.peek(Index); }
 
   bool decode() {
     const uint8_t *Bytecode = Ctx->getBytecode();
@@ -51,7 +51,47 @@ private:
       Ip++;
 
       switch (Opcode) {
-      // Stack operations
+      case OP_STOP:
+        handleStop();
+        return true;
+      case OP_ADD:
+        handleBinaryArithmetic<BinaryOperator::BO_ADD>();
+        break;
+      case OP_SUB:
+        handleBinaryArithmetic<BinaryOperator::BO_SUB>();
+        break;
+      case OP_LT:
+        handleCompare<CompareOperator::CO_LT>();
+        break;
+      case OP_GT:
+        handleCompare<CompareOperator::CO_GT>();
+        break;
+      case OP_SLT:
+        handleCompare<CompareOperator::CO_LT_S>();
+        break;
+      case OP_SGT:
+        handleCompare<CompareOperator::CO_GT_S>();
+        break;
+      case OP_EQ:
+        handleCompare<CompareOperator::CO_EQ>();
+        break;
+      case OP_ISZERO:
+        handleCompare<CompareOperator::CO_EQZ>();
+        break;
+      case OP_AND:
+        handleBitwiseOp<BinaryOperator::BO_AND>();
+        break;
+      case OP_OR:
+        handleBitwiseOp<BinaryOperator::BO_OR>();
+        break;
+      case OP_XOR:
+        handleBitwiseOp<BinaryOperator::BO_XOR>();
+        break;
+      case OP_POP:
+        Builder.handlePop();
+        break;
+
+      case OP_PUSH0:
       case OP_PUSH1:
       case OP_PUSH2:
       case OP_PUSH3:
@@ -84,9 +124,8 @@ private:
       case OP_PUSH30:
       case OP_PUSH31:
       case OP_PUSH32: {
-        uint32_t NumBytes = Opcode - OP_PUSH1 + 1;
-        Operand Result = Builder.handlePush(Ip, NumBytes);
-        push(Result);
+        uint8_t NumBytes = Opcode - OP_PUSH0;
+        handlePush(NumBytes);
         Ip += NumBytes;
         break;
       }
@@ -107,10 +146,8 @@ private:
       case OP_DUP14:
       case OP_DUP15:
       case OP_DUP16: {
-        uint32_t N = Opcode - OP_DUP1 + 1;
-        ZEN_ASSERT(Stack.size() >= N);
-        Operand Value = peek(N - 1);
-        push(Value);
+        uint8_t DupIndex = Opcode - OP_DUP1 + 1;
+        handleDup(DupIndex);
         break;
       }
 
@@ -130,33 +167,12 @@ private:
       case OP_SWAP14:
       case OP_SWAP15:
       case OP_SWAP16: {
-        uint32_t N = Opcode - OP_SWAP1 + 1;
-        ZEN_ASSERT(Stack.size() >= N + 1);
-        Builder.handleSwap(N);
-        break;
-      }
-
-      case OP_POP: {
-        ZEN_ASSERT(!Stack.empty());
-        pop();
-        Builder.handlePop();
-        break;
-      }
-
-      // Arithmetic operations
-      case OP_ADD: {
-        Operand B = pop();
-        Operand A = pop();
-        Operand Result = Builder.template handleBinaryArithmetic<OP_ADD>(A, B);
-        push(Result);
+        uint8_t SwapIndex = Opcode - OP_SWAP1 + 1;
+        handleSwap(SwapIndex);
         break;
       }
 
       case OP_MUL: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_SUB: {
         ZEN_ASSERT_TODO();
       }
 
@@ -189,46 +205,6 @@ private:
       }
 
       case OP_SIGNEXTEND: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_LT: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_GT: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_SLT: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_SGT: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_EQ: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_ISZERO: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_AND: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_OR: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_XOR: {
-        ZEN_ASSERT_TODO();
-      }
-
-      case OP_NOT: {
         ZEN_ASSERT_TODO();
       }
 
@@ -465,8 +441,10 @@ private:
       }
 
       // Halt operations
-      case OP_STOP:
-      case OP_RETURN:
+      case OP_RETURN: {
+        ZEN_ASSERT_TODO();
+      }
+
       case OP_REVERT:
         // End execution
         return true;
@@ -480,10 +458,57 @@ private:
     return true;
   }
 
+  void handleStop() { Builder.handleStop(); }
+
+  template <BinaryOperator Opr> void handleBinaryArithmetic() {
+    Operand RHS = pop();
+    Operand LHS = pop();
+    Operand Result = Builder.template handleBinaryArithmetic<Opr>(LHS, RHS);
+    push(Result);
+  }
+
+  template <CompareOperator Opr> void handleCompare() {
+    Operand CmpRHS = (Opr != CompareOperator::CO_EQZ) ? pop() : Operand();
+    Operand CmpLHS = pop();
+    Operand Result = Builder.template handleCompareOp<Opr>(CmpLHS, CmpRHS);
+    push(Result);
+  }
+
+  template <BinaryOperator Opr> void handleBitwiseOp() {
+    Operand RHS = pop();
+    Operand LHS = pop();
+    Operand Result = Builder.template handleBitwiseOp<Opr>(LHS, RHS);
+    push(Result);
+  }
+
+  void handlePush(uint8_t NumBytes) {
+    Bytes Data = readBytes(NumBytes);
+    Operand Result = Builder.handlePush(Data);
+    push(Result);
+  }
+
+  Bytes readBytes(uint8_t Count) {
+    if (PC + Count > Module.CodeSize) {
+      throw getError(common::ErrorCode::UnexpectedEnd);
+    }
+    Bytes Result(Module.Code + PC, Module.Code + PC + Count);
+    PC += Count;
+    return Result;
+  }
+
+  void handleDup(uint8_t Index) {
+    Operand Result = Builder.handleDup(Index);
+    push(Result);
+  }
+
+  void handleSwap(uint8_t Index) { Builder.handleSwap(Index); }
+
   IRBuilder &Builder;
   CompilerContext *Ctx;
-  EVMEvalStack Stack;
+  EvalStack Stack;
   uint64_t PC = 0;
 };
 
 } // namespace COMPILER
+
+#endif // ZEN_ACTION_EVM_BYTECODE_VISITOR_H
