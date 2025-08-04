@@ -69,11 +69,11 @@ protected:
 public:
   void execute() {
     uint64_t GasCost = static_cast<Derived *>(this)->calculateGas();
-    if ((uint64_t)getFrame()->GasLeft < GasCost) {
+    if ((uint64_t)getFrame()->Msg->gas < GasCost) {
       getContext()->setStatus(EVMC_OUT_OF_GAS);
       return;
     }
-    getFrame()->GasLeft -= GasCost;
+    getFrame()->Msg->gas -= GasCost;
     static_cast<Derived *>(this)->doExecute();
   };
 };

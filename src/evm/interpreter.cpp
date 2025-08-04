@@ -20,8 +20,6 @@ EVMFrame *InterpreterExecContext::allocFrame(
   FrameStack.emplace_back();
 
   EVMFrame &Frame = FrameStack.back();
-  Frame.GasLimit = GasLimit;
-  Frame.GasLeft = GasLimit;
 
   Frame.Msg = std::make_unique<evmc_message>();
   Frame.Msg->kind = Kind;
@@ -41,8 +39,6 @@ EVMFrame *InterpreterExecContext::allocFrame(evmc_message *Msg) {
   FrameStack.emplace_back();
 
   EVMFrame &Frame = FrameStack.back();
-  Frame.GasLimit = Msg->gas;
-  Frame.GasLeft = Msg->gas;
 
   Frame.Msg = std::make_unique<evmc_message>(*Msg);
 
@@ -520,7 +516,7 @@ void BaseInterpreter::interpret() {
       case EVMC_STATIC_MODE_VIOLATION:
       case EVMC_INSUFFICIENT_BALANCE:
         // Fatal errors: consume all remaining gas and clear return data
-        Frame->GasLeft = 0;
+        Frame->Msg->gas = 0;
         Frame->GasRefund = 0;
         Context.setReturnData(std::vector<uint8_t>());
         break;
@@ -528,7 +524,7 @@ void BaseInterpreter::interpret() {
       case EVMC_FAILURE:
       default:
         // Generic failure: consume all remaining gas and clear return data
-        Frame->GasLeft = 0;
+        Frame->Msg->gas = 0;
         Frame->GasRefund = 0;
         Context.setReturnData(std::vector<uint8_t>());
       }
