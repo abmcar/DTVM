@@ -832,7 +832,7 @@ void MSizeHandler::doExecute() {
 void GasLimitHandler::doExecute() {
   auto *Frame = getFrame();
   EVM_FRAME_CHECK(Frame);
-  Frame->push(intx::uint256(Frame->Msg->gas));
+  Frame->push(intx::uint256(Frame->getTxContext().block_gas_limit));
 }
 
 // Return operations
