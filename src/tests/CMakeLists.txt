@@ -96,6 +96,11 @@ if(ZEN_ENABLE_SPEC_TEST)
         PUBLIC ${GTEST_BOTH_LIBRARIES}
       )
       target_link_libraries(
+        solidityContractTests
+        PRIVATE dtvmcore rapidjson gtest_main -fsanitize=address
+        PUBLIC ${GTEST_BOTH_LIBRARIES}
+      )
+      target_link_libraries(
         evmStateTests
         PRIVATE dtvmcore rapidjson gtest_main -fsanitize=address
         PUBLIC ${GTEST_BOTH_LIBRARIES}
@@ -116,6 +121,11 @@ if(ZEN_ENABLE_SPEC_TEST)
       )
       target_link_libraries(
         evmInterpTests
+        PRIVATE dtvmcore rapidjson gtest_main -fsanitize=address -static-libasan
+        PUBLIC ${GTEST_BOTH_LIBRARIES}
+      )
+      target_link_libraries(
+        solidityContractTests
         PRIVATE dtvmcore rapidjson gtest_main -fsanitize=address -static-libasan
         PUBLIC ${GTEST_BOTH_LIBRARIES}
       )
@@ -147,6 +157,11 @@ if(ZEN_ENABLE_SPEC_TEST)
     )
     target_link_libraries(
       evmInterpTests
+      PRIVATE dtvmcore rapidjson gtest_main
+      PUBLIC ${GTEST_BOTH_LIBRARIES}
+    )
+    target_link_libraries(
+      solidityContractTests
       PRIVATE dtvmcore rapidjson gtest_main
       PUBLIC ${GTEST_BOTH_LIBRARIES}
     )
