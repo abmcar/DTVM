@@ -650,10 +650,10 @@ void SLoadHandler::doExecute() {
   intx::uint256 Key = Frame->pop();
   const auto KeyAddr = intx::be::store<evmc::bytes32>(Key);
   if (Frame->Rev >= EVMC_BERLIN &&
-      Frame->Host->access_account(Frame->Msg->recipient) == EVMC_ACCESS_COLD) {
-    EVM_REQUIRE(Frame->Msg->gas >= ADDITIONAL_COLD_ACCOUNT_ACCESS_COST,
+      Frame->Host->access_storage(Frame->Msg->recipient, KeyAddr) == EVMC_ACCESS_COLD) {
+    EVM_REQUIRE(Frame->Msg->gas >= COLD_SLOAD_COST,
                 EVMOutOfGas);
-    Frame->Msg->gas -= ADDITIONAL_COLD_ACCOUNT_ACCESS_COST;
+    Frame->Msg->gas -= COLD_SLOAD_COST;
   }
   intx::uint256 Value = intx::be::load<intx::uint256>(
       Frame->Host->get_storage(Frame->Msg->recipient, KeyAddr));
@@ -670,7 +670,7 @@ void SStoreHandler::doExecute() {
 
   const auto GasCostCold =
       (Frame->Rev >= EVMC_BERLIN &&
-       Frame->Host->access_account(Frame->Msg->recipient) == EVMC_ACCESS_COLD)
+       Frame->Host->access_storage(Frame->Msg->recipient, Key) == EVMC_ACCESS_COLD)
           ? COLD_SLOAD_COST
           : 0;
   const auto Status =
