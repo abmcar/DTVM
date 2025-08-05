@@ -56,6 +56,7 @@ if(ZEN_ENABLE_SPEC_TEST)
   add_executable(cAPITests c_api_tests.cpp)
   add_executable(evmInterpTests evm_interp_tests.cpp)
   add_executable(solidityContractTests solidity_contract_tests.cpp)
+  add_executable(evmStateTests evm_state_tests.cpp evm_test_utils.cpp)
 
   target_link_libraries(
     specUnitTests
@@ -92,6 +93,11 @@ if(ZEN_ENABLE_SPEC_TEST)
         PRIVATE dtvmcore rapidjson gtest_main -fsanitize=address
         PUBLIC ${GTEST_BOTH_LIBRARIES}
       )
+      target_link_libraries(
+        evmStateTests
+        PRIVATE dtvmcore rapidjson gtest_main -fsanitize=address
+        PUBLIC ${GTEST_BOTH_LIBRARIES}
+      )
     else()
       target_link_libraries(
         mempoolTests
@@ -110,6 +116,11 @@ if(ZEN_ENABLE_SPEC_TEST)
       )
       target_link_libraries(
         solidityContractTests
+        PRIVATE dtvmcore rapidjson gtest_main -fsanitize=address -static-libasan
+        PUBLIC ${GTEST_BOTH_LIBRARIES}
+      )
+      target_link_libraries(
+        evmStateTests
         PRIVATE dtvmcore rapidjson gtest_main -fsanitize=address -static-libasan
         PUBLIC ${GTEST_BOTH_LIBRARIES}
       )
@@ -135,6 +146,11 @@ if(ZEN_ENABLE_SPEC_TEST)
       PRIVATE dtvmcore rapidjson gtest_main
       PUBLIC ${GTEST_BOTH_LIBRARIES}
     )
+    target_link_libraries(
+      evmStateTests
+      PRIVATE dtvmcore rapidjson gtest_main
+      PUBLIC ${GTEST_BOTH_LIBRARIES}
+    )
   endif()
 
   add_dependencies(specUnitTests spec_jsons)
@@ -148,4 +164,5 @@ if(ZEN_ENABLE_SPEC_TEST)
   add_test(NAME cAPITests COMMAND cAPITests)
   add_test(NAME evmInterpTests COMMAND evmInterpTests)
   add_test(NAME solidityContractTests COMMAND solidityContractTests)
+  add_test(NAME evmStateTests COMMAND evmStateTests)
 endif()
