@@ -97,20 +97,9 @@ public:
 
   runtime::EVMInstance *getInstance() { return Inst; }
 
-  void setMessage(evmc_message &Msg) {
-    if (FrameStack.empty()) {
-      throw getError(common::ErrorCode::EVMStackUnderflow);
-    }
-    FrameStack.back().Msg = std::make_unique<evmc_message>(Msg);
-  }
-  void setCallData(const std::vector<uint8_t> &Data) {
-    if (FrameStack.empty()) {
-      throw getError(common::ErrorCode::EVMStackUnderflow);
-    }
-    FrameStack.back().CallData = Data;
-    FrameStack.back().Msg->input_data = FrameStack.back().CallData.data();
-    FrameStack.back().Msg->input_size = FrameStack.back().CallData.size();
-  }
+  void setMessage(evmc_message &Msg);
+  void setCallData(const std::vector<uint8_t> &Data);
+  void setTxContext(const evmc_tx_context &TxContext);
 
   evmc_status_code getStatus() const { return Status; }
   void setStatus(evmc_status_code Status) { this->Status = Status; }
