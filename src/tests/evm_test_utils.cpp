@@ -6,6 +6,7 @@
 #include "runtime/runtime.h"
 #include "utils/others.h"
 #include <algorithm>
+#include <evmc/hex.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -426,14 +427,99 @@ createTransactionFromIndex(const rapidjson::Document &Transaction,
   return PT;
 }
 
+namespace {
+
+std::vector<uint8_t> rlpEncodeLength(size_t Length, uint8_t Offset) {
+  std::vector<uint8_t> Result;
+  if (Length < 56) {
+    Result.push_back(static_cast<uint8_t>(Offset + Length));
+  } else {
+    std::vector<uint8_t> LengthBytes;
+    size_t TempLength = Length;
+    while (TempLength > 0) {
+      LengthBytes.push_back(static_cast<uint8_t>(TempLength & 0xFF));
+      TempLength >>= 8;
+    }
+    std::reverse(LengthBytes.begin(), LengthBytes.end());
+    Result.push_back(static_cast<uint8_t>(Offset + 55 + LengthBytes.size()));
+    Result.insert(Result.end(), LengthBytes.begin(), LengthBytes.end());
+  }
+  return Result;
+}
+
+std::vector<uint8_t> rlpEncodeBytes(const std::vector<uint8_t> &Data) {
+  if (Data.size() == 1 && Data[0] < 0x80) {
+    return Data;
+  }
+  auto Header = rlpEncodeLength(Data.size(), 0x80);
+  Header.insert(Header.end(), Data.begin(), Data.end());
+  return Header;
+}
+
+std::vector<uint8_t>
+rlpEncodeList(const std::vector<std::vector<uint8_t>> &Items) {
+  std::vector<uint8_t> EncodedData;
+  for (const auto &Item : Items) {
+    EncodedData.insert(EncodedData.end(), Item.begin(), Item.end());
+  }
+  auto Header = rlpEncodeLength(EncodedData.size(), 0xc0);
+  Header.insert(Header.end(), EncodedData.begin(), EncodedData.end());
+  return Header;
+}
+
+std::string
+calculateLogsHashImpl(const std::vector<evmc::MockedHost::log_record> &Logs) {
+  std::vector<std::vector<uint8_t>> EncodedLogs;
+
+  for (const auto &Log : Logs) {
+    std::vector<std::vector<uint8_t>> LogComponents;
+
+    // Address (20 bytes)
+    std::vector<uint8_t> AddressBytes(Log.creator.bytes,
+                                      Log.creator.bytes + 20);
+    LogComponents.push_back(rlpEncodeBytes(AddressBytes));
+
+    // Topics
+    std::vector<std::vector<uint8_t>> TopicsEncoded;
+    for (const auto &Topic : Log.topics) {
+      std::vector<uint8_t> TopicBytes(Topic.bytes, Topic.bytes + 32);
+      TopicsEncoded.push_back(rlpEncodeBytes(TopicBytes));
+    }
+    LogComponents.push_back(rlpEncodeList(TopicsEncoded));
+
+    // Data
+    std::vector<uint8_t> DataBytes(Log.data.begin(), Log.data.end());
+    LogComponents.push_back(rlpEncodeBytes(DataBytes));
+
+    // Encode the complete log entry
+    EncodedLogs.push_back(rlpEncodeList(LogComponents));
+  }
+
+  // Encode the list of logs
+  auto RlpEncodedLogs = rlpEncodeList(EncodedLogs);
+
+  // Calculate Keccak-256 hash
+  auto Hash = zen::host::evm::crypto::keccak256(RlpEncodedLogs);
+
+  // Convert to hex string
+  evmc::bytes_view HashView(
+      reinterpret_cast<const unsigned char *>(Hash.data()), Hash.size());
+  return evmc::hex(HashView);
+}
+
+} // anonymous namespace
+
+std::string
+calculateLogsHash(const std::vector<evmc::MockedHost::log_record> &Logs) {
+  return calculateLogsHashImpl(Logs);
+}
+
 bool verifyLogsHash(const std::vector<evmc::MockedHost::log_record> &Logs,
                     const std::string &ExpectedHash) {
-  // TODO
-  // std::string ActualHash = calculateLogsHash(Logs);
-  // std::cout << "ActualHash: " << ActualHash << std::endl;
+  std::string CalculatedHash = "0x" + calculateLogsHash(Logs);
+  // std::cout << "CalculatedHash: " << CalculatedHash << std::endl;
   // std::cout << "ExpectedHash: " << ExpectedHash << std::endl;
-  // return toLowerHex(ActualHash) == toLowerHex(ExpectedHash);
-  return true;
+  return CalculatedHash == ExpectedHash;
 }
 
 bool verifyStateRoot(evmc::MockedHost &Host, const std::string &ExpectedHash) {
