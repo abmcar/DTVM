@@ -41,3 +41,8 @@ bazel-testlogs
 
 # fuzzer
 /wtf
+
+# nodejs
+node_modules/
+package-lock.json
+package.json
