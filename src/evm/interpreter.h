@@ -98,12 +98,14 @@ public:
 
   runtime::EVMInstance *getInstance() { return Inst; }
 
+
   uint64_t getGasUsed() const { return GasUsed; }
 
   void setMessage(evmc_message &Msg);
   void setCallData(const std::vector<uint8_t> &Data);
   void setTxContext(const evmc_tx_context &TxContext);
   void setResource();
+
 
   evmc_status_code getStatus() const { return Status; }
   void setStatus(evmc_status_code Status) { this->Status = Status; }

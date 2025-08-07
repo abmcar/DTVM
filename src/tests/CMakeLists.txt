@@ -59,6 +59,7 @@ if(ZEN_ENABLE_SPEC_TEST)
   add_executable(evmStateTests evm_state_tests.cpp evm_test_utils.cpp)
   add_executable(mptCompareCpp mpt_compare_cpp.cpp)
 
+
   target_link_libraries(
     specUnitTests
     PRIVATE dtvmcore rapidjson gtest_main CLI11::CLI11
@@ -74,6 +75,7 @@ if(ZEN_ENABLE_SPEC_TEST)
     target_compile_options(evmInterpTests PRIVATE -fsanitize=address)
     target_compile_options(solidityContractTests PRIVATE -fsanitize=address)
     target_compile_options(mptCompareCpp PRIVATE -fsanitize=address)
+
     if(ZEN_BUILD_PLATFORM_DARWIN)
       target_link_libraries(
         mempoolTests
@@ -135,11 +137,6 @@ if(ZEN_ENABLE_SPEC_TEST)
         PUBLIC ${GTEST_BOTH_LIBRARIES}
       )
       target_link_libraries(
-        solidityContractTests
-        PRIVATE dtvmcore rapidjson gtest_main -fsanitize=address -static-libasan
-        PUBLIC ${GTEST_BOTH_LIBRARIES}
-      )
-      target_link_libraries(
         evmStateTests
         PRIVATE dtvmcore rapidjson gtest_main -fsanitize=address -static-libasan
         PUBLIC ${GTEST_BOTH_LIBRARIES}
@@ -163,11 +160,6 @@ if(ZEN_ENABLE_SPEC_TEST)
     target_link_libraries(
       evmInterpTests
       PRIVATE dtvmcore rapidjson yaml-cpp gtest_main
-      PUBLIC ${GTEST_BOTH_LIBRARIES}
-    )
-    target_link_libraries(
-      solidityContractTests
-      PRIVATE dtvmcore rapidjson gtest_main
       PUBLIC ${GTEST_BOTH_LIBRARIES}
     )
     target_link_libraries(

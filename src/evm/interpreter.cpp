@@ -95,9 +95,11 @@ void BaseInterpreter::interpret() {
   size_t CodeSize = Mod->CodeSize;
   uint8_t *Code = Mod->Code;
 
+
   if (!Frame->Host) {
     Frame->Host = Context.getInstance()->getRuntime()->getEVMHost();
   }
+
 
   while (Frame->Pc < CodeSize) {
     uint8_t OpcodeByte = Code[Frame->Pc];
@@ -458,6 +460,21 @@ void BaseInterpreter::interpret() {
       break;
     }
 
+    case OP_TLOAD: {
+      EVMOpcodeHandlerRegistry::getTLoadHandler().execute();
+      break;
+    }
+
+    case OP_TSTORE: {
+      EVMOpcodeHandlerRegistry::getTStoreHandler().execute();
+      break;
+    }
+
+    case OP_MCOPY: {
+      EVMOpcodeHandlerRegistry::getMCopyHandler().execute();
+      break;
+    }
+
     case evmc_opcode::OP_LOG0:
     case evmc_opcode::OP_LOG1:
     case evmc_opcode::OP_LOG2:
@@ -502,6 +519,7 @@ void BaseInterpreter::interpret() {
 
     case evmc_opcode::OP_PUSH0: { // PUSH0 (EIP-3855)
       Frame->Msg->gas -= 2;
+
       Frame->push(0);
       break;
     }
