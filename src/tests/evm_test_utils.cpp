@@ -243,6 +243,13 @@ std::vector<StateTestFixture> parseStateTestFile(const std::string &FilePath) {
       Fixture.Transaction = std::make_unique<rapidjson::Document>();
       Fixture.Transaction->CopyFrom(TestCase["transaction"],
                                     Fixture.Transaction->GetAllocator());
+      
+      // Parse gasPrice from transaction and set it in tx_context
+      const rapidjson::Value &Transaction = TestCase["transaction"];
+      if (Transaction.HasMember("gasPrice") && Transaction["gasPrice"].IsString()) {
+        Fixture.Environment.tx_gas_price = 
+            parseUint256(Transaction["gasPrice"].GetString());
+      }
     }
 
     if (TestCase.HasMember("post")) {
