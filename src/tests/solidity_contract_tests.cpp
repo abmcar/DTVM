@@ -24,17 +24,6 @@ using namespace zen::runtime;
 namespace {
 bool Debug = false;
 
-// Deprecated: Use test_utils::TempHexFile instead
-std::string createTempHexFile(const std::string &BasePath,
-                              const std::string &Suffix,
-                              const std::string &Content) {
-  std::string TempPath = BasePath + "/" + Suffix + ".hex";
-  std::ofstream TempFile(TempPath);
-  TempFile << Content;
-  TempFile.close();
-  return TempPath;
-}
-
 std::string toLowerHex(const std::string &Hex) {
   std::string Result = Hex;
   for (char &C : Result) {

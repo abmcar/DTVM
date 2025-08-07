@@ -19,6 +19,7 @@
 namespace zen {
 namespace test_utils {
 
+namespace {
 static std::string stripHexPrefix(const std::string &HexStr) {
   if (HexStr.size() >= 2 &&
       (HexStr.substr(0, 2) == "0x" || HexStr.substr(0, 2) == "0X")) {
@@ -26,6 +27,7 @@ static std::string stripHexPrefix(const std::string &HexStr) {
   }
   return HexStr;
 }
+} // namespace
 
 evmc::address parseAddress(const std::string &HexAddr) {
   auto Data = zen::utils::fromHex(HexAddr);
@@ -135,105 +137,9 @@ std::vector<ParsedAccount> parsePreAccounts(const rapidjson::Value &Pre) {
   return Accounts;
 }
 
-ParsedTransaction parseEnvAndTransaction(const rapidjson::Value &Env,
-                                         const rapidjson::Value &Transaction) {
-  ParsedTransaction PT;
-  PT.TxContext = {};
-
-  if (Env.HasMember("currentCoinbase") && Env["currentCoinbase"].IsString()) {
-    PT.TxContext.block_coinbase =
-        parseAddress(Env["currentCoinbase"].GetString());
-  }
-
-  if (Env.HasMember("currentNumber") && Env["currentNumber"].IsString()) {
-    std::string NumStr = stripHexPrefix(Env["currentNumber"].GetString());
-    PT.TxContext.block_number =
-        static_cast<int64_t>(std::stoull(NumStr, nullptr, 16));
-  }
-
-  if (Env.HasMember("currentTimestamp") && Env["currentTimestamp"].IsString()) {
-    std::string TimestampStr =
-        stripHexPrefix(Env["currentTimestamp"].GetString());
-    PT.TxContext.block_timestamp =
-        static_cast<int64_t>(std::stoull(TimestampStr, nullptr, 16));
-  }
-
-  if (Env.HasMember("currentGasLimit") && Env["currentGasLimit"].IsString()) {
-    std::string GasLimitStr =
-        stripHexPrefix(Env["currentGasLimit"].GetString());
-    PT.TxContext.block_gas_limit =
-        static_cast<int64_t>(std::stoull(GasLimitStr, nullptr, 16));
-  }
-
-  if (Env.HasMember("currentBaseFee") && Env["currentBaseFee"].IsString()) {
-    PT.TxContext.block_base_fee =
-        parseUint256(Env["currentBaseFee"].GetString());
-  }
-
-  if (Env.HasMember("currentRandom") && Env["currentRandom"].IsString()) {
-    PT.TxContext.block_prev_randao =
-        parseBytes32(Env["currentRandom"].GetString());
-  }
-
-  PT.Message = std::make_unique<evmc_message>();
-  PT.Message->kind = EVMC_CALL;
-  PT.Message->flags = 0;
-  PT.Message->depth = 0;
-
-  if (Transaction.HasMember("sender") && Transaction["sender"].IsString()) {
-    PT.Message->sender = parseAddress(Transaction["sender"].GetString());
-  }
-
-  if (Transaction.HasMember("to") && Transaction["to"].IsString()) {
-    PT.Message->recipient = parseAddress(Transaction["to"].GetString());
-  }
-
-  if (Transaction.HasMember("gasLimit")) {
-    if (Transaction["gasLimit"].IsArray() &&
-        Transaction["gasLimit"].Size() > 0) {
-      std::string GasStr =
-          stripHexPrefix(Transaction["gasLimit"][0].GetString());
-      PT.Message->gas = static_cast<int64_t>(std::stoull(GasStr, nullptr, 16));
-    } else if (Transaction["gasLimit"].IsString()) {
-      std::string GasStr = stripHexPrefix(Transaction["gasLimit"].GetString());
-      PT.Message->gas = static_cast<int64_t>(std::stoull(GasStr, nullptr, 16));
-    }
-  }
-
-  if (Transaction.HasMember("value")) {
-    if (Transaction["value"].IsArray() && Transaction["value"].Size() > 0) {
-      PT.Message->value = parseUint256(Transaction["value"][0].GetString());
-    } else if (Transaction["value"].IsString()) {
-      PT.Message->value = parseUint256(Transaction["value"].GetString());
-    }
-  }
-
-  if (Transaction.HasMember("data")) {
-    if (Transaction["data"].IsArray() && Transaction["data"].Size() > 0) {
-      PT.CallData = parseHexData(Transaction["data"][0].GetString());
-    } else if (Transaction["data"].IsString()) {
-      PT.CallData = parseHexData(Transaction["data"].GetString());
-    }
-  }
-
-  PT.Message->input_data = PT.CallData.data();
-  PT.Message->input_size = PT.CallData.size();
-
-  return PT;
-}
-
 void addAccountToMockedHost(evmc::MockedHost &Host, const evmc::address &Addr,
                             const evmc::MockedAccount &Account) {
   Host.accounts[Addr] = Account;
-}
-
-void populateFrameWithMockedHost(evm::EVMFrame &Frame, evmc::MockedHost &Host,
-                                 const std::vector<ParsedAccount> &Accounts) {
-  for (const auto &PA : Accounts) {
-    addAccountToMockedHost(Host, PA.Address, PA.Account);
-  }
-
-  Frame.Host = &Host;
 }
 
 std::vector<std::string> findJsonFiles(const std::string &RootPath) {

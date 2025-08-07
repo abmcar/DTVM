@@ -154,7 +154,7 @@ bool executeStateTest(const test_utils::StateTestFixture &Fixture,
         std::cout << "No target account found for test: " << Fixture.TestName
                   << std::endl;
       }
-      return ExpectedResult.ExpectedException.empty() ? false : true;
+      return !ExpectedResult.ExpectedException.empty();
     }
 
     // Skip if no code to execute

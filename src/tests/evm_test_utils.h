@@ -137,14 +137,8 @@ struct ForkPostResult {
 
 std::vector<ParsedAccount> parsePreAccounts(const rapidjson::Value &Pre);
 
-ParsedTransaction parseEnvAndTransaction(const rapidjson::Value &Env,
-                                         const rapidjson::Value &Transaction);
-
 void addAccountToMockedHost(evmc::MockedHost &Host, const evmc::address &Addr,
                             const evmc::MockedAccount &Account);
-
-void populateFrameWithMockedHost(evm::EVMFrame &Frame, evmc::MockedHost &Host,
-                                 const std::vector<ParsedAccount> &Accounts);
 
 evmc::address parseAddress(const std::string &HexAddr);
 evmc::bytes32 parseBytes32(const std::string &HexStr);
