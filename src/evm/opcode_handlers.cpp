@@ -711,7 +711,8 @@ void SLoadHandler::doExecute() {
   intx::uint256 Key = Frame->pop();
   const auto KeyAddr = intx::be::store<evmc::bytes32>(Key);
   if (Frame->Rev >= EVMC_BERLIN &&
-      Frame->Host->access_account(Frame->Msg->recipient) == EVMC_ACCESS_COLD) {
+      Frame->Host->access_storage(Frame->Msg->recipient, KeyAddr) ==
+          EVMC_ACCESS_COLD) {
     if (Frame->Msg->gas < ADDITIONAL_COLD_ACCOUNT_ACCESS_COST) {
       Context->setStatus(EVMC_OUT_OF_GAS);
       return;
