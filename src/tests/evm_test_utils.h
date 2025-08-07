@@ -6,6 +6,7 @@
 
 #include "evm/interpreter.h"
 #include "evmc/mocked_host.hpp"
+
 #include <filesystem>
 #include <fstream>
 #include <memory>

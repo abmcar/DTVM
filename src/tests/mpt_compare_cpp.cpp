@@ -3,6 +3,7 @@
 
 #include "evm/merkle_patricia_trie.h"
 #include "host/evm/crypto.h"
+
 #include <evmc/evmc.h>
 #include <evmc/hex.hpp>
 #include <fstream>

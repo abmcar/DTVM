@@ -6,15 +6,14 @@
 #include "host/evm/crypto.h"
 #include "runtime/runtime.h"
 #include "utils/others.h"
+
 #include <algorithm>
 #include <evmc/hex.hpp>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <rapidjson/document.h>
 #include <rapidjson/istreamwrapper.h>
-#include <sstream>
 #include <stdexcept>
 
 namespace zen {

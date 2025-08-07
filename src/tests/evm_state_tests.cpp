@@ -7,16 +7,16 @@
 #include "runtime/runtime.h"
 #include "utils/others.h"
 #include "zetaengine.h"
+
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <evmc/evmc.hpp>
 #include <evmc/mocked_host.hpp>
 #include <filesystem>
-#include <fstream>
-#include <gtest/gtest.h>
 #include <iostream>
 #include <rapidjson/document.h>
-#include <sstream>
 
 using namespace zen;
 using namespace zen::evm;
