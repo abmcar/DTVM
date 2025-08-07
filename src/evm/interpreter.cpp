@@ -368,6 +368,16 @@ void BaseInterpreter::interpret() {
       break;
     }
 
+    case OP_BLOBHASH: {
+      EVMOpcodeHandlerRegistry::getBlobHashHandler().execute();
+      break;
+    }
+
+    case OP_BLOBBASEFEE: {
+      EVMOpcodeHandlerRegistry::getBlobBaseFeeHandler().execute();
+      break;
+    }
+
     case evmc_opcode::OP_POP: {
       EVM_STACK_CHECK(Frame, 1);
       Frame->pop();
@@ -430,6 +440,21 @@ void BaseInterpreter::interpret() {
 
     case evmc_opcode::OP_JUMPDEST: {
       Frame->Msg->gas -= 1;
+      break;
+    }
+
+    case OP_TLOAD: {
+      EVMOpcodeHandlerRegistry::getTLoadHandler().execute();
+      break;
+    }
+
+    case OP_TSTORE: {
+      EVMOpcodeHandlerRegistry::getTStoreHandler().execute();
+      break;
+    }
+
+    case OP_MCOPY: {
+      EVMOpcodeHandlerRegistry::getMCopyHandler().execute();
       break;
     }
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "evmc/evmc.hpp"
+#include "evmc/instructions.h"
 
 namespace zen {
 namespace evm {
@@ -22,6 +23,13 @@ constexpr auto ACCOUNT_CREATION_COST = 25000;
 constexpr auto CALL_GAS_STIPEND = 2300;
 
 constexpr auto MAX_SIZE_OF_INITCODE = 0xC000;
+
+// evmc missing-opcode
+constexpr evmc_opcode OP_BLOBHASH = static_cast<evmc_opcode>(0x49);
+constexpr evmc_opcode OP_BLOBBASEFEE = static_cast<evmc_opcode>(0x4a);
+constexpr evmc_opcode OP_TLOAD = static_cast<evmc_opcode>(0x5c);
+constexpr evmc_opcode OP_TSTORE = static_cast<evmc_opcode>(0x5d);
+constexpr evmc_opcode OP_MCOPY = static_cast<evmc_opcode>(0x5e);
 
 } // namespace evm
 } // namespace zen
