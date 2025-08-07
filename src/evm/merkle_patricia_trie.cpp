@@ -11,9 +11,7 @@ namespace zen::evm {
 
 // RLP encoding constants
 const uint8_t RLP_OFFSET_SHORT_STRING = 0x80;
-const uint8_t RLP_OFFSET_LONG_STRING = 0xb7;
 const uint8_t RLP_OFFSET_SHORT_LIST = 0xc0;
-const uint8_t RLP_OFFSET_LONG_LIST = 0xf7;
 
 // Empty node hash (Keccak256 of empty string)
 static const std::vector<uint8_t> EMPTY_NODE_HASH = {
