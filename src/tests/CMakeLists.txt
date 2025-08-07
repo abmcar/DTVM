@@ -101,8 +101,7 @@ if(ZEN_ENABLE_SPEC_TEST)
         PUBLIC ${GTEST_BOTH_LIBRARIES}
       )
       target_link_libraries(
-        mptCompareCpp
-        PRIVATE dtvmcore rapidjson -fsanitize=address
+        mptCompareCpp PRIVATE dtvmcore rapidjson -fsanitize=address
       )
     else()
       target_link_libraries(
@@ -131,8 +130,8 @@ if(ZEN_ENABLE_SPEC_TEST)
         PUBLIC ${GTEST_BOTH_LIBRARIES}
       )
       target_link_libraries(
-        mptCompareCpp
-        PRIVATE dtvmcore rapidjson -fsanitize=address -static-libasan
+        mptCompareCpp PRIVATE dtvmcore rapidjson -fsanitize=address
+                              -static-libasan
       )
     endif()
   else()
@@ -161,10 +160,7 @@ if(ZEN_ENABLE_SPEC_TEST)
       PRIVATE dtvmcore rapidjson gtest_main
       PUBLIC ${GTEST_BOTH_LIBRARIES}
     )
-    target_link_libraries(
-      mptCompareCpp
-      PRIVATE dtvmcore rapidjson
-    )
+    target_link_libraries(mptCompareCpp PRIVATE dtvmcore rapidjson)
   endif()
 
   add_dependencies(specUnitTests spec_jsons)
