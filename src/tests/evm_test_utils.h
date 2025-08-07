@@ -7,13 +7,94 @@
 #include "evm/interpreter.h"
 #include "evmc/mocked_host.hpp"
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <rapidjson/document.h>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace zen {
 namespace test_utils {
+
+// RAII class for temporary hex files
+class TempHexFile {
+private:
+  std::string FilePath;
+  bool Valid = false;
+
+public:
+  explicit TempHexFile(const std::string &HexCode) {
+    if (HexCode.empty() || HexCode == "0x") {
+      return;
+    }
+
+    FilePath = std::tmpnam(nullptr);
+    FilePath += ".hex";
+
+    std::string CleanHex = HexCode;
+    if (CleanHex.size() >= 2 && CleanHex.substr(0, 2) == "0x") {
+      CleanHex = CleanHex.substr(2);
+    }
+
+    std::ofstream File(FilePath);
+    if (!File) {
+      throw std::runtime_error("Failed to create temp file: " + FilePath);
+    }
+    File << CleanHex;
+    File.close();
+    Valid = true;
+  }
+
+  // Constructor for custom path and suffix
+  TempHexFile(const std::string &BasePath, const std::string &Suffix,
+              const std::string &Content) {
+    if (Content.empty()) {
+      return;
+    }
+
+    FilePath = BasePath + "/" + Suffix + ".hex";
+
+    std::ofstream File(FilePath);
+    if (!File) {
+      throw std::runtime_error("Failed to create temp file: " + FilePath);
+    }
+    File << Content;
+    File.close();
+    Valid = true;
+  }
+
+  ~TempHexFile() {
+    if (Valid && !FilePath.empty()) {
+      std::filesystem::remove(FilePath);
+    }
+  }
+
+  // Delete copy constructor and assignment operator
+  TempHexFile(const TempHexFile &) = delete;
+  TempHexFile &operator=(const TempHexFile &) = delete;
+
+  // Allow move semantics
+  TempHexFile(TempHexFile &&Other) noexcept
+      : FilePath(std::move(Other.FilePath)), Valid(Other.Valid) {
+    Other.Valid = false;
+  }
+
+  TempHexFile &operator=(TempHexFile &&Other) noexcept {
+    if (this != &Other) {
+      if (Valid && !FilePath.empty()) {
+        std::filesystem::remove(FilePath);
+      }
+      FilePath = std::move(Other.FilePath);
+      Valid = Other.Valid;
+      Other.Valid = false;
+    }
+    return *this;
+  }
+
+  bool isValid() const { return Valid; }
+  const std::string &getPath() const { return FilePath; }
+};
 
 struct ParsedAccount {
   evmc::address Address;

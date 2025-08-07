@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "evm_test_utils.h"
+#include "evm/merkle_patricia_trie.h"
 #include "host/evm/crypto.h"
 #include "runtime/runtime.h"
 #include "utils/others.h"
@@ -106,6 +107,17 @@ std::vector<ParsedAccount> parsePreAccounts(const rapidjson::Value &Pre) {
     if (AccountData.HasMember("code") && AccountData["code"].IsString()) {
       auto CodeData = parseHexData(AccountData["code"].GetString());
       PA.Account.code.assign(CodeData.begin(), CodeData.end());
+
+      // Calculate and set code hash
+      auto CodeHashBytes = zen::host::evm::crypto::keccak256(CodeData);
+      std::memcpy(PA.Account.codehash.bytes, CodeHashBytes.data(), 32);
+    } else {
+      // For accounts without code, set the empty code hash
+      // EMPTY_CODE_HASH = keccak256("") =
+      // 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+      std::vector<uint8_t> EmptyCode;
+      auto EmptyCodeHash = zen::host::evm::crypto::keccak256(EmptyCode);
+      std::memcpy(PA.Account.codehash.bytes, EmptyCodeHash.data(), 32);
     }
 
     if (AccountData.HasMember("storage") && AccountData["storage"].IsObject()) {
@@ -522,9 +534,168 @@ bool verifyLogsHash(const std::vector<evmc::MockedHost::log_record> &Logs,
   return CalculatedHash == ExpectedHash;
 }
 
+namespace {
+
+// RLP encoding helper functions for state root calculation
+std::vector<uint8_t> encodeRLPLength(size_t Length, uint8_t Offset) {
+  std::vector<uint8_t> Result;
+
+  if (Length < 56) {
+    Result.push_back(static_cast<uint8_t>(Length + Offset));
+  } else {
+    std::vector<uint8_t> LengthBytes;
+    size_t Temp = Length;
+    while (Temp > 0) {
+      LengthBytes.insert(LengthBytes.begin(),
+                         static_cast<uint8_t>(Temp & 0xFF));
+      Temp >>= 8;
+    }
+    Result.push_back(static_cast<uint8_t>(LengthBytes.size() + Offset + 55));
+    Result.insert(Result.end(), LengthBytes.begin(), LengthBytes.end());
+  }
+
+  return Result;
+}
+
+std::vector<uint8_t> encodeRLPString(const std::vector<uint8_t> &Input) {
+  if (Input.empty()) {
+    return {0x80}; // RLP encoding for empty string
+  }
+
+  if (Input.size() == 1 && Input[0] < 0x80) {
+    return Input;
+  }
+
+  auto LengthBytes = encodeRLPLength(Input.size(), 0x80);
+  LengthBytes.insert(LengthBytes.end(), Input.begin(), Input.end());
+  return LengthBytes;
+}
+
+std::vector<uint8_t>
+encodeRLPList(const std::vector<std::vector<uint8_t>> &Items) {
+  std::vector<uint8_t> Payload;
+  for (const auto &Item : Items) {
+    auto Encoded = encodeRLPString(Item);
+    Payload.insert(Payload.end(), Encoded.begin(), Encoded.end());
+  }
+
+  auto LengthBytes = encodeRLPLength(Payload.size(), 0xc0);
+  LengthBytes.insert(LengthBytes.end(), Payload.begin(), Payload.end());
+  return LengthBytes;
+}
+
+// Convert uint256be to minimal byte representation (remove leading zeros)
+std::vector<uint8_t> uint256beToBytes(const evmc::uint256be &Value) {
+  const auto *Data = Value.bytes;
+  size_t Start = 0;
+
+  // Find first non-zero byte
+  while (Start < sizeof(Value.bytes) && Data[Start] == 0) {
+    Start++;
+  }
+
+  if (Start == sizeof(Value.bytes)) {
+    return {}; // All zeros, return empty
+  }
+
+  return std::vector<uint8_t>(Data + Start, Data + sizeof(Value.bytes));
+}
+
+// Calculate storage root for an account
+std::vector<uint8_t> calculateStorageRoot(
+    const std::unordered_map<evmc::bytes32, evmc::StorageValue> &Storage) {
+  zen::evm::MerklePatriciaTrie StorageTrie;
+
+  for (const auto &[Key, StorageValue] : Storage) {
+    // Skip empty values (deleted storage slots)
+    bool IsEmpty = true;
+    for (int I = 0; I < 32; I++) {
+      if (StorageValue.current.bytes[I] != 0) {
+        IsEmpty = false;
+        break;
+      }
+    }
+    if (IsEmpty)
+      continue;
+
+    // Use key hash as trie key
+    auto KeyHash = zen::host::evm::crypto::keccak256(
+        std::vector<uint8_t>(Key.bytes, Key.bytes + sizeof(Key.bytes)));
+
+    // Convert storage value to minimal byte representation
+    auto ValueBytes = uint256beToBytes(StorageValue.current);
+    auto EncodedValue = encodeRLPString(ValueBytes);
+
+    StorageTrie.put(KeyHash, EncodedValue);
+  }
+
+  return StorageTrie.rootHash();
+}
+
+// Encode account for state trie
+std::vector<uint8_t> encodeAccount(const evmc::MockedAccount &Account) {
+  std::vector<std::vector<uint8_t>> AccountFields;
+
+  // 1. Nonce (as minimal bytes)
+  if (Account.nonce == 0) {
+    AccountFields.push_back({});
+  } else {
+    std::vector<uint8_t> NonceBytes;
+    int Nonce = Account.nonce;
+    while (Nonce > 0) {
+      NonceBytes.insert(NonceBytes.begin(), static_cast<uint8_t>(Nonce & 0xFF));
+      Nonce >>= 8;
+    }
+    AccountFields.push_back(NonceBytes);
+  }
+
+  // 2. Balance (as minimal bytes)
+  auto BalanceBytes = uint256beToBytes(Account.balance);
+  AccountFields.push_back(BalanceBytes);
+
+  // 3. Storage root
+  auto StorageRoot = calculateStorageRoot(Account.storage);
+  AccountFields.push_back(StorageRoot);
+
+  // 4. Code hash
+  std::vector<uint8_t> CodeHash(Account.codehash.bytes,
+                                Account.codehash.bytes +
+                                    sizeof(Account.codehash.bytes));
+  AccountFields.push_back(CodeHash);
+
+  return encodeRLPList(AccountFields);
+}
+
+} // anonymous namespace
+
 bool verifyStateRoot(evmc::MockedHost &Host, const std::string &ExpectedHash) {
-  // TODO
-  return true;
+  zen::evm::MerklePatriciaTrie StateTrie;
+
+  // Build state trie from all accounts
+  for (const auto &[Address, Account] : Host.accounts) {
+    // Calculate address hash (used as key in state trie)
+    auto AddressHash = zen::host::evm::crypto::keccak256(std::vector<uint8_t>(
+        Address.bytes, Address.bytes + sizeof(Address.bytes)));
+
+    // Encode account data
+    auto EncodedAccount = encodeAccount(Account);
+
+    // Add to state trie
+    StateTrie.put(AddressHash, EncodedAccount);
+  }
+
+  // Calculate state root hash
+  auto StateRoot = StateTrie.rootHash();
+
+  // Convert to hex string for comparison
+  evmc::bytes_view HashView(StateRoot.data(), StateRoot.size());
+  std::string CalculatedHash = "0x" + evmc::hex(HashView);
+
+  std::cout << "CalculatedHash: " << CalculatedHash << std::endl;
+  std::cout << "ExpectedHash: " << ExpectedHash << std::endl;
+
+  // Compare with expected hash
+  return CalculatedHash == ExpectedHash;
 }
 
 } // namespace test_utils
