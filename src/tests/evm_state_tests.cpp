@@ -101,9 +101,7 @@ public:
 
     } catch (const std::exception &E) {
       // On error, return parent result
-      if (Debug) {
-        std::cout << "Error in recursive call: " << E.what() << std::endl;
-      }
+      std::cout << "Error in recursive call: " << E.what() << std::endl;
       return ParentResult;
     }
   }
@@ -271,10 +269,8 @@ bool executeStateTest(const test_utils::StateTestFixture &Fixture,
       GasUsed += Ctx.getGasUsed();
     } catch (const std::exception &E) {
       ExecutionSucceeded = false;
-      if (Debug) {
-        std::cout << "Execution failed for " << Fixture.TestName << ": "
-                  << E.what() << std::endl;
-      }
+      std::cout << "Execution failed for " << Fixture.TestName << ": "
+                << E.what() << std::endl;
     }
 
     // 3. Deduct gas cost after execution (gas_used * gas_price)
@@ -355,10 +351,8 @@ bool executeStateTest(const test_utils::StateTestFixture &Fixture,
                                       ExpectedResult.ExpectedLogs);
 
   } catch (const std::exception &E) {
-    if (Debug) {
-      std::cout << "Exception in executeStateTest for " << Fixture.TestName
-                << ": " << E.what() << std::endl;
-    }
+    std::cout << "Exception in executeStateTest for " << Fixture.TestName
+              << ": " << E.what() << std::endl;
     return !ExpectedResult.ExpectedException.empty();
   }
 }

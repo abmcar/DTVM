@@ -243,11 +243,12 @@ std::vector<StateTestFixture> parseStateTestFile(const std::string &FilePath) {
       Fixture.Transaction = std::make_unique<rapidjson::Document>();
       Fixture.Transaction->CopyFrom(TestCase["transaction"],
                                     Fixture.Transaction->GetAllocator());
-      
+
       // Parse gasPrice from transaction and set it in tx_context
       const rapidjson::Value &Transaction = TestCase["transaction"];
-      if (Transaction.HasMember("gasPrice") && Transaction["gasPrice"].IsString()) {
-        Fixture.Environment.tx_gas_price = 
+      if (Transaction.HasMember("gasPrice") &&
+          Transaction["gasPrice"].IsString()) {
+        Fixture.Environment.tx_gas_price =
             parseUint256(Transaction["gasPrice"].GetString());
       }
     }
@@ -441,8 +442,10 @@ calculateLogsHash(const std::vector<evmc::MockedHost::log_record> &Logs) {
 bool verifyLogsHash(const std::vector<evmc::MockedHost::log_record> &Logs,
                     const std::string &ExpectedHash) {
   std::string CalculatedHash = "0x" + calculateLogsHash(Logs);
-  // std::cout << "CalculatedHash: " << CalculatedHash << std::endl;
-  // std::cout << "ExpectedHash: " << ExpectedHash << std::endl;
+  if (CalculatedHash != ExpectedHash) {
+    std::cout << "CalculatedLogsHash: " << CalculatedHash << std::endl;
+    std::cout << "ExpectedLogsHash: " << ExpectedHash << std::endl;
+  }
   return CalculatedHash == ExpectedHash;
 }
 
@@ -603,8 +606,10 @@ bool verifyStateRoot(evmc::MockedHost &Host, const std::string &ExpectedHash) {
   evmc::bytes_view HashView(StateRoot.data(), StateRoot.size());
   std::string CalculatedHash = "0x" + evmc::hex(HashView);
 
-  std::cout << "CalculatedHash: " << CalculatedHash << std::endl;
-  std::cout << "ExpectedHash: " << ExpectedHash << std::endl;
+  if (CalculatedHash != ExpectedHash) {
+    std::cout << "CalculatedRootHash: " << CalculatedHash << std::endl;
+    std::cout << "ExpectedRootHash: " << ExpectedHash << std::endl;
+  }
 
   // Compare with expected hash
   return CalculatedHash == ExpectedHash;
