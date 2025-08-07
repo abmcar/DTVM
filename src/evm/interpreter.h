@@ -75,6 +75,7 @@ private:
   std::vector<EVMFrame> FrameStack;
   evmc_status_code Status = EVMC_SUCCESS;
   std::vector<uint8_t> ReturnData;
+  uint64_t GasUsed = 0;
 
 public:
   bool IsJump = false;
@@ -96,6 +97,8 @@ public:
   }
 
   runtime::EVMInstance *getInstance() { return Inst; }
+
+  uint64_t getGasUsed() const { return GasUsed; }
 
   void setMessage(evmc_message &Msg);
   void setCallData(const std::vector<uint8_t> &Data);

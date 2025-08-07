@@ -32,6 +32,8 @@ EVMFrame *InterpreterExecContext::allocFrame(
   Frame.Msg->input_data = CallData.data();
   Frame.Msg->input_size = CallData.size();
 
+  GasUsed = GasLimit;
+
   return &Frame;
 }
 
@@ -42,6 +44,8 @@ EVMFrame *InterpreterExecContext::allocFrame(evmc_message *Msg) {
 
   Frame.Msg = std::make_unique<evmc_message>(*Msg);
 
+  GasUsed = Frame.Msg->gas;
+
   return &Frame;
 }
 
@@ -50,6 +54,8 @@ EVMFrame *InterpreterExecContext::allocFrame(evmc_message *Msg) {
 void InterpreterExecContext::freeBackFrame() {
   if (FrameStack.empty())
     return;
+
+  GasUsed = GasUsed - FrameStack.back().Msg->gas;
 
   FrameStack.pop_back();
 }
@@ -423,6 +429,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_JUMPDEST: {
+      Frame->Msg->gas -= 1;
       break;
     }
 
@@ -469,6 +476,7 @@ void BaseInterpreter::interpret() {
     }
 
     case evmc_opcode::OP_PUSH0: { // PUSH0 (EIP-3855)
+      Frame->Msg->gas -= 2;
       Frame->push(0);
       break;
     }
