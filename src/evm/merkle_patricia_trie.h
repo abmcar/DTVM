@@ -168,19 +168,15 @@ private:
 public:
   MerklePatriciaTrie();
 
-  // Main interface
   std::optional<std::vector<uint8_t>>
   get(const std::vector<uint8_t> &Key) const;
   void put(const std::vector<uint8_t> &Key, const std::vector<uint8_t> &Value);
   bool remove(const std::vector<uint8_t> &Key);
 
-  // Get root hash
   std::vector<uint8_t> rootHash() const;
 
-  // Check if trie is empty
   bool empty() const;
 
-  // Get root node (for testing/debugging)
   std::shared_ptr<Node> getRoot() const { return Root; }
 };
 

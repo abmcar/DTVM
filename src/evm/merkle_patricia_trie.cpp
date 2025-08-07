@@ -9,6 +9,19 @@
 
 namespace zen::evm {
 
+// RLP encoding constants
+const uint8_t RLP_OFFSET_SHORT_STRING = 0x80;
+const uint8_t RLP_OFFSET_LONG_STRING = 0xb7;
+const uint8_t RLP_OFFSET_SHORT_LIST = 0xc0;
+const uint8_t RLP_OFFSET_LONG_LIST = 0xf7;
+
+// Empty node hash (Keccak256 of empty string)
+static const std::vector<uint8_t> EMPTY_NODE_HASH = {
+    0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6, 0xff, 0x83, 0x45,
+    0xe6, 0x92, 0xc0, 0xf8, 0x6e, 0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c,
+    0xad, 0xc0, 0x01, 0x62, 0x2f, 0xb5, 0xe3, 0x63, 0xb4, 0x21};
+
+namespace {
 // Safe type casting helper functions to replace dynamic_cast
 template <typename T>
 std::shared_ptr<T> safeCast(std::shared_ptr<Node> Node, NodeType ExpectedType) {
@@ -31,19 +44,6 @@ std::shared_ptr<ExtensionNode> asExtensionNode(std::shared_ptr<Node> Node) {
   return safeCast<ExtensionNode>(Node, NodeType::Extension);
 }
 
-// RLP encoding constants
-const uint8_t RLP_OFFSET_SHORT_STRING = 0x80;
-const uint8_t RLP_OFFSET_LONG_STRING = 0xb7;
-const uint8_t RLP_OFFSET_SHORT_LIST = 0xc0;
-const uint8_t RLP_OFFSET_LONG_LIST = 0xf7;
-
-// Empty node hash (Keccak256 of empty string)
-static const std::vector<uint8_t> EMPTY_NODE_HASH = {
-    0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6, 0xff, 0x83, 0x45,
-    0xe6, 0x92, 0xc0, 0xf8, 0x6e, 0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c,
-    0xad, 0xc0, 0x01, 0x62, 0x2f, 0xb5, 0xe3, 0x63, 0xb4, 0x21};
-
-namespace {
 // RLP encoding helper functions
 std::vector<uint8_t> encodeLength(size_t Length, uint8_t Offset) {
   std::vector<uint8_t> Result;
