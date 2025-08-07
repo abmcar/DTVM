@@ -246,55 +246,29 @@ bool executeStateTest(const test_utils::StateTestFixture &Fixture,
 
     // 2. Handle value transfer manually (MockedHost doesn't do this
     // automatically)
-    bool IsValueTransfer = false;
-    for (int I = 0; I < 32; I++) {
-      if (Msg.value.bytes[I] != 0) {
-        IsValueTransfer = true;
-        break;
-      }
-    }
+    intx::uint256 TransferValue = intx::be::load<intx::uint256>(Msg.value);
+    if (TransferValue != 0) {
+      // Subtract value from sender balance using intx arithmetic
+      intx::uint256 SenderBalance =
+          intx::be::load<intx::uint256>(SenderAccount.balance);
+      intx::uint256 NewSenderBalance = SenderBalance - TransferValue;
+      SenderAccount.balance = intx::be::store<evmc::bytes32>(NewSenderBalance);
 
-    if (IsValueTransfer) {
-      // Subtract value from sender balance
-      bool Borrow = false;
-      for (int I = 31; I >= 0; I--) {
-        uint16_t Result = SenderAccount.balance.bytes[I];
-        if (Borrow) {
-          if (Result == 0) {
-            Result = 255;
-          } else {
-            Result--;
-            Borrow = false;
-          }
-        }
-
-        if (Result < Msg.value.bytes[I]) {
-          Result += 256;
-          Borrow = true;
-        }
-        Result -= Msg.value.bytes[I];
-        SenderAccount.balance.bytes[I] = static_cast<uint8_t>(Result);
-      }
-
-      // Add value to recipient balance
+      // Add value to recipient balance using intx arithmetic
       evmc::address Recipient = Msg.recipient;
       auto &RecipientAccount = MockedHost->accounts[Recipient];
-
-      uint16_t Carry = 0;
-      for (int I = 31; I >= 0; I--) {
-        uint16_t Sum =
-            RecipientAccount.balance.bytes[I] + Msg.value.bytes[I] + Carry;
-        RecipientAccount.balance.bytes[I] = static_cast<uint8_t>(Sum & 0xFF);
-        Carry = Sum >> 8;
-      }
+      intx::uint256 RecipientBalance =
+          intx::be::load<intx::uint256>(RecipientAccount.balance);
+      intx::uint256 NewRecipientBalance = RecipientBalance + TransferValue;
+      RecipientAccount.balance =
+          intx::be::store<evmc::bytes32>(NewRecipientBalance);
     }
 
     bool ExecutionSucceeded = true;
-    evmc::Result CallResult;
+    uint64_t GasUsed = 21000; // Base gas cost
     try {
-
       Interpreter.interpret();
-      // CallResult = Host->call(Msg);
+      GasUsed += Ctx.getGasUsed();
     } catch (const std::exception &E) {
       ExecutionSucceeded = false;
       if (Debug) {
@@ -305,38 +279,34 @@ bool executeStateTest(const test_utils::StateTestFixture &Fixture,
 
     // 3. Deduct gas cost after execution (gas_used * gas_price)
     if (ExecutionSucceeded) {
-      uint64_t TotalGasCost =
-          0x0f143c; // Expected total gas cost from test analysis (987196)
+      intx::uint256 GasPrice256 =
+          intx::be::load<intx::uint256>(MockedHost->tx_context.tx_gas_price);
+      uint64_t GasPrice =
+          static_cast<uint64_t>(GasPrice256 & 0xFFFFFFFFFFFFFFFFULL);
 
-      // Convert gas cost to uint256 (big-endian)
-      evmc::uint256be GasCostBig{};
-      uint64_t TempCost = TotalGasCost;
-      for (int I = 31; I >= 24 && TempCost > 0;
-           I--) { // Fill from least significant byte
-        GasCostBig.bytes[I] = static_cast<uint8_t>(TempCost & 0xFF);
-        TempCost >>= 8;
+      if (Debug) {
+        std::cout << "GasPrice: " << GasPrice << std::endl;
       }
 
-      // Subtract gas cost from sender balance
-      bool Borrow = false;
-      for (int I = 31; I >= 0; I--) {
-        uint16_t ResultByte = SenderAccount.balance.bytes[I];
-        if (Borrow) {
-          if (ResultByte == 0) {
-            ResultByte = 255;
-          } else {
-            ResultByte--;
-            Borrow = false;
-          }
-        }
+      // Get base fee from tx_context
+      intx::uint256 BaseFee256 =
+          intx::be::load<intx::uint256>(MockedHost->tx_context.block_base_fee);
+      uint64_t BaseFee =
+          GasPrice - static_cast<uint64_t>(BaseFee256 & 0xFFFFFFFFFFFFFFFFULL);
 
-        if (ResultByte < GasCostBig.bytes[I]) {
-          ResultByte += 256;
-          Borrow = true;
-        }
-        ResultByte -= GasCostBig.bytes[I];
-        SenderAccount.balance.bytes[I] = static_cast<uint8_t>(ResultByte);
+      uint64_t TotalGasCost = GasUsed * GasPrice;
+      uint64_t CoinBaseGas = GasUsed * BaseFee;
+      if (Debug) {
+        std::cout << "TotalGasCost: " << TotalGasCost << std::endl;
+        std::cout << "CoinBaseGas: " << CoinBaseGas << std::endl;
       }
+
+      // Subtract gas cost from sender balance using intx arithmetic
+      intx::uint256 SenderBalance =
+          intx::be::load<intx::uint256>(SenderAccount.balance);
+      intx::uint256 NewSenderBalance =
+          SenderBalance - intx::uint256(TotalGasCost);
+      SenderAccount.balance = intx::be::store<evmc::bytes32>(NewSenderBalance);
 
       // Add gas cost to coinbase balance
       evmc::address Coinbase = MockedHost->tx_context.block_coinbase;
@@ -348,13 +318,11 @@ bool executeStateTest(const test_utils::StateTestFixture &Fixture,
       auto EmptyCodeHash = zen::host::evm::crypto::keccak256(EmptyCode);
       std::memcpy(CoinbaseAccount.codehash.bytes, EmptyCodeHash.data(), 32);
 
-      uint16_t Carry = 0;
-      for (int I = 31; I >= 0; I--) {
-        uint16_t Sum =
-            CoinbaseAccount.balance.bytes[I] + GasCostBig.bytes[I] + Carry;
-        CoinbaseAccount.balance.bytes[I] = static_cast<uint8_t>(Sum & 0xFF);
-        Carry = Sum >> 8;
-      }
+      // Add coinbase gas to coinbase balance using intx arithmetic
+      intx::uint256 CurrentBalance =
+          intx::be::load<intx::uint256>(CoinbaseAccount.balance);
+      intx::uint256 NewBalance = CurrentBalance + intx::uint256(CoinBaseGas);
+      CoinbaseAccount.balance = intx::be::store<evmc::bytes32>(NewBalance);
     }
 
     if (!ExpectedResult.ExpectedException.empty()) {
@@ -365,20 +333,21 @@ bool executeStateTest(const test_utils::StateTestFixture &Fixture,
       return false;
     }
 
-    // for (auto Account : MockedHost->accounts) {
-    //   std::cout << "Account: "
-    //             << evmc::hex(evmc::bytes_view(Account.first.bytes, 20))
-    //             << std::endl;
-    //   std::cout << "  balance: "
-    //             << evmc::hex(evmc::bytes_view(Account.second.balance.bytes,
-    //             32))
-    //             << std::endl;
-    //   std::cout << "  nonce: " << Account.second.nonce << std::endl;
-    //   std::cout << "  code size: " << Account.second.code.size() <<
-    //   std::endl; std::cout << "  storage keys: " <<
-    //   Account.second.storage.size()
-    //             << std::endl;
-    // }
+    if (Debug) {
+      for (auto Account : MockedHost->accounts) {
+        std::cout << "Account: "
+                  << evmc::hex(evmc::bytes_view(Account.first.bytes, 20))
+                  << std::endl;
+        std::cout << "  balance: "
+                  << evmc::hex(
+                         evmc::bytes_view(Account.second.balance.bytes, 32))
+                  << std::endl;
+        std::cout << "  nonce: " << Account.second.nonce << std::endl;
+        std::cout << "  code size: " << Account.second.code.size() << std::endl;
+        std::cout << "  storage keys: " << Account.second.storage.size()
+                  << std::endl;
+      }
+    }
 
     return test_utils::verifyStateRoot(*MockedHost,
                                        ExpectedResult.ExpectedHash) &&
