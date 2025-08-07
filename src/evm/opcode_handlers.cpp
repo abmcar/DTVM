@@ -1142,6 +1142,7 @@ void CallHandler::doExecute() {
   }
 
   const auto Result = Frame->Host->call(NewMsg);
+  Context->setResource();
   if (Result.status_code == EVMC_SUCCESS) {
     Frame->pop(); // pop the assume value
     Frame->push(intx::uint256(1));
