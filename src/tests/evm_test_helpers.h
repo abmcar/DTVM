@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <rapidjson/document.h>
 #include <string>
 #include <vector>
 
@@ -104,6 +105,11 @@ bool verifyLogsHash(const std::vector<evmc::MockedHost::log_record> &Logs,
 
 std::string calculateStateRootHash(evmc::MockedHost &Host);
 bool verifyStateRoot(evmc::MockedHost &Host, const std::string &ExpectedHash);
+
+std::vector<std::string> verifyPostState(evmc::MockedHost &Host,
+                                         const rapidjson::Value &ExpectedState,
+                                         const std::string &TestName,
+                                         const std::string &Fork);
 
 } // namespace zen::evm_test_utils
 

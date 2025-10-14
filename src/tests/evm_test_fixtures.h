@@ -48,6 +48,7 @@ struct ForkPostResult {
     size_t Gas = 0;
     size_t Value = 0;
   } Indexes;
+  std::shared_ptr<rapidjson::Document> ExpectedState;
 };
 
 evmc::address parseAddress(const std::string &HexAddr);

@@ -43,14 +43,17 @@ const std::string DefaultTestDir = getDefaultTestDir();
 
 struct ExecutionResult {
   bool Passed = false;
-  std::string ErrorMessage;
+  std::vector<std::string> ErrorMessages;
 };
 
 ExecutionResult executeStateTest(const StateTestFixture &Fixture,
                                  const std::string &Fork,
                                  const ForkPostResult &ExpectedResult) {
   auto makeFailure = [&](const std::string &Msg) {
-    return ExecutionResult{false, Msg};
+    ExecutionResult Result;
+    Result.Passed = false;
+    Result.ErrorMessages.push_back(Msg);
+    return Result;
   };
 
   try {
@@ -289,19 +292,36 @@ ExecutionResult executeStateTest(const StateTestFixture &Fixture,
                          " (" + Fork + "): " + ExecutionError);
     }
 
+    std::vector<std::string> AllErrors;
+
     std::string ActualStateRoot = calculateStateRootHash(*MockedHost);
     if (ActualStateRoot != ExpectedResult.ExpectedHash) {
-      return makeFailure("State root mismatch for " + Fixture.TestName + " (" +
-                         Fork + ") expected " + ExpectedResult.ExpectedHash +
-                         " got " + ActualStateRoot);
+      AllErrors.push_back("State root mismatch" +
+                          std::string("\n  Expected: ") +
+                          ExpectedResult.ExpectedHash +
+                          std::string("\n  Actual:   ") + ActualStateRoot);
     }
 
     std::string ActualLogsHash =
         "0x" + calculateLogsHash(MockedHost->recorded_logs);
     if (ActualLogsHash != ExpectedResult.ExpectedLogs) {
-      return makeFailure("Logs hash mismatch for " + Fixture.TestName + " (" +
-                         Fork + ") expected " + ExpectedResult.ExpectedLogs +
-                         " got " + ActualLogsHash);
+      AllErrors.push_back("Logs hash mismatch" + std::string("\n  Expected: ") +
+                          ExpectedResult.ExpectedLogs +
+                          std::string("\n  Actual:   ") + ActualLogsHash);
+    }
+
+    if (ExpectedResult.ExpectedState &&
+        ExpectedResult.ExpectedState->IsObject()) {
+      auto StateErrors = verifyPostState(
+          *MockedHost, *ExpectedResult.ExpectedState, Fixture.TestName, Fork);
+      AllErrors.insert(AllErrors.end(), StateErrors.begin(), StateErrors.end());
+    }
+
+    if (!AllErrors.empty()) {
+      ExecutionResult Result;
+      Result.Passed = false;
+      Result.ErrorMessages = std::move(AllErrors);
+      return Result;
     }
 
     return {true, {}};
@@ -458,7 +478,22 @@ TEST_P(EVMStateTest, ExecutesStateTest) {
   ExecutionResult Result =
       executeStateTest(*Param.Fixture, Param.ForkName, Param.Expected);
 
-  EXPECT_TRUE(Result.Passed) << Result.ErrorMessage;
+  if (!Result.Passed) {
+    std::string CombinedErrors = "\n";
+    CombinedErrors += "=================================================\n";
+    CombinedErrors +=
+        "Post-execution state verification failed with " +
+        std::to_string(Result.ErrorMessages.size()) +
+        (Result.ErrorMessages.size() == 1 ? " error:" : " errors:") + "\n";
+    CombinedErrors += "=================================================\n";
+    for (size_t I = 0; I < Result.ErrorMessages.size(); ++I) {
+      CombinedErrors += "\n[Error " + std::to_string(I + 1) + "]\n";
+      CombinedErrors += Result.ErrorMessages[I];
+      CombinedErrors += "\n";
+    }
+    CombinedErrors += "=================================================\n";
+    EXPECT_TRUE(Result.Passed) << CombinedErrors;
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(ExecuteAllStateTests, EVMStateTest,

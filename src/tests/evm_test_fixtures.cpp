@@ -298,6 +298,12 @@ ForkPostResult parseForkPostResult(const rapidjson::Value &PostResult) {
     }
   }
 
+  if (PostResult.HasMember("state") && PostResult["state"].IsObject()) {
+    Result.ExpectedState = std::make_shared<rapidjson::Document>();
+    Result.ExpectedState->CopyFrom(PostResult["state"],
+                                   Result.ExpectedState->GetAllocator());
+  }
+
   return Result;
 }
 
