@@ -92,10 +92,14 @@ public:
       // Execute the interpreter
       Interpreter.interpret();
 
+      // Calculate gas consumed and remaining
+      uint64_t GasUsed = Ctx.getGasUsed();
+      int64_t RemainingGas = Msg.gas - GasUsed;
+
       // Create result based on execution status
       evmc::Result Result;
       Result.status_code = Ctx.getStatus();
-      Result.gas_left = CallMsg.gas;
+      Result.gas_left = RemainingGas;
 
       ReturnData = Ctx.getReturnData();
       if (!ReturnData.empty()) {
@@ -245,11 +249,14 @@ public:
       auto *Frame = Ctx.getCurFrame();
       Frame->Host = this;
       Interp.interpret();
-      
+
+      // Calculate gas consumed and remaining
+      uint64_t GasUsed = Ctx.getGasUsed();
+      int64_t RemainingGas = Msg.gas - GasUsed;
 
       evmc::Result Result;
       Result.status_code = Ctx.getStatus();
-      Result.gas_left = CallMsg.gas;
+      Result.gas_left = RemainingGas;
       ReturnData = Ctx.getReturnData();
 
       // 6 Deploy the contract code (the output is the runtime code)

@@ -1221,15 +1221,14 @@ void CallHandler::doExecute() {
   Context->setReturnData(std::vector<uint8_t>());
 
   // EIP-2929
+  // Note: The base gas cost (WARM_STORAGE_READ_COST = 100) is already charged
+  // in execute(). We only need to charge the ADDITIONAL cost for cold access.
   const auto Rev = currentRevision();
   if (Rev >= EVMC_BERLIN and
       Frame->Host->access_account(Dest) == EVMC_ACCESS_COLD) {
-    if (!chargeGas(Frame, COLD_ACCOUNT_ACCESS_COST)) {
-      Context->setStatus(EVMC_OUT_OF_GAS);
-      return;
-    }
-  } else {
-    if (!chargeGas(Frame, WARM_ACCOUNT_ACCESS_COST)) {
+    // Charge additional cold access cost (2600 - 100 = 2500)
+    if (!chargeGas(Frame,
+                   COLD_ACCOUNT_ACCESS_COST - WARM_ACCOUNT_ACCESS_COST)) {
       Context->setStatus(EVMC_OUT_OF_GAS);
       return;
     }
@@ -1283,14 +1282,15 @@ void CallHandler::doExecute() {
     return;
   }
 
-  int64_t Cost = NeedValue ? CALL_VALUE_COST : 0;
+  // Charge CALL_VALUE_COST only if actually transferring value (EIP-150)
+  int64_t Cost = (NeedValue && Value != 0) ? CALL_VALUE_COST : 0;
 
   if (OpCode == OP_CALL) {
     if (Frame->isStaticMode()) {
       Context->setStatus(EVMC_STATIC_MODE_VIOLATION);
       return;
     }
-    if (!Frame->Host->account_exists(Dest)) {
+    if (Value != 0 && !Frame->Host->account_exists(Dest)) {
       Cost += ACCOUNT_CREATION_COST;
     }
   }
@@ -1301,8 +1301,8 @@ void CallHandler::doExecute() {
     return;
   }
 
-  // EIP-150
-  if (NeedValue) {
+  // EIP-150: Add stipend only if actually transferring value
+  if (NeedValue && Value != 0) {
     NewMsg.gas += CALL_GAS_STIPEND;
   }
 

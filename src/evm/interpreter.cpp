@@ -40,7 +40,12 @@ EVMFrame *InterpreterExecContext::allocFrame(
 }
 
 EVMFrame *InterpreterExecContext::allocFrame(evmc_message *Msg) {
-  EVM_REQUIRE(Msg->gas >= BASIC_EXECUTION_COST, EVMOutOfGas);
+  // Only deduct intrinsic gas (BASIC_EXECUTION_COST) for top-level transactions
+  // (depth == 0) Nested calls (depth > 0) should not pay intrinsic gas
+  const bool IsTopLevel = (Msg->depth == 0);
+  const int64_t IntrinsicGas = IsTopLevel ? BASIC_EXECUTION_COST : 0;
+
+  EVM_REQUIRE(Msg->gas >= IntrinsicGas, EVMOutOfGas);
 
   FrameStack.emplace_back();
 
@@ -50,7 +55,7 @@ EVMFrame *InterpreterExecContext::allocFrame(evmc_message *Msg) {
 
   GasUsed = Frame.Msg->gas;
 
-  Frame.Msg->gas = Frame.Msg->gas - BASIC_EXECUTION_COST;
+  Frame.Msg->gas = Frame.Msg->gas - IntrinsicGas;
 
   return &Frame;
 }
