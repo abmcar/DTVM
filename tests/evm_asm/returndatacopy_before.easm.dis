@@ -1,4 +1,5 @@
 // RETURNDATACOPY(mem[0:32], 0, 32) before any call -> zeros
+// This testcase is disabled because call is not supported yet
 PUSH1 0x20
 PUSH1 0x00
 PUSH1 0x00
