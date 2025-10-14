@@ -602,24 +602,16 @@ void ReturnDataCopyHandler::doExecute() {
 
   const auto &ReturnData = Context->getReturnData();
 
-  if (Offset >= ReturnData.size()) {
-    // If Offset is beyond the return data size, fill with zeros
-    if (Size > 0) {
-      std::memset(Frame->Memory.data() + DestOffset, 0, Size);
-    }
+  // EIP-211: RETURNDATACOPY reverts if offset + size > returndata.size()
+  if (Offset > ReturnData.size() || Size > ReturnData.size() - Offset) {
+    Context->setStatus(EVMC_INVALID_MEMORY_ACCESS);
     return;
   }
 
   // Copy return data to memory
-  auto CopySize = std::min(Size, ReturnData.size() - Offset);
-
-  std::memcpy(Frame->Memory.data() + DestOffset, ReturnData.data() + Offset,
-              CopySize);
-
-  if (Size > CopySize) {
-    // Fill the rest with zeros if Size is larger than the actual copied size
-    std::memset(Frame->Memory.data() + DestOffset + CopySize, 0,
-                Size - CopySize);
+  if (Size > 0) {
+    std::memcpy(Frame->Memory.data() + DestOffset, ReturnData.data() + Offset,
+                Size);
   }
 }
 void ExtCodeHashHandler::doExecute() {

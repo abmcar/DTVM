@@ -38,12 +38,16 @@ public:
     }
     evmc::Result ParentResult = evmc::MockedHost::call(Msg);
 
-    // Try to find the target contract
-    auto It = accounts.find(Msg.recipient);
+    // For CALLCODE and DELEGATECALL, code comes from code_address, not recipient
+    const evmc::address &CodeAddr =
+        (Msg.kind == EVMC_CALLCODE || Msg.kind == EVMC_DELEGATECALL)
+        ? Msg.code_address : Msg.recipient;
+
+    auto It = accounts.find(CodeAddr);
     if (It == accounts.end() || It->second.code.empty()) {
       // No contract found, return parent result
-       ZEN_LOG_DEBUG("No contract found for recipient {},return parent result", 
-                   evmc::hex(evmc::bytes_view(Msg.recipient.bytes, 20)).c_str());
+      ZEN_LOG_DEBUG("No contract found for code address {},return parent result",
+                   evmc::hex(evmc::bytes_view(CodeAddr.bytes, 20)).c_str());
       return ParentResult;
     }
 
