@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <evmc/hex.hpp>
+#include <intx/intx.hpp>
 #include <iostream>
 #include <rapidjson/document.h>
 
@@ -54,18 +55,15 @@ calculateLogsHashImpl(const std::vector<evmc::MockedHost::log_record> &Logs) {
 }
 
 std::vector<uint8_t> uint256beToBytes(const evmc::uint256be &Value) {
-  const auto *Data = Value.bytes;
-  size_t Start = 0;
-
-  while (Start < sizeof(Value.bytes) && Data[Start] == 0) {
-    Start++;
-  }
-
-  if (Start == sizeof(Value.bytes)) {
+  intx::uint256 Val = intx::be::load<intx::uint256>(Value.bytes);
+  if (Val == 0) {
     return {};
   }
 
-  return std::vector<uint8_t>(Data + Start, Data + sizeof(Value.bytes));
+  unsigned NumBytes = intx::count_significant_bytes(Val);
+  std::vector<uint8_t> Result(32);
+  intx::be::unsafe::store(Result.data(), Val);
+  return std::vector<uint8_t>(Result.end() - NumBytes, Result.end());
 }
 
 std::vector<uint8_t> calculateStorageRoot(
@@ -73,14 +71,9 @@ std::vector<uint8_t> calculateStorageRoot(
   zen::evm::mpt::MerklePatriciaTrie StorageTrie;
 
   for (const auto &[Key, StorageValue] : Storage) {
-    bool IsEmpty = true;
-    for (int I = 0; I < 32; I++) {
-      if (StorageValue.current.bytes[I] != 0) {
-        IsEmpty = false;
-        break;
-      }
-    }
-    if (IsEmpty)
+    intx::uint256 Val =
+        intx::be::load<intx::uint256>(StorageValue.current.bytes);
+    if (Val == 0)
       continue;
 
     auto KeyHash = zen::host::evm::crypto::keccak256(
@@ -101,11 +94,11 @@ std::vector<uint8_t> encodeAccount(const evmc::MockedAccount &Account) {
   if (Account.nonce == 0) {
     AccountFields.push_back({});
   } else {
-    std::vector<uint8_t> NonceBytes;
-    int Nonce = Account.nonce;
-    while (Nonce > 0) {
-      NonceBytes.insert(NonceBytes.begin(), static_cast<uint8_t>(Nonce & 0xFF));
-      Nonce >>= 8;
+    uint64_t Nonce = Account.nonce;
+    unsigned NumBytes = (63 - __builtin_clzll(Nonce)) / 8 + 1;
+    std::vector<uint8_t> NonceBytes(NumBytes);
+    for (unsigned I = 0; I < NumBytes; ++I) {
+      NonceBytes[NumBytes - 1 - I] = static_cast<uint8_t>(Nonce >> (I * 8));
     }
     AccountFields.push_back(NonceBytes);
   }
@@ -172,15 +165,11 @@ bool verifyStateRoot(evmc::MockedHost &Host, const std::string &ExpectedHash) {
 
 namespace {
 std::string formatBytes32Compact(const evmc::bytes32 &Value) {
-  size_t Start = 0;
-  while (Start < 32 && Value.bytes[Start] == 0) {
-    Start++;
-  }
-  if (Start == 32) {
+  intx::uint256 Val = intx::be::load<intx::uint256>(Value.bytes);
+  if (Val == 0) {
     return "0x00";
   }
-  evmc::bytes_view View(Value.bytes + Start, 32 - Start);
-  return "0x" + evmc::hex(View);
+  return "0x" + intx::hex(Val);
 }
 } // namespace
 
@@ -259,15 +248,12 @@ std::vector<std::string> verifyPostState(evmc::MockedHost &Host,
           std::memcpy(ExpectedBalance.bytes + (32 - DataSize), Data->data(),
                       DataSize);
 
-          bool Match = true;
-          for (int I = 0; I < 32; ++I) {
-            if (ExpectedBalance.bytes[I] != ActualAccount.balance.bytes[I]) {
-              Match = false;
-              break;
-            }
-          }
+          intx::uint256 ExpectedVal =
+              intx::be::load<intx::uint256>(ExpectedBalance.bytes);
+          intx::uint256 ActualVal =
+              intx::be::load<intx::uint256>(ActualAccount.balance.bytes);
 
-          if (!Match) {
+          if (ExpectedVal != ActualVal) {
             std::string ExpectedCompact = formatBytes32Compact(ExpectedBalance);
             std::string ActualCompact =
                 formatBytes32Compact(ActualAccount.balance);
@@ -329,15 +315,13 @@ std::vector<std::string> verifyPostState(evmc::MockedHost &Host,
           }
 
           const evmc::bytes32 &ActualValue = StorageIter->second.current;
-          bool Match = true;
-          for (int I = 0; I < 32; ++I) {
-            if (ExpectedValue.bytes[I] != ActualValue.bytes[I]) {
-              Match = false;
-              break;
-            }
-          }
 
-          if (!Match) {
+          intx::uint256 ExpectedVal =
+              intx::be::load<intx::uint256>(ExpectedValue.bytes);
+          intx::uint256 ActualVal =
+              intx::be::load<intx::uint256>(ActualValue.bytes);
+
+          if (ExpectedVal != ActualVal) {
             std::string ExpectedCompact = formatBytes32Compact(ExpectedValue);
             std::string ActualCompact = formatBytes32Compact(ActualValue);
             Errors.push_back("Storage mismatch for account " + AddressStr +
