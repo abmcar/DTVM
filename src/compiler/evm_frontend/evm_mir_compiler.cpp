@@ -2561,31 +2561,23 @@ EVMMirBuilder::handleAddU64Const(const Operand &FullOp,
   U256Inst LHS = extractU256Operand(FullOp);
   MType *MirI64Type =
       EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+
   MInstruction *RHS0 =
       createIntConstInstruction(MirI64Type, U64ConstOp.getConstValue()[0]);
   MInstruction *RHSZero = createIntConstInstruction(MirI64Type, 0);
 
-  // Pre-materialize LHS operands for carry chain safety
-  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
-    LHS[I] = protectUnsafeValue(LHS[I], MirI64Type);
-  }
-  RHS0 = protectUnsafeValue(RHS0, MirI64Type);
-  MInstruction *ProtectedZero = protectUnsafeValue(RHSZero, MirI64Type);
-
-  U256Inst Result = {};
-  // Limb 0: ADD with the actual u64 value
-  MInstruction *Limb0 = createInstruction<BinaryInstruction>(
-      false, OP_add, MirI64Type, LHS[0], RHS0);
-  Result[0] = protectUnsafeValue(Limb0, MirI64Type);
-  // Limbs 1-3: ADC with raw carry producer (not dread-wrapped) so that
-  // isCarryDead can traverse the chain.
-  MInstruction *CarryProducer = Limb0;
-  for (size_t I = 1; I < EVM_ELEMENTS_COUNT; ++I) {
-    MInstruction *LocalResult = createInstruction<AdcInstruction>(
-        false, MirI64Type, LHS[I], ProtectedZero, CarryProducer);
-    CarryProducer = LocalResult;
-    Result[I] = protectUnsafeValue(LocalResult, MirI64Type);
-  }
+  MInstruction *AddInst = createInstruction<EvmU256AddInstruction>(
+      false, MirI64Type, LHS[0], LHS[1], LHS[2], LHS[3], RHS0, RHSZero, RHSZero,
+      RHSZero);
+  U256Inst Result = {
+      AddInst,
+      createInstruction<EvmU256AddResultInstruction>(false, MirI64Type, AddInst,
+                                                     1),
+      createInstruction<EvmU256AddResultInstruction>(false, MirI64Type, AddInst,
+                                                     2),
+      createInstruction<EvmU256AddResultInstruction>(false, MirI64Type, AddInst,
+                                                     3),
+  };
   return Operand(Result, EVMType::UINT256);
 }
 
