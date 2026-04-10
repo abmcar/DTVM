@@ -333,6 +333,16 @@ public:
   Operand handleAddMod(Operand AugendOp, Operand AddendOp, Operand ModulusOp);
   Operand handleMulMod(Operand MultiplicandOp, Operand MultiplierOp,
                        Operand ModulusOp);
+
+  // Barrett reduction for MULMOD with compile-time constant modulus
+  using U512Inst = std::array<MInstruction *, 8>;
+  Operand handleMulModConstant(const Operand &MultiplicandOp,
+                               const Operand &MultiplierOp,
+                               const intx::uint256 &N);
+  U512Inst compute512BitProduct(const U256Inst &A, const U256Inst &B);
+  U256Inst multiply256x256Upper(const U256Inst &A, const U256Inst &B);
+  U256Inst multiply256x256Lower(const U256Inst &A, const U256Inst &B);
+
   Operand handleExp(Operand BaseOp, Operand ExponentOp);
   template <CompareOperator Operator>
   Operand handleCompareOp(Operand LHSOp, Operand RHSOp) {

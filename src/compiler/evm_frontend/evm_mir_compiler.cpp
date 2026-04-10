@@ -2032,10 +2032,500 @@ EVMMirBuilder::handleMulMod(Operand MultiplicandOp, Operand MultiplierOp,
     return Operand(intxToU256Value(Result));
   }
 
+  // Barrett reduction for constant modulus
+  if (ModulusOp.isConstant()) {
+    intx::uint256 N = u256ValueToIntx(ModulusOp.getConstValue());
+    if (N == 0)
+      return Operand(U256Value{0, 0, 0, 0});
+    if (N == 1)
+      return Operand(U256Value{0, 0, 0, 0});
+    return handleMulModConstant(MultiplicandOp, MultiplierOp, N);
+  }
+
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   return callRuntimeFor<const intx::uint256 *, const intx::uint256 &,
                         const intx::uint256 &, const intx::uint256 &>(
       RuntimeFunctions.GetMulMod, MultiplicandOp, MultiplierOp, ModulusOp);
+}
+
+// Compute the full 512-bit product of two 256-bit values A and B.
+// Returns 8 limbs in little-endian order (R[0] = least significant).
+// Uses 4x4 schoolbook multiplication with umul128 for 64x64 -> 128 products.
+EVMMirBuilder::U512Inst EVMMirBuilder::compute512BitProduct(const U256Inst &A,
+                                                            const U256Inst &B) {
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+
+  // Compute all 16 partial products: PP[i][j] = A[i] * B[j]
+  // Each partial product is 128 bits, split into lo and hi halves.
+  MInstruction *PPLo[4][4];
+  MInstruction *PPHi[4][4];
+  for (size_t I = 0; I < 4; ++I) {
+    for (size_t J = 0; J < 4; ++J) {
+      PPLo[I][J] = createEvmUmul128(A[I], B[J]);
+      PPHi[I][J] = createEvmUmul128Hi(PPLo[I][J]);
+    }
+  }
+
+  // Accumulate partial products into 8 result limbs.
+  // Result limb K receives PPLo[i][j] where i+j == K,
+  //   and PPHi[i][j] where i+j == K-1.
+  //
+  // Limb 0: PPLo[0][0]
+  // Limb 1: PPHi[0][0] + PPLo[0][1] + PPLo[1][0]
+  // Limb 2: PPHi[0][1] + PPHi[1][0] + PPLo[0][2] + PPLo[1][1] + PPLo[2][0]
+  // ...
+  // Limb 7: PPHi[3][3]
+
+  // Helper: accumulate terms into a limb with carry propagation.
+  // Each term is added via OP_add + ADC to capture carry into the next
+  // accumulator.
+  using SumCarryPair = std::pair<MInstruction *, MInstruction *>;
+  auto addTermWithCarry = [&](MInstruction *Sum, MInstruction *Carry,
+                              MInstruction *Term) -> SumCarryPair {
+    MInstruction *NewSum =
+        createInstruction<BinaryInstruction>(false, OP_add, I64Type, Sum, Term);
+    MInstruction *NewCarry =
+        createInstruction<AdcInstruction>(false, I64Type, Carry, Zero, Zero);
+    return {protectUnsafeValue(NewSum, I64Type),
+            protectUnsafeValue(NewCarry, I64Type)};
+  };
+
+  auto addTermNoCarry = [&](MInstruction *Sum,
+                            MInstruction *Term) -> MInstruction * {
+    MInstruction *NewSum =
+        createInstruction<BinaryInstruction>(false, OP_add, I64Type, Sum, Term);
+    return protectUnsafeValue(NewSum, I64Type);
+  };
+
+  // Collect terms for each limb. For each result limb K:
+  //   Lo terms: PPLo[i][j] where i + j == K, 0 <= i,j < 4
+  //   Hi terms: PPHi[i][j] where i + j == K - 1, 0 <= i,j < 4
+  // We accumulate all terms with carry propagation across limbs.
+
+  U512Inst R;
+  MInstruction *Carry = Zero;
+
+  // Limb 0: PPLo[0][0]
+  R[0] = PPLo[0][0];
+
+  // Limb 1: PPHi[0][0] + PPLo[0][1] + PPLo[1][0] + carry_from_0
+  // No carry from limb 0 (single term), so carry is zero.
+  {
+    MInstruction *Sum = PPHi[0][0];
+    Carry = Zero;
+    auto [S1, C1] = addTermWithCarry(Sum, Carry, PPLo[0][1]);
+    auto [S2, C2] = addTermWithCarry(S1, C1, PPLo[1][0]);
+    R[1] = S2;
+    Carry = C2;
+  }
+
+  // Limb 2: PPHi[0][1] + PPHi[1][0] + PPLo[0][2] + PPLo[1][1] + PPLo[2][0]
+  //          + carry_from_1
+  {
+    MInstruction *Sum = PPHi[0][1];
+    auto [S1, C1] = addTermWithCarry(Sum, Zero, Carry);
+    auto [S2, C2] = addTermWithCarry(S1, C1, PPHi[1][0]);
+    auto [S3, C3] = addTermWithCarry(S2, C2, PPLo[0][2]);
+    auto [S4, C4] = addTermWithCarry(S3, C3, PPLo[1][1]);
+    auto [S5, C5] = addTermWithCarry(S4, C4, PPLo[2][0]);
+    R[2] = S5;
+    Carry = C5;
+  }
+
+  // Limb 3: PPHi[0][2] + PPHi[1][1] + PPHi[2][0] +
+  //          PPLo[0][3] + PPLo[1][2] + PPLo[2][1] + PPLo[3][0]
+  //          + carry_from_2
+  {
+    MInstruction *Sum = PPHi[0][2];
+    auto [S1, C1] = addTermWithCarry(Sum, Zero, Carry);
+    auto [S2, C2] = addTermWithCarry(S1, C1, PPHi[1][1]);
+    auto [S3, C3] = addTermWithCarry(S2, C2, PPHi[2][0]);
+    auto [S4, C4] = addTermWithCarry(S3, C3, PPLo[0][3]);
+    auto [S5, C5] = addTermWithCarry(S4, C4, PPLo[1][2]);
+    auto [S6, C6] = addTermWithCarry(S5, C5, PPLo[2][1]);
+    auto [S7, C7] = addTermWithCarry(S6, C6, PPLo[3][0]);
+    R[3] = S7;
+    Carry = C7;
+  }
+
+  // Limb 4: PPHi[0][3] + PPHi[1][2] + PPHi[2][1] + PPHi[3][0] +
+  //          PPLo[1][3] + PPLo[2][2] + PPLo[3][1]
+  //          + carry_from_3
+  {
+    MInstruction *Sum = PPHi[0][3];
+    auto [S1, C1] = addTermWithCarry(Sum, Zero, Carry);
+    auto [S2, C2] = addTermWithCarry(S1, C1, PPHi[1][2]);
+    auto [S3, C3] = addTermWithCarry(S2, C2, PPHi[2][1]);
+    auto [S4, C4] = addTermWithCarry(S3, C3, PPHi[3][0]);
+    auto [S5, C5] = addTermWithCarry(S4, C4, PPLo[1][3]);
+    auto [S6, C6] = addTermWithCarry(S5, C5, PPLo[2][2]);
+    auto [S7, C7] = addTermWithCarry(S6, C6, PPLo[3][1]);
+    R[4] = S7;
+    Carry = C7;
+  }
+
+  // Limb 5: PPHi[1][3] + PPHi[2][2] + PPHi[3][1] +
+  //          PPLo[2][3] + PPLo[3][2]
+  //          + carry_from_4
+  {
+    MInstruction *Sum = PPHi[1][3];
+    auto [S1, C1] = addTermWithCarry(Sum, Zero, Carry);
+    auto [S2, C2] = addTermWithCarry(S1, C1, PPHi[2][2]);
+    auto [S3, C3] = addTermWithCarry(S2, C2, PPHi[3][1]);
+    auto [S4, C4] = addTermWithCarry(S3, C3, PPLo[2][3]);
+    auto [S5, C5] = addTermWithCarry(S4, C4, PPLo[3][2]);
+    R[5] = S5;
+    Carry = C5;
+  }
+
+  // Limb 6: PPHi[2][3] + PPHi[3][2] + PPLo[3][3] + carry_from_5
+  {
+    MInstruction *Sum = PPHi[2][3];
+    auto [S1, C1] = addTermWithCarry(Sum, Zero, Carry);
+    auto [S2, C2] = addTermWithCarry(S1, C1, PPHi[3][2]);
+    auto [S3, C3] = addTermWithCarry(S2, C2, PPLo[3][3]);
+    R[6] = S3;
+    Carry = C3;
+  }
+
+  // Limb 7: PPHi[3][3] + carry_from_6
+  R[7] = addTermNoCarry(PPHi[3][3], Carry);
+
+  return R;
+}
+
+// Multiply two 256-bit values and return only the upper 256 bits of the
+// 512-bit product. This is used for Barrett reduction q_hat estimation.
+EVMMirBuilder::U256Inst EVMMirBuilder::multiply256x256Upper(const U256Inst &A,
+                                                            const U256Inst &B) {
+  // Compute the full 512-bit product, then return limbs [4..7].
+  U512Inst Full = compute512BitProduct(A, B);
+  return {Full[4], Full[5], Full[6], Full[7]};
+}
+
+// Multiply two 256-bit values and return only the lower 256 bits
+// (truncated product). This is used for computing q_hat * N mod 2^256.
+EVMMirBuilder::U256Inst EVMMirBuilder::multiply256x256Lower(const U256Inst &A,
+                                                            const U256Inst &B) {
+  // For lower 256 bits only, we can skip partial products that contribute
+  // only to limbs >= 4. This saves roughly half the multiplications.
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+
+  // Only compute PPLo/PPHi where i + j <= 3 (for lo terms) or i + j <= 2
+  // (for hi terms contributing to limb <= 3).
+  MInstruction *PPLo[4][4];
+  MInstruction *PPHi[4][4];
+  for (size_t I = 0; I < 4; ++I) {
+    for (size_t J = 0; J < 4; ++J) {
+      if (I + J <= 3) {
+        PPLo[I][J] = createEvmUmul128(A[I], B[J]);
+        if (I + J <= 2)
+          PPHi[I][J] = createEvmUmul128Hi(PPLo[I][J]);
+      }
+    }
+  }
+
+  using SumCarryPair = std::pair<MInstruction *, MInstruction *>;
+  auto addTermWithCarry = [&](MInstruction *Sum, MInstruction *Carry,
+                              MInstruction *Term) -> SumCarryPair {
+    MInstruction *NewSum =
+        createInstruction<BinaryInstruction>(false, OP_add, I64Type, Sum, Term);
+    MInstruction *NewCarry =
+        createInstruction<AdcInstruction>(false, I64Type, Carry, Zero, Zero);
+    return {protectUnsafeValue(NewSum, I64Type),
+            protectUnsafeValue(NewCarry, I64Type)};
+  };
+
+  auto addTermNoCarry = [&](MInstruction *Sum,
+                            MInstruction *Term) -> MInstruction * {
+    MInstruction *NewSum =
+        createInstruction<BinaryInstruction>(false, OP_add, I64Type, Sum, Term);
+    return protectUnsafeValue(NewSum, I64Type);
+  };
+
+  U256Inst R;
+  MInstruction *Carry = Zero;
+
+  // Limb 0: PPLo[0][0]
+  R[0] = PPLo[0][0];
+
+  // Limb 1
+  {
+    MInstruction *Sum = PPHi[0][0];
+    Carry = Zero;
+    auto [S1, C1] = addTermWithCarry(Sum, Carry, PPLo[0][1]);
+    auto [S2, C2] = addTermWithCarry(S1, C1, PPLo[1][0]);
+    R[1] = S2;
+    Carry = C2;
+  }
+
+  // Limb 2
+  {
+    MInstruction *Sum = PPHi[0][1];
+    auto [S1, C1] = addTermWithCarry(Sum, Zero, Carry);
+    auto [S2, C2] = addTermWithCarry(S1, C1, PPHi[1][0]);
+    auto [S3, C3] = addTermWithCarry(S2, C2, PPLo[0][2]);
+    auto [S4, C4] = addTermWithCarry(S3, C3, PPLo[1][1]);
+    auto [S5, C5] = addTermWithCarry(S4, C4, PPLo[2][0]);
+    R[2] = S5;
+    Carry = C5;
+  }
+
+  // Limb 3: truncated, no carry needed
+  {
+    MInstruction *Sum = PPHi[0][2];
+    Sum = addTermNoCarry(Sum, Carry);
+    Sum = addTermNoCarry(Sum, PPHi[1][1]);
+    Sum = addTermNoCarry(Sum, PPHi[2][0]);
+    Sum = addTermNoCarry(Sum, PPLo[0][3]);
+    Sum = addTermNoCarry(Sum, PPLo[1][2]);
+    Sum = addTermNoCarry(Sum, PPLo[2][1]);
+    Sum = addTermNoCarry(Sum, PPLo[3][0]);
+    R[3] = Sum;
+  }
+
+  return R;
+}
+
+// Barrett reduction for MULMOD with a compile-time constant modulus N.
+// Computes (A * B) mod N inline when possible.
+//
+// Supported specializations:
+//   - Power-of-2 N: mask low bits of the 512-bit product
+//   - N with high bit >= 254 (i.e., mu fits in <= 258 bits): full Barrett
+//   - Smaller N: fall back to runtime call (mu too wide for 256x256 multiply)
+//
+// Barrett algorithm (for large N):
+//   1. P = A * B  (512-bit product)
+//   2. P_hi = upper 256 bits of P
+//   3. q_hat = upper_256(P_hi * mu_lo) + mu_hi * P_hi
+//   4. QN = lower_256(q_hat * N)
+//   5. r = P_lo - QN (mod 2^256)
+//   6. if r >= N: r -= N  (at most 2 corrections)
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleMulModConstant(const Operand &MultiplicandOp,
+                                    const Operand &MultiplierOp,
+                                    const intx::uint256 &N) {
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+
+  // Special case: power-of-2 modulus — just mask low bits of the product
+  if ((N & (N - 1)) == 0) {
+    // N is a power of 2. Result = low_bits(A * B) & (N - 1).
+    // We need the full 512-bit product, then mask the lower 256 bits.
+    // Since N <= 2^255 (it's a uint256 power of 2), the mask fits in 256 bits.
+    U256Inst A = extractU256Operand(MultiplicandOp);
+    U256Inst B = extractU256Operand(MultiplierOp);
+    U512Inst Product = compute512BitProduct(A, B);
+
+    // Mask = N - 1
+    intx::uint256 Mask = N - 1;
+    U256Value MaskVal = intxToU256Value(Mask);
+
+    // Result = Product_lo & Mask
+    U256Inst Result;
+    for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+      if (MaskVal[I] == 0) {
+        Result[I] = Zero;
+      } else if (MaskVal[I] == UINT64_MAX) {
+        Result[I] = Product[I];
+      } else {
+        MInstruction *MaskConst =
+            createIntConstInstruction(I64Type, MaskVal[I]);
+        Result[I] = createInstruction<BinaryInstruction>(false, OP_and, I64Type,
+                                                         Product[I], MaskConst);
+      }
+    }
+    return Operand(Result, EVMType::UINT256);
+  }
+
+  // Check if Barrett reduction is feasible: mu = floor(2^512 / N) must fit
+  // in at most 258 bits so that mu_hi fits in 2 bits (values 0, 1, 2, or 3).
+  // This is true when N >= 2^254 (the top limb N[3] >= 2^62).
+  // For smaller N, fall back to runtime.
+  using uint768 = intx::uint<768>;
+  uint768 Pow2_512 = uint768(1) << 512;
+  uint768 Mu768 = Pow2_512 / uint768(N);
+
+  // Check mu bit width: must be <= 258 bits (fits in 256 + 2 bits)
+  if ((Mu768 >> 258) != uint768(0)) {
+    // mu is too large for inline Barrett — fall back to runtime
+    const auto &RuntimeFunctions = getRuntimeFunctionTable();
+    Operand ModulusOp(intxToU256Value(N));
+    return callRuntimeFor<const intx::uint256 *, const intx::uint256 &,
+                          const intx::uint256 &, const intx::uint256 &>(
+        RuntimeFunctions.GetMulMod, MultiplicandOp, MultiplierOp, ModulusOp);
+  }
+
+  // General Barrett reduction for constant modulus N >= 2^254.
+  //
+  // mu fits in at most 258 bits. Split as:
+  //   mu_lo = lower 256 bits of mu (4 x u64 limbs)
+  //   mu_hi = upper bits (at most 2 bits, value 0..3)
+  intx::uint256 MuLo = intx::uint256(Mu768); // lower 256 bits
+  uint64_t MuHi = static_cast<uint64_t>(Mu768 >> 256);
+
+  U256Value MuLoVal = intxToU256Value(MuLo);
+  U256Value NVal = intxToU256Value(N);
+
+  // Step 1: Compute 512-bit product P = A * B
+  U256Inst A = extractU256Operand(MultiplicandOp);
+  U256Inst B = extractU256Operand(MultiplierOp);
+  U512Inst Product = compute512BitProduct(A, B);
+
+  // Extract P_lo and P_hi
+  U256Inst PLo = {Product[0], Product[1], Product[2], Product[3]};
+  U256Inst PHi = {Product[4], Product[5], Product[6], Product[7]};
+
+  // Step 2: q_hat = upper_256(P_hi * mu_lo) + (mu_hi ? P_hi : 0)
+  // Create constant mu_lo limbs
+  U256Inst MuLoInst;
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    MuLoInst[I] = createIntConstInstruction(I64Type, MuLoVal[I]);
+  }
+
+  // Protect P_hi limbs since they will be used in multiple multiplies
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    PHi[I] = protectUnsafeValue(PHi[I], I64Type);
+  }
+
+  // upper_256(P_hi * mu_lo) — 256x256 multiply, keep upper 256 bits
+  U256Inst QHat = multiply256x256Upper(PHi, MuLoInst);
+
+  // Add mu_hi * P_hi (compile-time constant mu_hi, at most 3).
+  // mu_hi * P_hi is computed as repeated 256-bit additions.
+  for (uint64_t K = 0; K < MuHi; ++K) {
+    MInstruction *Carry = createIntConstInstruction(I64Type, 0);
+    for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+      QHat[I] = protectUnsafeValue(QHat[I], I64Type);
+      PHi[I] = protectUnsafeValue(PHi[I], I64Type);
+    }
+    for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+      if (I == 0) {
+        MInstruction *AddResult = createInstruction<BinaryInstruction>(
+            false, OP_add, I64Type, QHat[I], PHi[I]);
+        QHat[I] = protectUnsafeValue(AddResult, I64Type);
+      } else {
+        MInstruction *AdcResult = createInstruction<AdcInstruction>(
+            false, I64Type, QHat[I], PHi[I], Carry);
+        QHat[I] = protectUnsafeValue(AdcResult, I64Type);
+      }
+    }
+  }
+
+  // Step 3: QN = lower_256(q_hat * N) — only need lower 256 bits
+  U256Inst NInst;
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    NInst[I] = createIntConstInstruction(I64Type, NVal[I]);
+  }
+
+  U256Inst QN = multiply256x256Lower(QHat, NInst);
+
+  // Step 4: r = P_lo - QN (256-bit subtraction, mod 2^256)
+  // Protect all operands before SUB/SBB chain
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    PLo[I] = protectUnsafeValue(PLo[I], I64Type);
+    QN[I] = protectUnsafeValue(QN[I], I64Type);
+  }
+
+  U256Inst Remainder;
+  {
+    MInstruction *Borrow = createIntConstInstruction(I64Type, 0);
+    for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+      if (I == 0) {
+        MInstruction *SubResult = createInstruction<BinaryInstruction>(
+            false, OP_sub, I64Type, PLo[I], QN[I]);
+        Remainder[I] = protectUnsafeValue(SubResult, I64Type);
+      } else {
+        MInstruction *SbbResult = createInstruction<SbbInstruction>(
+            false, I64Type, PLo[I], QN[I], Borrow);
+        Remainder[I] = protectUnsafeValue(SbbResult, I64Type);
+      }
+    }
+  }
+
+  // Step 5: Correction — subtract N at most twice (branchless).
+  // Use the same cascaded limb comparison pattern as handleAddMod.
+  auto u256GeConstant = [&](const U256Inst &Value,
+                            const U256Inst &Threshold) -> MInstruction * {
+    // Returns 1 if Value >= Threshold, 0 otherwise.
+    // Equivalent to !(Value < Threshold).
+    // Use cascaded limb comparison: high-to-low.
+    MInstruction *LtResult = nullptr;
+    MInstruction *AllEqual = nullptr;
+    for (int I = EVM_ELEMENTS_COUNT - 1; I >= 0; --I) {
+      MInstruction *LT = createInstruction<CmpInstruction>(
+          false, CmpInstruction::ICMP_ULT, I64Type, Value[I], Threshold[I]);
+      MInstruction *EQ = createInstruction<CmpInstruction>(
+          false, CmpInstruction::ICMP_EQ, I64Type, Value[I], Threshold[I]);
+      if (LtResult == nullptr) {
+        LtResult = LT;
+        AllEqual = EQ;
+      } else {
+        LtResult = createInstruction<SelectInstruction>(false, I64Type,
+                                                        AllEqual, LT, LtResult);
+        AllEqual = createInstruction<BinaryInstruction>(false, OP_and, I64Type,
+                                                        AllEqual, EQ);
+      }
+    }
+    // GE = !LT = LT xor 1
+    MInstruction *One = createIntConstInstruction(I64Type, 1);
+    return createInstruction<BinaryInstruction>(false, OP_xor, I64Type,
+                                                LtResult, One);
+  };
+
+  auto u256SubConst = [&](const U256Inst &Value,
+                          const U256Inst &Sub) -> U256Inst {
+    // Compute Value - Sub using SUB/SBB chain
+    U256Inst Res;
+    // Protect operands before chain
+    U256Inst ValProt, SubProt;
+    for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+      ValProt[I] = protectUnsafeValue(Value[I], I64Type);
+      SubProt[I] = protectUnsafeValue(Sub[I], I64Type);
+    }
+    MInstruction *Borrow = createIntConstInstruction(I64Type, 0);
+    for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+      if (I == 0) {
+        MInstruction *SubResult = createInstruction<BinaryInstruction>(
+            false, OP_sub, I64Type, ValProt[I], SubProt[I]);
+        Res[I] = protectUnsafeValue(SubResult, I64Type);
+      } else {
+        MInstruction *SbbResult = createInstruction<SbbInstruction>(
+            false, I64Type, ValProt[I], SubProt[I], Borrow);
+        Res[I] = protectUnsafeValue(SbbResult, I64Type);
+      }
+    }
+    return Res;
+  };
+
+  // First correction: if r >= N, r = r - N
+  U256Inst RSubN1 = u256SubConst(Remainder, NInst);
+  MInstruction *GeN1 = u256GeConstant(Remainder, NInst);
+  U256Inst CorrectedR1;
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    CorrectedR1[I] = createInstruction<SelectInstruction>(
+        false, I64Type, GeN1, RSubN1[I], Remainder[I]);
+  }
+
+  // Need fresh N constants for second comparison (protect reuse)
+  U256Inst NInst2;
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    NInst2[I] = createIntConstInstruction(I64Type, NVal[I]);
+  }
+
+  // Second correction: if r >= N, r = r - N
+  U256Inst RSubN2 = u256SubConst(CorrectedR1, NInst2);
+  MInstruction *GeN2 = u256GeConstant(CorrectedR1, NInst2);
+  U256Inst Result;
+  for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
+    Result[I] = createInstruction<SelectInstruction>(false, I64Type, GeN2,
+                                                     RSubN2[I], CorrectedR1[I]);
+  }
+
+  return Operand(Result, EVMType::UINT256);
 }
 
 typename EVMMirBuilder::Operand EVMMirBuilder::handleExp(Operand BaseOp,
