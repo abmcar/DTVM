@@ -2396,8 +2396,11 @@ EVMMirBuilder::handleMulModConstant(const Operand &MultiplicandOp,
 
   // Add mu_hi * P_hi (compile-time constant mu_hi, at most 3).
   // mu_hi * P_hi is computed as repeated 256-bit additions.
+  // Track carry-out from the addition chain to avoid q_hat truncation.
+  // The true q_hat = QHat[0..3] + QHatCarry * 2^256.
+  MInstruction *QHatCarry = Zero;
   for (uint64_t K = 0; K < MuHi; ++K) {
-    MInstruction *Carry = createIntConstInstruction(I64Type, 0);
+    MInstruction *CarryPlaceholder = createIntConstInstruction(I64Type, 0);
     for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
       QHat[I] = protectUnsafeValue(QHat[I], I64Type);
       PHi[I] = protectUnsafeValue(PHi[I], I64Type);
@@ -2409,50 +2412,95 @@ EVMMirBuilder::handleMulModConstant(const Operand &MultiplicandOp,
         QHat[I] = protectUnsafeValue(AddResult, I64Type);
       } else {
         MInstruction *AdcResult = createInstruction<AdcInstruction>(
-            false, I64Type, QHat[I], PHi[I], Carry);
+            false, I64Type, QHat[I], PHi[I], CarryPlaceholder);
         QHat[I] = protectUnsafeValue(AdcResult, I64Type);
       }
     }
+    // Capture carry-out from the top-limb ADC using ADC(0, 0, 0).
+    // This reads CF set by the preceding ADC and produces 0 or 1.
+    MInstruction *IterCarry = createInstruction<AdcInstruction>(
+        false, I64Type, Zero, Zero, createIntConstInstruction(I64Type, 0));
+    IterCarry = protectUnsafeValue(IterCarry, I64Type);
+    // Accumulate into QHatCarry (sum of per-iteration carries)
+    QHatCarry = createInstruction<BinaryInstruction>(false, OP_add, I64Type,
+                                                     QHatCarry, IterCarry);
+    QHatCarry = protectUnsafeValue(QHatCarry, I64Type);
   }
 
-  // Step 3: QN = lower_256(q_hat * N) — only need lower 256 bits
+  // Step 3: Compute QN = q_hat * N.
+  // We need lower 5 limbs (320 bits) of the true product, because the
+  // Barrett remainder r = P - q_hat*N can be up to 3*N (< 3 * 2^256),
+  // requiring 258 bits.
+  //
+  // True q_hat = QHat[0..3] + QHatCarry * 2^256.
+  // QN_true = QHat[0..3] * N + QHatCarry * 2^256 * N
+  //
+  // Lower 4 limbs of QN_true = lower 4 limbs of QHat[0..3] * N
+  //   (the QHatCarry term contributes 0 mod 2^256).
+  // Limb 4 of QN_true = (QHat[0..3] * N)[4] + QHatCarry * N[0] (mod 2^64)
+  //   (higher terms from QHatCarry * N go to limbs 5+, not needed).
   U256Inst NInst;
   for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
     NInst[I] = createIntConstInstruction(I64Type, NVal[I]);
   }
 
-  U256Inst QN = multiply256x256Lower(QHat, NInst);
+  // Compute full 512-bit product of QHat[0..3] * N to get limbs 0-4
+  U512Inst QNFull = compute512BitProduct(QHat, NInst);
 
-  // Step 4: r = P_lo - QN (256-bit subtraction, mod 2^256)
-  // Protect all operands before SUB/SBB chain
+  // Adjust limb 4 for the QHatCarry contribution
+  MInstruction *QHatCarryTimesN0 = createInstruction<BinaryInstruction>(
+      false, OP_mul, I64Type, QHatCarry,
+      createIntConstInstruction(I64Type, NVal[0]));
+  MInstruction *QN4Adjusted = createInstruction<BinaryInstruction>(
+      false, OP_add, I64Type, QNFull[4], QHatCarryTimesN0);
+
+  // Step 4: r = P[0..4] - QN[0..4] (5-limb subtraction).
+  // The true remainder 0 <= r < 3*N < 3*2^256, so it fits in 258 bits.
+  // R[4] will hold the overflow (value 0, 1, or 2).
   for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
     PLo[I] = protectUnsafeValue(PLo[I], I64Type);
-    QN[I] = protectUnsafeValue(QN[I], I64Type);
+    QNFull[I] = protectUnsafeValue(QNFull[I], I64Type);
   }
+  MInstruction *PLimb4 = protectUnsafeValue(Product[4], I64Type);
+  QN4Adjusted = protectUnsafeValue(QN4Adjusted, I64Type);
 
   U256Inst Remainder;
+  MInstruction *RemExtra; // 5th limb of remainder (0, 1, or 2)
   {
-    MInstruction *Borrow = createIntConstInstruction(I64Type, 0);
+    MInstruction *BorrowPlaceholder = createIntConstInstruction(I64Type, 0);
+    // Limbs 0-3: SUB/SBB chain
     for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
       if (I == 0) {
         MInstruction *SubResult = createInstruction<BinaryInstruction>(
-            false, OP_sub, I64Type, PLo[I], QN[I]);
+            false, OP_sub, I64Type, PLo[I], QNFull[I]);
         Remainder[I] = protectUnsafeValue(SubResult, I64Type);
       } else {
         MInstruction *SbbResult = createInstruction<SbbInstruction>(
-            false, I64Type, PLo[I], QN[I], Borrow);
+            false, I64Type, PLo[I], QNFull[I], BorrowPlaceholder);
         Remainder[I] = protectUnsafeValue(SbbResult, I64Type);
       }
     }
+    // Limb 4: continue the SBB chain for the 5th limb
+    MInstruction *Sbb4Result = createInstruction<SbbInstruction>(
+        false, I64Type, PLimb4, QN4Adjusted,
+        createIntConstInstruction(I64Type, 0));
+    RemExtra = protectUnsafeValue(Sbb4Result, I64Type);
   }
 
   // Step 5: Correction — subtract N at most twice (branchless).
-  // Use the same cascaded limb comparison pattern as handleAddMod.
+  // The remainder is (Remainder[0..3], RemExtra) where RemExtra is 0, 1, or 2.
+  // N is (NVal[0..3], 0) — the 5th limb of N is always 0.
+  //
+  // Comparison: (R, RemExtra) >= (N, 0) iff:
+  //   RemExtra > 0, OR (RemExtra == 0 AND R[0..3] >= N[0..3])
+  //
+  // Subtraction: (R, RemExtra) - (N, 0):
+  //   R_new[0..3] = R[0..3] - N[0..3] with borrow chain
+  //   RemExtra_new = RemExtra - borrow
+
+  // Helper: 256-bit comparison R[0..3] >= N (cascaded limb comparison)
   auto u256GeConstant = [&](const U256Inst &Value,
                             const U256Inst &Threshold) -> MInstruction * {
-    // Returns 1 if Value >= Threshold, 0 otherwise.
-    // Equivalent to !(Value < Threshold).
-    // Use cascaded limb comparison: high-to-low.
     MInstruction *LtResult = nullptr;
     MInstruction *AllEqual = nullptr;
     for (int I = EVM_ELEMENTS_COUNT - 1; I >= 0; --I) {
@@ -2470,23 +2518,24 @@ EVMMirBuilder::handleMulModConstant(const Operand &MultiplicandOp,
                                                         AllEqual, EQ);
       }
     }
-    // GE = !LT = LT xor 1
     MInstruction *One = createIntConstInstruction(I64Type, 1);
     return createInstruction<BinaryInstruction>(false, OP_xor, I64Type,
                                                 LtResult, One);
   };
 
-  auto u256SubConst = [&](const U256Inst &Value,
-                          const U256Inst &Sub) -> U256Inst {
-    // Compute Value - Sub using SUB/SBB chain
+  // Helper: 5-limb subtraction (R[0..3], Extra) - (N[0..3], 0)
+  // Returns new R[0..3] and new Extra.
+  auto u256SubConstWithExtra =
+      [&](const U256Inst &Value, MInstruction *Extra,
+          const U256Inst &Sub) -> std::pair<U256Inst, MInstruction *> {
     U256Inst Res;
-    // Protect operands before chain
     U256Inst ValProt, SubProt;
     for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
       ValProt[I] = protectUnsafeValue(Value[I], I64Type);
       SubProt[I] = protectUnsafeValue(Sub[I], I64Type);
     }
-    MInstruction *Borrow = createIntConstInstruction(I64Type, 0);
+    Extra = protectUnsafeValue(Extra, I64Type);
+    MInstruction *BorrowPH = createIntConstInstruction(I64Type, 0);
     for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
       if (I == 0) {
         MInstruction *SubResult = createInstruction<BinaryInstruction>(
@@ -2494,31 +2543,57 @@ EVMMirBuilder::handleMulModConstant(const Operand &MultiplicandOp,
         Res[I] = protectUnsafeValue(SubResult, I64Type);
       } else {
         MInstruction *SbbResult = createInstruction<SbbInstruction>(
-            false, I64Type, ValProt[I], SubProt[I], Borrow);
+            false, I64Type, ValProt[I], SubProt[I], BorrowPH);
         Res[I] = protectUnsafeValue(SbbResult, I64Type);
       }
     }
-    return Res;
+    // Capture borrow from the 4-limb chain using ADC(0, 0, 0).
+    // After SUB/SBB, CF = borrow. ADC(0, 0, 0) reads CF and produces 0 or 1.
+    MInstruction *Borrow = createInstruction<AdcInstruction>(
+        false, I64Type, Zero, Zero, createIntConstInstruction(I64Type, 0));
+    Borrow = protectUnsafeValue(Borrow, I64Type);
+    // New extra = old Extra - borrow (using plain subtraction)
+    MInstruction *NewExtra = createInstruction<BinaryInstruction>(
+        false, OP_sub, I64Type, Extra, Borrow);
+    return {Res, NewExtra};
   };
 
-  // First correction: if r >= N, r = r - N
-  U256Inst RSubN1 = u256SubConst(Remainder, NInst);
-  MInstruction *GeN1 = u256GeConstant(Remainder, NInst);
+  // Helper: 5-limb comparison (R[0..3], Extra) >= (N[0..3], 0)
+  auto u256GeConstantWithExtra =
+      [&](const U256Inst &Value, MInstruction *Extra,
+          const U256Inst &Threshold) -> MInstruction * {
+    // If Extra > 0: always >= (since N's 5th limb is 0)
+    MInstruction *ExtraIsNonZero = createInstruction<CmpInstruction>(
+        false, CmpInstruction::ICMP_NE, I64Type, Extra, Zero);
+    // If Extra == 0: use 256-bit comparison
+    MInstruction *LowGe = u256GeConstant(Value, Threshold);
+    return createInstruction<BinaryInstruction>(false, OP_or, I64Type,
+                                                ExtraIsNonZero, LowGe);
+  };
+
+  // First correction: if (R, RemExtra) >= (N, 0), subtract N
+  auto [RSubN1, RemExtra1] = u256SubConstWithExtra(Remainder, RemExtra, NInst);
+  MInstruction *GeN1 = u256GeConstantWithExtra(Remainder, RemExtra, NInst);
   U256Inst CorrectedR1;
   for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
     CorrectedR1[I] = createInstruction<SelectInstruction>(
         false, I64Type, GeN1, RSubN1[I], Remainder[I]);
   }
+  MInstruction *CorrectedExtra1 = createInstruction<SelectInstruction>(
+      false, I64Type, GeN1, RemExtra1, RemExtra);
 
-  // Need fresh N constants for second comparison (protect reuse)
+  // Fresh N constants for second comparison
   U256Inst NInst2;
   for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
     NInst2[I] = createIntConstInstruction(I64Type, NVal[I]);
   }
 
-  // Second correction: if r >= N, r = r - N
-  U256Inst RSubN2 = u256SubConst(CorrectedR1, NInst2);
-  MInstruction *GeN2 = u256GeConstant(CorrectedR1, NInst2);
+  // Second correction: if (R, RemExtra) >= (N, 0), subtract N
+  auto [RSubN2, RemExtra2] =
+      u256SubConstWithExtra(CorrectedR1, CorrectedExtra1, NInst2);
+  (void)RemExtra2; // After two corrections, the extra limb is guaranteed 0
+  MInstruction *GeN2 =
+      u256GeConstantWithExtra(CorrectedR1, CorrectedExtra1, NInst2);
   U256Inst Result;
   for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
     Result[I] = createInstruction<SelectInstruction>(false, I64Type, GeN2,
