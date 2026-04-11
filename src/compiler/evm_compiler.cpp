@@ -68,7 +68,7 @@ void EagerEVMJITCompiler::compile() {
                   EVMMod->CodeSize);
   const auto &Cache = EVMMod->getBytecodeCache();
   Ctx.setGasChunkInfo(Cache.GasChunkEnd.data(), Cache.GasChunkCost.data(),
-                      EVMMod->CodeSize);
+                      Cache.GasChunkCostSPP.data(), EVMMod->CodeSize);
 
   MModule Mod(Ctx);
   buildEVMFunction(Ctx, Mod, *EVMMod);
