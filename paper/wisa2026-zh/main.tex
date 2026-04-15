@@ -1,0 +1,80 @@
+% paper/wisa2026-zh/main.tex
+% WISA 2026 中文短文稿（≤ 7 页）
+% 本稿以 article + ctex + twocolumn 近似《计算机工程与应用》投稿排版，
+% 录用后须替换为 CEAJ 官方模板。双盲：不含作者、单位、致谢、资助、
+% 自引及代码仓链接。
+\documentclass[10pt,a4paper,twocolumn]{article}
+
+\usepackage[UTF8,fontset=none]{ctex}
+\setCJKmainfont{Noto Serif CJK SC}[
+  BoldFont = Noto Serif CJK SC Bold,
+  ItalicFont = Noto Serif CJK SC,
+  BoldItalicFont = Noto Serif CJK SC Bold
+]
+\setCJKsansfont{Noto Sans CJK SC}
+\setCJKmonofont{Noto Sans Mono CJK SC}
+\newCJKfontfamily\heiti{Noto Sans CJK SC Bold}
+
+\usepackage[a4paper,left=2cm,right=2cm,top=2.2cm,bottom=2.2cm,columnsep=0.7cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\setlist[itemize]{topsep=1pt,partopsep=0pt,parsep=1pt,itemsep=1pt,leftmargin=1.6em}
+\setlist[enumerate]{topsep=1pt,partopsep=0pt,parsep=1pt,itemsep=1pt,leftmargin=1.8em}
+\setlength{\parskip}{2pt plus 0.5pt minus 0.5pt}
+\setlength{\textfloatsep}{5pt plus 1pt minus 1pt}
+\setlength{\intextsep}{5pt plus 1pt minus 1pt}
+\setlength{\abovecaptionskip}{3pt}
+\setlength{\belowcaptionskip}{2pt}
+
+\usepackage{titlesec}
+\titleformat*{\section}{\normalsize\heiti}
+\titleformat*{\subsection}{\small\heiti}
+\titlespacing*{\section}{0pt}{1.2ex plus 0.3ex minus 0.2ex}{0.6ex plus 0.1ex}
+\titlespacing*{\subsection}{0pt}{0.9ex plus 0.2ex minus 0.2ex}{0.4ex plus 0.1ex}
+
+\providecommand{\doi}[1]{}
+\usepackage[numbers,sort&compress]{gbt7714}
+
+\title{\bfseries 面向区块链信息系统执行层的可验证窥孔优化：\\基于 dMIR 进位链原语与 SMT 规则准入的方法}
+\author{匿名作者~~匿名单位}
+\date{}
+
+\begin{document}
+
+\twocolumn[
+\begin{@twocolumnfalse}
+\maketitle
+\begin{center}
+\parbox{0.9\textwidth}{\small
+\textbf{摘要：} TBD — T13 填。
+\vspace{0.3em}
+
+\textbf{关键词：}区块链信息系统；EVM JIT；窥孔优化；SMT 规则准入；进位链；dMIR
+}
+\end{center}
+\vspace{1.0em}
+\end{@twocolumnfalse}
+]
+
+\input{sections/01-intro}
+\input{sections/02-problem}
+\input{sections/03-method}
+\input{sections/04-evaluation}
+\input{sections/05-related}
+\input{sections/06-conclusion}
+\input{sections/07-availability}
+
+% gbt7714 package auto-sets bibstyle; do not call \bibliographystyle again.
+% Baseline scaffold: \nocite{*} exercises references.bib while sections are
+% empty so bib entries fail fast; remove or replace with \cite{...} once
+% T13-T18 wire in actual citations.
+\nocite{*}
+\bibliography{references}
+
+\end{document}
