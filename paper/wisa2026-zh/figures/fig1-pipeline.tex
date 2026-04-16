@@ -1,0 +1,53 @@
+% figures/fig1-pipeline.tex — Pipeline architecture diagram (Task T10)
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  >=Stealth,
+  scale=0.75, every node/.style={scale=0.75},
+  box/.style={draw, rounded corners=2pt, minimum height=0.65cm,
+              inner sep=3pt, align=center, font=\footnotesize},
+  arr/.style={->, thick},
+]
+  % --- Left: two enumeration paths ---
+  \node[box] (enum1) {深度2枚举\\[-1pt]{\scriptsize (代数恒等)}};
+  \node[box, below=0.45cm of enum1] (enum2) {ADC/SBB模板\\[-1pt]{\scriptsize (进位链)}};
+
+  % --- Merge point (invisible) between the two enum nodes ---
+  \coordinate (merge) at ($(enum1.south east)!0.5!(enum2.north east) + (0.55,0)$);
+
+  % --- Z3 admission ---
+  \node[box, right=0.3cm of merge] (z3) {Z3准入\\[-1pt]{\scriptsize (位向量等价)}};
+
+  % --- Rule JSON ---
+  \node[box, right=0.55cm of z3] (json) {规则JSON\\[-1pt]{\scriptsize (83条)}};
+
+  % --- Two integration levels ---
+  \node[box, above right=0.25cm and 0.6cm of json.east, anchor=west] (dmir) {dMIR层};
+  \node[box, below right=0.25cm and 0.6cm of json.east, anchor=west] (x86) {x86 CgIR层};
+
+  % --- CI verification ---
+  \coordinate (cianchor) at ($(dmir.east)!0.5!(x86.east) + (0.5,0)$);
+  \node[box, anchor=west] (ci) at (cianchor) {CI校验\\[-1pt]{\scriptsize (Z3重放)}};
+
+  % --- Arrows: enum paths -> merge ---
+  \draw[arr] (enum1.east) -- ++(0.25,0) |- (merge);
+  \draw[-,thick] (enum2.east) -- ++(0.25,0) |- (merge);
+
+  % --- Arrow: merge -> Z3 ---
+  \draw[arr] (merge) -- (z3.west);
+
+  % --- Arrow: Z3 -> JSON ---
+  \draw[arr] (z3) -- (json);
+
+  % --- Arrows: JSON -> dMIR / x86 ---
+  \draw[arr] (json.east) -- node[above, font=\scriptsize, pos=0.4] {70} (dmir.west);
+  \draw[arr] (json.east) -- node[below, font=\scriptsize, pos=0.4] {13} (x86.west);
+
+  % --- Arrows: dMIR / x86 -> CI ---
+  \draw[arr] (dmir.east) -- ++(0.15,0) |- (ci.west);
+  \draw[-,thick] (x86.east) -- ++(0.15,0) |- (ci.west);
+
+\end{tikzpicture}
+\caption{离线规则合成与两级集成流水线。}
+\label{fig:pipeline}
+\end{figure}
