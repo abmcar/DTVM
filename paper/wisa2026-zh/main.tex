@@ -53,7 +53,23 @@
 \maketitle
 \begin{center}
 \parbox{0.9\textwidth}{\small
-\textbf{摘要：} TBD — T13 填。
+\textbf{摘要：}区块链信息系统的执行层需要在所有共识节点上按位一致地执行智能合约，因此
+EVM 即时编译器（JIT）中的每一条窥孔重写规则都是共识关键资产：一条被误判为等价的规则如果
+只在部分客户端上线，就可能引发链分叉。本文为面向此类执行层的确定性 EVM JIT 构建了一套
+两级窥孔重写系统。在 DTVM 的 dMIR（确定性中间表示）层，我们把带进位加减法
+\texttt{adc}/\texttt{sbb} 作为一等位向量算子，所有 \textbf{70} 条 dMIR 规则都通过
+Z3 位向量等价性校验，且校验脚本随代码改动在持续集成中自动重新执行；在其下方的 x86
+代码生成层另有 \textbf{13} 条针对寄存器、标志位与分支跳转的机械冗余清理规则，这一层的
+正确性由开启与关闭规则集两侧的对照测试套件覆盖。这一设计补足了形式化窥孔验证工作在
+JIT 执行路径上收益最大的一类规则——256 位字长映射到 64 位硬件后产生的多字进位链——的
+覆盖空白：现有通用编译器中间表示（如 LLVM）把进位位以多返回值结构间接表达，使自动等价
+验证工具难以直接匹配此类规则，瓶颈不在求解器容量。在 DTVM JIT 上集成后，27 个标准
+EVM 智能合约基准上的几何均值加速为 \textbf{+5.93\%}（95\% 置信区间
+[+3.53\%, +8.78\%]），峰值加速 \textbf{+24.7\%}；开启与关闭规则集两侧的
+\textbf{223/223} 条 JIT 单元测试、\textbf{215/215} 条解释器单元测试和
+\textbf{2723/2723} 条 Cancun 状态转换测试全部通过且两侧结果一致；与同样做形式化
+EVM 优化的代表工作 Albert 等人在 CAV 2023 发表的字节码块级验证规则集合相比，规则重合度
+仅 \textbf{8.4\%}（7/83 条），两套规则集指向不同的抽象层次。
 \vspace{0.3em}
 
 \textbf{关键词：}区块链信息系统；EVM JIT；窥孔优化；SMT 规则准入；进位链；dMIR
@@ -72,9 +88,8 @@
 \input{sections/07-availability}
 
 % gbt7714 package auto-sets bibstyle; do not call \bibliographystyle again.
-% Baseline scaffold: \nocite{*} exercises references.bib while sections are
-% empty so bib entries fail fast; remove or replace with \cite{...} once
-% T13-T18 wire in actual citations.
+% \nocite{*} kept so all bib entries appear while sections are being drafted;
+% remove once T17 wires in all actual \cite{} calls.
 \nocite{*}
 \bibliography{references}
 
