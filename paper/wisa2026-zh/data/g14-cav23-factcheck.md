@@ -38,6 +38,17 @@ Sources:
 
 **结论：N = 14（artifact-faithful），和 PDF 正文 15 的 -1 差异单独在脚注交代。**
 
+**PDF line 498 的硬证据**：原文 line 498（精确 sed 片段）"so we predict a success
+rate of 100% when all the rules in App. A in [10] are integrated" 明确暗示 App. A
+in [10] 是比 stack-only 当前实现更大的**超集**（作者自己说"当 App. A 全部规则被集成
+后"才能达到 100%，反证当前 stack-only artifact 尚未集成 App. A 全集）。我们的
+N = 14 对应 stack-only 分支的 artifact 实现快照，不是 App. A 的理论上限。
+DTVM 83 条同为 stack 层 / JIT 层的实现快照，两侧口径一致：**不可复现的
+App. A 超集不纳入 overlap 分母**。若 App. A 含 memory/storage 规则，由于
+DTVM 83 条也未涉及该层，overlap 分子仍为 7；该层的额外规则（假设 K 条）
+会让分母从 14 放大为 14+K，使 Albert-side 覆盖率从 7/14=50% 下降到更低，
+对我方反而更有利。我们取 stack-only 为公平口径。
+
 ## Per-Rule Verification (7 overlap candidates)
 
 全部 7 条候选 overlap 规则均在 cav23_rules.json 中命中（index/14, coq_def_line 有
@@ -77,21 +88,20 @@ in [10]（extended version）。主 PDF 不展开列表是因为 12 页会议页
 
 ## Verdict
 
-- [x] **锚点 8.4% 成立**（全部 7 条在 artifact JSON 中命中且 DTVM 分母 83 已
-  核验）。可直接进正文。**无需修订 8.4% 这个数。**
-
-- [x] **建议在 §5.2 或脚注补一句口径说明**，澄清 N=14 的选择依据，防止审稿人
-  读到 PDF 正文 "15 simplification rules" 时质疑。推荐原文（中文）：
-  > "Albert et al. 的 CAV'23 论文正文声称实现 15 条化简规则（§5），而其
-  > 开源 artifact (Coq 源 optimizations.v, stack-only 分支) 实际定义 14 条
-  > top-level `optimize_*`。本文以 artifact 可复现计数为准，取 N=14。"
-
-- 需同步修订的位置：**无**。abstract / §1.4 / §4.3 脚注 / §5.2 / §6 五处
-  "7/83 = 8.4%" 不变。Tab 4.3 中 CAV'23 overlap 相关行（若有）保持现状。
-
-- **额外建议**（非阻塞）：在 §5.2 规模对照里补 "Albert 14 vs DTVM 83"
-  的不对等论据，利用 7/14=50% 讲述"DTVM 覆盖 CAV'23 高频规则的一半"，
-  而非仅单侧讲 8.4%。这是 Task 3 Step 3 的料，不在本 G14 范围内。
+- [x] **数值锚点 (8.4% = 7/83) 无需修订**：abstract / §1.4 / §4.3 脚注 / §5.2 / §6
+  / Tab 4.3 五处的 8.4% 数值保持不变。
+- [ ] **§5.2 narrative 必须新增 asymmetry + universal-BV-defense 段**（Task 3 Step 3
+  强制交付，非 optional）。方向：不要讲"DTVM 覆盖了 Albert 一半"，应翻转为
+  "Albert 14 条全部在 stack 代数层；DTVM 83 条中该 7 条是任何 verified BV peephole
+  必然重合的 universal identity 子集（ADD-0, MUL-1, MUL-0, OR-0, NOT-NOT,
+  SUB-self, AND-absorb；见 Alive2 / Souper / LLVM InstCombine 同类实现），
+  其余 76 条覆盖 Albert 未涉及的范畴：x86 后端（13 条）、u256-specific rules、
+  carry chain rules、constant folding 等。"
+- [ ] **§5.2 或 §4.3 脚注必须新增 N=14 口径说明**（Task 3 Step 3 交付）。参考：
+  "We compare against the stack-only release branch of Albert et al.'s artifact,
+  which is consistent with DTVM's stack-layer rule set; memory/storage
+  optimizations in the extended Appendix A [10] are out of scope for both
+  systems."（中文改写）
 
 ## Notes for downstream tasks
 
