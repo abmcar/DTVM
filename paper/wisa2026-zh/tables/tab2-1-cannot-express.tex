@@ -3,22 +3,22 @@
 \centering
 \caption{在通用中间表示（LLVM IR + Alive2）下不可直接等价验证的 4 条典型进位链规则}
 \label{tab:cannot-express}
-\small
+\scriptsize
 \begin{tabular}{@{}lll@{}}
 \toprule
-规则 & 重写形式 & 不可验证的原因 \\
+规则 & 重写形式 & 不可验证原因 \\
 \midrule
 \texttt{adc\_zero\_carry}
-  & $\texttt{adc}(x,y,0) \to \texttt{add}(x,y)$
-  & \multirow{3}{*}{\parbox{3.8cm}{多返回值结构\{结果,进位\}无法与纯 $N$ 位加/减法直接等价}} \\
+  & $\texttt{adc}(x,y,0)\!\to\!\texttt{add}(x,y)$
+  & \multirow{3}{*}{\parbox{2.6cm}{多返回值结构无法与纯 $N$ 位加/减法等价}} \\
 \texttt{sbb\_zero\_borrow}
-  & $\texttt{sbb}(x,y,0) \to \texttt{sub}(x,y)$ & \\
+  & $\texttt{sbb}(x,y,0)\!\to\!\texttt{sub}(x,y)$ & \\
 \texttt{sbb\_self\_zero}
-  & $\texttt{sbb}(x,x,0) \to 0$ & \\
+  & $\texttt{sbb}(x,x,0)\!\to\!0$ & \\
 \midrule
 4-limb ADC 链
-  & \parbox{3.2cm}{$4\times$\texttt{uadd.with.overflow.i64}\\$\to$ \texttt{add.i256}}
-  & \parbox{3.8cm}{链式多输出无法化归为扁平 256 位加法——U256 的典型 lowering 形态} \\
+  & \parbox{2.3cm}{$4\!\times\!$\texttt{uadd.w.overflow}\\$\to$ \texttt{add.i256}}
+  & \parbox{2.6cm}{链式多输出无法化归为 256 位加法} \\
 \bottomrule
 \end{tabular}
 \end{table}

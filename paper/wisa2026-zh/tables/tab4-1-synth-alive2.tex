@@ -3,14 +3,14 @@
 \centering
 \caption{合成管线产出与通用中间表示验证对照}
 \label{tab:synth-alive2}
-\small
+\footnotesize
 \begin{tabular}{@{}lrrrrl@{}}
 \toprule
-候选来源 & 输入 & 通过 & 拒收 & 准入率 & Alive2 状态 \\
+候选来源 & 输入 & 通过 & 拒收 & 准入率 & Alive2 \\
 \midrule
-深度 2 代数枚举
+代数枚举
   & 775 & 765 & 10$^*$ & 98.7\% & 6/10 可验证 \\
-进位加减法模板
+进位模板
   & 78 & 17 & 61 & 21.8\% & 4/10 不可表达 \\
 \bottomrule
 \multicolumn{6}{@{}l}{\scriptsize $^*$\,10 条均为超时拒收，无语义反例。}

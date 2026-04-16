@@ -3,9 +3,9 @@
 \centering
 \begin{tikzpicture}[
   >=Stealth,
-  scale=0.72, every node/.style={scale=0.72},
+  scale=0.55, every node/.style={scale=0.55},
   panel/.style={draw, rounded corners=2pt, inner sep=4pt, align=left,
-                minimum width=3.6cm},
+                minimum width=3.0cm},
   lbl/.style={font=\footnotesize\bfseries, anchor=south},
   code/.style={font=\scriptsize\ttfamily, align=left, anchor=north west},
   note/.style={font=\scriptsize, align=center},
@@ -49,6 +49,6 @@
     node[midway, above, font=\scriptsize] {对比};
 
 \end{tikzpicture}
-\caption{通用 IR 与 dMIR 在带进位加法上的表达力对比：左侧 LLVM IR 的 \texttt{uadd.with.overflow} 返回多值结构，右侧 dMIR 把进位作为一等位向量算子。}
+\caption{通用 IR 与 dMIR 在带进位加法上的表达力对比。}
 \label{fig:ir-expr}
 \end{figure}
