@@ -1,1 +1,75 @@
-% 05-related - TBD by Task T17
+% 05-related.tex — §5 相关工作与讨论
+\section{相关工作与讨论}
+
+\subsection{可验证窥孔优化框架}
+
+基于 SMT 求解器校验的窥孔优化工作可追溯到 Lopes 等人提出的
+Alive~\cite{alive}及其继任 Alive2~\cite{alive2}，以及 Sasnauskas 等人的
+Souper~\cite{souper}——它们共同确立了"先合成候选、再用 SMT 等价性验证准入"的
+基本范式。本文沿用此范式，但将校验的 IR 从通用 LLVM IR 改为 EVM JIT 的 dMIR。
+需要指出的是，Alive 的 PLDI 2015 论文已明确指出 LLVM 以多返回值结构表达进位/溢出
+标志对窥孔验证的表达力限制——这一观察是本文的起点，而非新发现。
+
+Bhat 等人在 ITP 2024 提出的 LeanMLIR~\cite{leanmlir}在 Lean~4 中形式化了
+"将窥孔验证框架对 IR 参数化"的思想，与本文的定位互补：LeanMLIR 关注证明框架
+对 IR 的通用性，本文关注在具体 IR（dMIR）上的实例化规则集与端到端集成。
+
+Mukherjee 与 Regehr 在 OOPSLA 2024 提出的 Hydra~\cite{hydra}可自动发现与输入
+位宽无关的窥孔规则。由于 Hydra 与 Alive2 同样建立在 LLVM IR 之上，在多字进位链
+这一族规则上承袭第~2~节所述的表达力限制；本文的规则合成路径通过更换 IR 基础对此
+给出一种具体的工程解法。
+%
+Schett 与 Nagele 在 FMBC 2020 发表的工作~\cite{fmbc20_evm_peephole}以相似的
+离线枚举加 SMT 流程为 EVM \emph{字节码}自动生成约 993 条规则。两者在等价性
+保证形式上对等，差别在抽象层次：本文规则集直接作用在 JIT 代码生成路径上，因此
+可同时利用 dMIR 中间表示提供的结构化匹配与 x86 层的机械冗余清理机会，这两类
+机会都不在字节码层的视野内。
+
+多字整数的 \texttt{adc}/\texttt{sbb} 进位链是 GMP、libsecp256k1 等密码学库的
+规范 lowering 形态，并对应于 Intel ADCX/ADOX 指令；4 段 64 位链是 EVM 256 位
+算术在 64 位硬件上的典型形状，并非刻意构造的边界情形。
+
+\subsection{面向共识关键路径的验证工作}
+
+Albert 等人于 CAV 2023 发表的工作~\cite{verified_evm_cav23}以 Coq 为证明基础，
+在 EVM 字节码块级提前式（AOT）优化规则集合上完成形式化证明。其定位是字节码块级、
+离线证明、通用位向量与代数恒等；本文定位是 JIT 中间表示与机器码层、规则合成时的
+SMT 准入、包含多字进位链的 EVM 专用模式。两者重合 7 条规则（均为
+$\texttt{add}(x,0) \to x$ 之类的通用位向量恒等式，详见第~\ref{sec:correctness}~节
+脚注），其余 76 条不在对方抽象层次的覆盖范围内，两者形成互补。
+
+运行时对比验证工作——如 Breidenbach 等人于 USENIX Security 2018 发表的 Hydra
+Framework~\cite{hydra_framework}所代表的多客户端共识检测系统、EVM 模糊测试以及
+共识测试网络——在上线后检测分歧；本文定位为开发期的静态强化，两者不替代而互补。
+注意此处的 Hydra Framework 与上一小节引用的 Mukherjee 等人 OOPSLA 2024 的同名
+窥孔合成工具~\cite{hydra}是两份不同的工作。
+
+\subsection{局限与未来工作}
+\label{sec:limitations}
+
+\begin{enumerate}[leftmargin=1.8em]
+  \item \textbf{可信基础。}本文的 SMT 等价性校验建立在 dMIR 的位向量语义模型
+    之上，我们假设该模型与真实 JIT 解释器的执行语义一致；对这一一致性进行系统化
+    测试是本文之外的未来工作。
+  \item \textbf{x86 代码生成层规则的校验覆盖。}13 条 x86 层规则未配套独立的
+    SMT 校验——这一层规则均为机械语法重写，其正确性由
+    第~\ref{sec:correctness}~节中开启/关闭规则集的对照测试套件保障；x86 寄存器与
+    标志位语义的形式化建模与 SMT 校验作为未来工作。
+  \item \textbf{工作负载覆盖。}本文的加速数据来自 evmone-bench 的 27 个基准，
+    它们不能代表全部生产合约。
+  \item \textbf{规则建模范围。}本文只对窥孔重写前后的算术与标志位语义做等价性
+    校验，不建模气体计费、内存别名与存储槽等副作用。
+  \item \textbf{死进位消除在 U256 加减法上的构造性阻塞。}U256 加减法下降出的
+    链首带进位加法，其第三操作数是运行时值而非可被规则匹配的零常量，因此这一条
+    规则在 U256 加减法的链首位置按构造无法生效。我们保留这条规则，因为它在 U256
+    乘法下降内部生成的独立带进位加法上仍然有效。
+  \item \textbf{编译开销的细粒度归因。}编译开销按模块整体测量（中位数
+    0.45\,ms，95 百分位 0.87\,ms）；窥孔重写单步的开销未从其它阶段中分离，
+    后续可在该步前后插入更细粒度的计时。
+  \item \textbf{负向观测值的归因。}27 个基准中有 2 条
+    （\texttt{weierstrudel/1} 与 \texttt{signextend/zero}）在开启规则集一侧
+    略慢（均在 $-2\%$ 附近）。我们对规则族做了逐一关闭的对照，没有任何一条规则
+    同时在这两条基准上呈现稳定的负贡献；关闭全部新规则后
+    \texttt{weierstrudel/1} 反而更慢。因此我们把这两条负向观测值记录为测量
+    可变性，而非规则级劣化。
+\end{enumerate}

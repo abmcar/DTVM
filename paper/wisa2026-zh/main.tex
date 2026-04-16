@@ -23,7 +23,7 @@
 \usepackage{hyperref}
 \usepackage{enumitem}
 \usepackage{tikz}
-\usetikzlibrary{positioning,arrows.meta,calc}
+\usetikzlibrary{positioning,arrows.meta,calc,patterns}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
 \setlist[itemize]{topsep=1pt,partopsep=0pt,parsep=1pt,itemsep=1pt,leftmargin=1.6em}
@@ -89,9 +89,6 @@ EVM 优化的代表工作 Albert 等人在 CAV 2023 发表的字节码块级验�
 \input{sections/07-availability}
 
 % gbt7714 package auto-sets bibstyle; do not call \bibliographystyle again.
-% \nocite{*} kept so all bib entries appear while sections are being drafted;
-% remove once T17 wires in all actual \cite{} calls.
-\nocite{*}
 \bibliography{references}
 
 \end{document}
