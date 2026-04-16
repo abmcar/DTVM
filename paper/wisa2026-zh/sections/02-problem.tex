@@ -1,1 +1,80 @@
-% 02-problem - TBD by Task T14
+% 02-problem.tex — §2 背景与动机
+\section{背景与动机}
+
+\subsection{U256 运算的代价以及进位链的代表性}
+
+EVM 的原生字长为 256 位，而当前商用硬件的通用寄存器仅有 64 位。一条
+EVM 层面的 U256 加法在 JIT 编译产出中需被拆分为 4 条机器级加法：第一条是
+普通的 64 位加法，后续 3 条为带进位加法（\texttt{adc}），形成一条\emph{串行
+进位链}。减法的情况类似，由 1 条 \texttt{sub} 与 3 条 \texttt{sbb}（带借位
+减法）构成。以下给出一个典型的 U256 加法在 dMIR 与 x86 两侧的对照代码框：
+
+\begin{center}
+\small
+\begin{tabular}{@{}l|l@{}}
+\textbf{dMIR（4-limb 加法）} & \textbf{x86-64 产出} \\
+\hline
+\texttt{r0 = add(a0, b0)}   & \texttt{add rax, rcx}  \\
+\texttt{r1 = adc(a1, b1, cout0)} & \texttt{adc rbx, rdx}  \\
+\texttt{r2 = adc(a2, b2, cout1)} & \texttt{adc rsi, rdi}  \\
+\texttt{r3 = adc(a3, b3, cout2)} & \texttt{adc r8,\enspace r9} \\
+\end{tabular}
+\end{center}
+
+在 JIT 产出的全部指令中，与 U256 多字运算直接相关的指令占比约
+\textbf{2.15\%}（基于 14 个标准基准的加权统计）。这个比例看似不高，但
+进位链的特殊之处在于：链上的每一条 \texttt{adc}/\texttt{sbb} 都依赖前一条
+的进位输出，构成严格的\emph{串行数据依赖}，无法通过指令级并行掩盖延迟。
+因此，U256 指令虽少，却对执行时间产生不成比例的影响。
+在第~\ref{sec:evaluation}~节的家族归因实验（表~\ref{tab:family-attribution}）
+中，真实合约上 U256 相关规则的命中比例在 25\% 至 99.9\% 之间分布极不均匀，
+说明进位链模式在部分合约中占主导地位。
+
+\subsection{通用中间表示对进位链的表达力限制}
+
+在 LLVM 这样的通用编译器中间表示中，基础算术运算（\texttt{add}、
+\texttt{sub}、\texttt{mul}）仅对 $N$ 位整数 \texttt{iN} 定义。若需显式获取
+进位位，程序员必须调用内置函数 \texttt{@llvm.uadd.with.overflow.iN}，该函数
+返回一个 \texttt{\{iN, i1\}} 的多返回值结构——结果与进位位打包在同一个结构
+中。换言之，进位位在 LLVM IR 中\emph{不是一等公民}，而是隐藏在结构的第二个
+字段里。
+
+这一设计对自动等价验证工具构成了表达力障碍。以 Lopes 等人在
+Alive~\cite{alive}中提出并由 Alive2~\cite{alive2}继承的窥孔验证框架为参照，
+表~\ref{tab:cannot-express}列出了 4 条典型的进位链规则，它们在 Alive2 上均
+未能直接完成等价验证——工具对这些规则返回类型不匹配或不可判定。
+
+\input{tables/tab2-1-cannot-express}
+
+值得注意的是，瓶颈并不在 SMT 求解器~\cite{demoura2008z3}的容量。我们测试了
+同一类别的其余 6 条 U256 规则（不涉及多返回值结构的进位传递），它们在 Alive2
+中均可直接通过等价验证，平均耗时约 60\,ms。这表明 256 位位向量的规模对
+求解器而言并非障碍，真正的瓶颈在于中间表示对进位位的表达方式。
+
+\input{figures/fig2-ir-expr}
+
+图~\ref{fig:ir-expr}从结构层面对比了通用 IR 与 dMIR 在带进位加法上的表达力
+差异：左侧 LLVM IR 需要 5 行代码来调用 \texttt{uadd.with.overflow} 并从
+多返回值结构中提取结果与进位位，右侧 dMIR 将进位位作为一等位向量算子，
+一条 \texttt{ADC} 指令即完成。若以进位位为一等算子，上述 4 条规则便可纳入
+自动等价验证的范围；本文沿此思路在 dMIR 上给出具体设计。
+
+\subsection{dMIR 进位链原语的设计与代价}
+
+dMIR 的核心类型是参数化位宽的位向量 $\mathrm{BV}_n$，其中
+$\mathrm{BV}_1$ 专门承担进位输入（$c_{in}$）与进位输出（$c_{out}$）。
+带进位加法的语义定义为：
+\[
+  \texttt{ADC}: \mathrm{BV}_n \times \mathrm{BV}_n \times \mathrm{BV}_1
+  \;\to\; \mathrm{BV}_n \times \mathrm{BV}_1
+\]
+\noindent 输入两个 $n$ 位操作数与一个 1 位进位，输出一个 $n$ 位结果与一个
+1 位进位。带借位减法 \texttt{SBB} 的签名完全对称。
+
+这是一个面向 EVM JIT 场景定制的中间表示设计选择，并不追求通用性。作为代价，
+我们放弃了与通用编译器基础设施（如 LLVM）的直接互操作；作为收益，我们获得了
+进位链规则在 SMT 工具下可自动等价验证这一能力。
+从工程验证角度看，表~\ref{tab:cannot-express}中列出的 4 条在通用中间表示下
+不可直接等价验证的规则，在 dMIR 的位向量模型上都被
+Z3~\cite{demoura2008z3}直接通过了——这与上一小节所揭示的表达力限制恰好相
+印证。
