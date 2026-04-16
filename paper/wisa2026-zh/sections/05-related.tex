@@ -23,7 +23,9 @@ Schett 与 Nagele 在 FMBC 2020 发表的工作~\cite{fmbc20_evm_peephole}以相
 离线枚举加 SMT 流程为 EVM \emph{字节码}自动生成约 993 条规则。两者在等价性
 保证形式上对等，差别在抽象层次：本文规则集直接作用在 JIT 代码生成路径上，因此
 可同时利用 dMIR 中间表示提供的结构化匹配与 x86 层的机械冗余清理机会，这两类
-机会都不在字节码层的视野内。
+机会都不在字节码层的视野内。两者规则数量的差距（993 对 83）反映的是作用层次
+与覆盖策略的差异：前者以字节码层代数恒等的系统穷举为目标，后者以 JIT 代码
+生成路径上的窥孔匹配触发率为目标——两套方法论平行而非竞争。
 
 多字整数的 \texttt{adc}/\texttt{sbb} 进位链是 GMP、libsecp256k1 等密码学库的
 规范 lowering 形态，并对应于 Intel ADCX/ADOX 指令；4 段 64 位链是 EVM 256 位
@@ -37,6 +39,20 @@ Albert 等人于 CAV 2023 发表的工作~\cite{verified_evm_cav23}以 Coq 为�
 SMT 准入、包含多字进位链的 EVM 专用模式。两者重合 7 条规则（均为
 $\texttt{add}(x,0) \to x$ 之类的通用位向量恒等式，详见第~\ref{sec:correctness}~节
 脚注），其余 76 条不在对方抽象层次的覆盖范围内，两者形成互补。
+
+两套规则集的规模并不对等：Albert 等人的 14 条规则\footnote{以 Albert 等人
+artifact 的 stack-only 分支 Coq 源文件 \texttt{optimizations.v} 为准；
+原文 extended version 的 Appendix A~\cite{verified_evm_cav23} 可能列出更多
+针对 memory/storage 层的规则，这部分两侧系统均不涉及，此处按 stack-only
+公平口径对照。}均作用于 EVM 字节码块级的 stack 代数化简，而本文 83 条中
+的这 7 条重合是任何 verified 位向量窥孔系统几乎必然包含的代数恒等公理
+（加法幺元、乘法幺元、乘零吸收、或零、双重否定、自减、与吸收等；在
+Alive2~\cite{alive2}、Souper~\cite{souper} 与 LLVM InstCombine 的
+peephole 集合中均可见其同构实现），不构成对 Albert 工作的衍生依赖。
+本文其余 76 条中，13 条位于 x86 代码生成层，60 余条位于 dMIR 层且覆盖
+Albert 未涉及的范畴——包含 256 位字长分解出的多字进位链规则、
+\texttt{adc}/\texttt{sbb} 语义的代数简化、与 JIT 代码生成路径相关的
+常量传播与强度削减等。
 
 运行时对比验证工作——如 Breidenbach 等人于 USENIX Security 2018 发表的 Hydra
 Framework~\cite{hydra_framework}（与上一小节的同名窥孔合成工具~\cite{hydra}不同）
@@ -67,4 +83,9 @@ Framework~\cite{hydra_framework}（与上一小节的同名窥孔合成工具~\c
     此外，27 个基准中有 2 条（\texttt{weierstrudel/1} 与
     \texttt{signextend/zero}）在开启规则集一侧略慢（均在 $-2\%$ 附近），
     逐一关闭对照未发现稳定的负贡献规则，我们将其记录为测量可变性。
+  \item \textbf{编译开销的开启/关闭对照缺失。}第~\ref{sec:evaluation}~节
+    报告的单模块编译时间中位数 0.45\,ms 与 95 百分位 0.87\,ms 均来自
+    开启规则集一侧的单边测量。EVMC 外部虚拟机接口未提供逐阶段的编译计时
+    钩子，关闭规则集一侧的对照测量需要另行插桩实现；本文仅以开启侧绝对
+    量级作为整体编译延迟的上界，不断言窥孔重写引入的净增量。
 \end{enumerate}
