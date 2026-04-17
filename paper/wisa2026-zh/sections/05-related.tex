@@ -5,13 +5,13 @@
 
 我们从作用的抽象层次、验证方法与进位链覆盖三个维度定位本文工作。基于 SMT 求解器校验的窥孔优化工作可追溯到 Lopes 等人提出的
 Alive~\cite{alive}及其后继 Alive2~\cite{alive2}，以及 Sasnauskas 等人的
-Souper~\cite{souper}——它们共同确立了"先合成候选、再用 SMT 等价性验证准入"的
+Souper~\cite{souper}——它们共同确立了“先合成候选、再用 SMT 等价性验证准入”的
 基本范式。本文沿用此范式，但将校验的 IR 从通用 LLVM IR 改为 EVM JIT 的 dMIR。
 值得说明的是，Alive 的 PLDI 2015 论文已明确指出 LLVM 以多返回值结构表达进位/溢出
 标志对窥孔验证的表达力限制——这一观察是本文的起点，而非新发现。
 
 Bhat 等人在 ITP 2024 提出的 LeanMLIR~\cite{leanmlir}在 Lean~4 中形式化了
-"将窥孔验证框架对 IR 参数化"的思想，与本文的定位互补：LeanMLIR 关注证明框架
+“将窥孔验证框架对 IR 参数化”的思想，与本文的定位互补：LeanMLIR 关注证明框架
 对 IR 的通用性，本文关注在具体 IR（dMIR）上的实例化规则集与端到端集成。
 
 Mukherjee 与 Regehr 在 OOPSLA 2024 提出的 Hydra~\cite{hydra}可自动发现与输入
