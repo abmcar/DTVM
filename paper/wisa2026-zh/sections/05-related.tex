@@ -16,7 +16,7 @@ Bhat 等人在 ITP 2024 提出的 LeanMLIR~\cite{leanmlir}在 Lean~4 中形式�
 对 IR 的通用性，本文关注在具体 IR（dMIR）上的实例化规则集与端到端集成。
 
 Mukherjee 与 Regehr 在 OOPSLA 2024 提出的 Hydra~\cite{hydra}可自动发现与输入
-位宽无关的窥孔规则。由于 Hydra 与 Alive2 同样建立在 LLVM IR 之上，在多字进位链
+位宽无关的窥孔重写规则。由于 Hydra 与 Alive2 同样建立在 LLVM IR 之上，在多字进位链
 这一族规则上承袭第~2~节所述的表达力限制；本文的规则合成路径通过更换 IR 基础对此
 给出一种具体的工程解法。
 %
@@ -29,7 +29,7 @@ Schett 与 Nagele 在 FMBC 2020 发表的工作~\cite{fmbc20_evm_peephole}以相
 生成路径上的窥孔匹配触发率为目标。
 
 多字整数的 \texttt{adc}/\texttt{sbb} 进位链是 GMP、libsecp256k1 等密码学库的
-规范 lowering 形态，并对应于 Intel ADCX/ADOX 指令；4 段 64 位链是 EVM 256 位
+规范下降形态（lowering pattern），并对应于 Intel ADCX/ADOX 指令；4 段 64 位链是 EVM 256 位
 算术在 64 位硬件上的典型形状，并非刻意构造的边界情形。
 
 \subsection{面向共识关键路径的验证工作}

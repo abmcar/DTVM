@@ -212,8 +212,8 @@ def emit_tikz(rows: List[dict]) -> str:
     lines.append(r"\end{axis}")
     lines.append(r"\end{tikzpicture}")
     lines.append(
-        r"\caption{27 个基准上启用/关闭窥孔规则集的加速比"
-        r"（95\% 置信区间误差棒，按工作负载类型分组）。}"
+        r"\caption{27 个基准上启用/关闭窥孔重写规则集的加速比"
+        r"（95\% 置信区间误差棒，按工作负载类型分组）}"
     )
     lines.append(r"\label{fig:speedup}")
     lines.append(r"\end{figure}")
