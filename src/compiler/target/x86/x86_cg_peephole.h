@@ -12,6 +12,15 @@ public:
   void peepholeOptimizeBB(CgBasicBlock &MBB);
   // Returns true when the matcher has already advanced MII.
   bool peepholeOptimize(CgBasicBlock &MBB, CgBasicBlock::iterator &MII);
+
+private:
+  void optimizeCmp(CgBasicBlock &MBB, CgBasicBlock::iterator &MII);
+  void optimizeTestSetcc(CgBasicBlock &MBB, CgBasicBlock::iterator &MII);
+  void optimizeNoOpImm(CgBasicBlock &MBB, CgBasicBlock::iterator &MII);
+  void optimizeAdcZeroReg(CgBasicBlock &MBB, CgBasicBlock::iterator &MII);
+  void optimizeAddZeroReg(CgBasicBlock &MBB, CgBasicBlock::iterator &MII);
+  void optimizeBranchInBlockEnd(CgBasicBlock &MBB, CgInstruction &MI);
+  void eraseCurrentInstruction(CgBasicBlock &MBB, CgBasicBlock::iterator &MII);
 };
 
 } // namespace COMPILER
