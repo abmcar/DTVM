@@ -48,20 +48,9 @@ Alive~\cite{alive} 中提出并由 Alive2~\cite{alive2} 继承的窥孔验证框
 
 \input{tables/tab2-1-cannot-express}
 
-表~\ref{tab:cannot-express}中 4 条规则的 Alive2 运行命令行、版本号
-（git 提交 \texttt{28b9f9c92052}，2026-03-20 master，版本字符串
-\texttt{v21.0-78-g28b9f9c9}，底层 Z3 4.8.12）与完整失败消息
-（p1/p2/p3 返回 \texttt{Doesn't type check!}，p9 返回
-\texttt{Source is more defined than target}）保存于本文
-artifact（见~\ref{sec:availability}~节），读者可据此独立复现。\footnote{%
-本文使用的是 2026-03-20 的 Alive2 主线而非 2022-era 的旧版；
-Hydra~\cite{hydra}（OOPSLA 2024）在 LLVM IR 合成层面扩展了对
-\texttt{@llvm.uadd.with.overflow} 多返回值窥孔规则的\emph{综合}能力，
-但本节讨论的 4 条规则失败于 Alive2 的\emph{精化验证层}——p1/p2/p3
-在解析阶段即被判为类型不匹配（源端 \texttt{\{iN, i1\}} 结构与目标端
-平坦 \texttt{iN} 的精化格不一致），p9 的 \emph{Source is more defined
-than target} 源自 poison/undef 格在串接多字进位上的严格下降；二者均
-独立于 SMT 求解器版本与合成能力。}
+4 条规则的 Alive2 命令行、完整失败消息与版本号（2026-03-20 主线
+\texttt{v21.0-78-g28b9f9c9}，Z3 4.8.12）保存于 artifact（\S\ref{sec:availability}）；
+与 Hydra~\cite{hydra}（OOPSLA 2024）等 LLVM IR 合成工具的关系见~\S\ref{sec:related}。
 
 值得注意的是，瓶颈并不在 SMT 求解器~\cite{demoura2008z3}的容量。我们测试了
 同一类别的其余 6 条 U256 规则（不涉及多返回值结构的进位传递），它们在 Alive2
