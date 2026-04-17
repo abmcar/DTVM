@@ -52,7 +52,7 @@
 \providecommand{\doi}[1]{}
 \usepackage[numbers,sort&compress]{gbt7714}
 
-\title{\bfseries 面向区块链信息系统执行层的可验证窥孔优化：\\基于 dMIR 进位链原语与 SMT 规则准入的方法}
+\title{\bfseries 面向区块链信息系统执行层的可验证窥孔优化：\\dMIR 进位链原语与 SMT 规则准入}
 \author{匿名作者~~匿名单位}
 \date{}
 
@@ -63,9 +63,9 @@
 \maketitle
 \begin{center}
 \parbox{0.9\textwidth}{\small
-\textbf{摘要：}区块链执行层的 EVM 即时编译器（JIT）中，每条窥孔重写规则都是共识关键
-资产——一条误判等价的规则可能引发链分叉。现有通用 IR 对进位位的间接表达限制了自动等价
-验证的覆盖面。本文在 DTVM 的 dMIR 中把带进位加减法 \texttt{adc}/\texttt{sbb} 设计为
+\textbf{摘要：}区块链执行层的 EVM 即时编译器（JIT）中，窥孔重写规则直接影响共识
+一致性：任一规则的等价性判断有误，就可能导致节点间执行结果不一致，进而引发链分叉。
+现有通用 IR 以间接方式表达进位位，限制了自动等价验证的适用范围。本文在 DTVM 的 dMIR 中把带进位加减法 \texttt{adc}/\texttt{sbb} 设计为
 一等位向量算子，构建了 \textbf{70} 条 dMIR 层（Z3 位向量等价性校验）与 \textbf{13} 条
 x86 层（对照测试套件覆盖）的两级窥孔重写系统。在 27 个标准 EVM 基准上，几何均值加速
 \textbf{+5.93\%}（95\% CI [+3.53\%, +8.78\%]），峰值 \textbf{+24.7\%}；3161 条
