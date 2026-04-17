@@ -25,11 +25,9 @@ Z3 在 256 位位向量上求解典型窥孔等价性命题的平均耗时约为
 
 \subsection{端到端性能}
 
-\paragraph{实验设置。}基线为上游主分支（commit \texttt{a9928c4}），其 x86
-代码生成层已含 2 条硬编码窥孔（\texttt{cmp}/\texttt{setcc}/\texttt{jne} 融合、
-\texttt{jmp} 紧邻块消除；非本文新增\footnote{\texttt{src/compiler/target/x86/x86\_cg\_peephole.cpp}}），无规则集
-JSON 与 dMIR rewrite pass；HEAD 在此基础上追加 83 条新规则（70 dMIR + 13
-x86），动态链接库通过 evmone-bench 外部接入评测。为降低跨配置的系统抖动，关闭 CPU turbo、将进程固定到
+\paragraph{实验设置。}基线为上游主分支（已含 2 条硬编码 x86 窥孔，非本文新增），
+HEAD 在此之上启用本文 83 条规则（70 dMIR + 13 x86）；两侧动态链接库通过
+evmone-bench 接入评测。为降低跨配置的系统抖动，关闭 CPU turbo、将进程固定到
 专用核，每个基准重复 20 次采集；几何均值的 95\% 置信区间通过自举法
 （$B = 10\,000$）估计。若出现变异系数大于 3\% 的基准，将其重复次数扩展到
 30 次。
@@ -38,7 +36,7 @@ x86），动态链接库通过 evmone-bench 外部接入评测。为降低跨配
 
 \input{tables/tab4-2-attribution}
 
-在 27 个基准上，本文 HEAD 相对于基线的加速几何均值为
+在 27 个基准上，HEAD 相对于基线的加速几何均值为
 \textbf{+5.93\%}（95\% 置信区间 [+3.53\%, +8.78\%]），峰值加速
 \textbf{+24.7\%} 出现在 JUMPDEST\_n0/empty 基准，sha1 系列基准加速约
 \textbf{+11.5\%}（\texttt{sha1\_divs/5311} 与 \texttt{sha1\_shifts/5311}）。
@@ -58,7 +56,7 @@ x86），动态链接库通过 evmone-bench 外部接入评测。为降低跨配
 百分位为 \textbf{0.87\,ms}。这一测量覆盖加载、分析、JIT 代码生成的完整流水线；
 dMIR 窥孔重写只是其中一遍局部匹配。99 百分位的尾部出现在代码体量大于
 16\,KB 的少量大合约上（此语料中共 19 个），与合约体量正相关，符合预期。
-本测量仅给出本文 HEAD 一侧的绝对量级作为上界；本文 HEAD 与基线两侧的逐阶段插桩列为
+本测量仅给出 HEAD 一侧的绝对量级作为上界；HEAD 与基线两侧的逐阶段插桩列为
 未来工作（见~\ref{sec:limitations}~节第~7~项）。
 
 \subsection{正确性与规则覆盖}
