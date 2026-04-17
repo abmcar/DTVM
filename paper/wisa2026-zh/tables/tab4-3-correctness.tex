@@ -3,17 +3,18 @@
 \centering
 \caption{正确性测试与规则覆盖}
 \label{tab:correctness}
-\footnotesize
+\scriptsize
+\setlength{\tabcolsep}{3pt}
 \begin{tabular}{@{}lccl@{}}
 \toprule
-维度 & HEAD & 基线 & 方法 \\
+维度 & 启用 & 基线 & 方法 \\
 \midrule
-单元测试（JIT）
-  & 223/223 & 223/223 & EVM 规范 \\
-单元测试（解释器）
-  & 215/215 & 215/215 & 运行列表 \\
-statetest Cancun
-  & 2723/2723 & 2723/2723 & 101 套件 \\
+单元测试（JIT）     & 223/223   & 223/223   & EVM 规范 \\
+单元测试（解释器）  & 215/215   & 215/215   & 运行列表 \\
+statetest（JIT）    & 2723/2723 & 2723/2723 & 101 套件 \\
+statetest（解释器） & 2723/2723 & 2723/2723 & 101 套件 \\
+\midrule
+合计                & 5884/5884 & 5884/5884 & \\
 \bottomrule
 \end{tabular}
 \end{table}

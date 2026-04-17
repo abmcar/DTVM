@@ -10,42 +10,42 @@
   xtick={0,...,26},
   xticklabels={
     {mg\_mload/nogr},
-    {mg\_mload/by1},
     {mg\_mload/by32},
+    {mg\_mload/by1},
     {mg\_mload/by16},
-    {mg\_mstore/by32},
-    {mg\_mstore/by1},
     {snail/bench},
-    {mg\_mstore/nogr},
-    {mg\_mstore/by16},
     {weier/15},
     {weier/1},
-    {sha1\_d/5311},
+    {mg\_mstore/by32},
+    {mg\_mstore/by1},
+    {mg\_mstore/by16},
+    {mg\_mstore/nogr},
     {sha1\_s/5311},
+    {sha1\_d/5311},
     {sha1\_s/emp},
-    {b2\_huff/emp},
     {sha1\_d/emp},
     {b2\_huff/8415n},
+    {b2\_huff/emp},
     {b2\_shifts/8415n},
     {struct\_a/nfts},
-    {swap\_m/insuf},
     {swap\_m/spent},
-    {signext/one},
     {swap\_m/recv},
+    {swap\_m/insuf},
     {signext/zero},
+    {signext/one},
     {JDEST/emp},
-    {jump\_ar/emp},
-    {loop\_jd/emp}
+    {loop\_jd/emp},
+    {jump\_ar/emp}
   },
   xticklabel style={rotate=45, anchor=east, font=\scriptsize},
   x tick label style={rotate=45, anchor=east},
   ylabel={加速比 (\%)},
   ylabel style={font=\small},
-  ymin=-5,
+  ymin=-10,
   ymax=28,
   xmin=-0.8,
   xmax=26.8,
-  ytick={-5,0,5,10,15,20,25},
+  ytick={-10,-5,0,5,10,15,20,25},
   grid=major,
   grid style={dashed, gray!30},
   legend style={
@@ -65,17 +65,17 @@
 \addplot[fill=black!20, draw=black, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
   table[x=x, y=y, y error minus=ym, y error plus=yp] {
     x y ym yp
-    0 8.2885 0.6341 0.6629
-    1 6.8763 0.7719 0.7796
-    2 6.5362 0.8839 0.8644
-    3 6.5114 0.4992 0.4766
-    4 2.0837 0.8841 0.9023
-    5 2.0019 0.9717 0.9140
-    6 1.8869 0.8179 0.8055
-    7 1.1523 0.4600 0.4632
-    8 1.0222 0.5854 0.5637
-    9 0.4627 0.8576 0.8610
-    10 -2.0611 0.6089 0.5952
+    0 7.2549 0.8283 0.8210
+    1 6.9940 1.0760 1.0637
+    2 6.9362 0.7959 0.7892
+    3 6.0337 0.7583 0.7522
+    4 2.6203 0.7584 0.7526
+    5 -0.6458 0.9480 0.9391
+    6 -2.7090 0.8529 0.8459
+    7 -7.7440 1.0362 1.0263
+    8 -8.2146 1.1947 1.1817
+    9 -8.5264 1.0577 1.0475
+    10 -8.8509 0.9705 0.9620
   };
 \addlegendentry{U256 密集型}
 
@@ -83,13 +83,13 @@
 \addplot[pattern=north east lines, draw=black, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
   table[x=x, y=y, y error minus=ym, y error plus=yp] {
     x y ym yp
-    11 11.5137 0.7302 0.7682
-    12 11.4630 0.3438 0.3519
-    13 10.4597 0.6175 0.6018
-    14 8.7067 0.8997 0.8831
-    15 7.6977 0.5827 0.5939
-    16 7.2846 0.6947 0.7173
-    17 5.4319 0.7185 0.7238
+    11 24.8066 0.6719 0.6660
+    12 23.5105 0.7462 0.7390
+    13 20.2360 1.0368 1.0235
+    14 19.5875 0.7839 0.7763
+    15 11.5442 1.0606 1.0481
+    16 10.4090 0.7829 0.7761
+    17 4.4577 0.8946 0.8863
   };
 \addlegendentry{哈希}
 
@@ -97,12 +97,12 @@
 \addplot[pattern=crosshatch, draw=black, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
   table[x=x, y=y, y error minus=ym, y error plus=yp] {
     x y ym yp
-    18 16.7242 0.2868 0.2828
-    19 3.8531 0.8103 0.7753
-    20 2.2781 1.1627 1.1510
-    21 0.5857 0.7098 0.7314
-    22 0.0555 0.4807 0.5045
-    23 -1.4126 0.8203 0.7935
+    18 17.0420 0.7116 0.7056
+    19 4.7468 0.9761 0.9662
+    20 3.8131 0.9158 0.9072
+    21 2.4458 0.9211 0.9124
+    22 0.6157 1.3616 1.3432
+    23 -1.1836 1.2136 1.1992
   };
 \addlegendentry{算术/逻辑}
 
@@ -110,9 +110,9 @@
 \addplot[pattern=dots, draw=black, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
   table[x=x, y=y, y error minus=ym, y error plus=yp] {
     x y ym yp
-    24 24.7171 0.4525 0.4112
-    25 0.8954 0.9696 1.0210
-    26 0.8606 0.6643 0.6456
+    24 25.7880 0.6690 0.6630
+    25 4.8763 0.6924 0.6873
+    26 1.5885 1.2836 1.2671
   };
 \addlegendentry{控制流}
 

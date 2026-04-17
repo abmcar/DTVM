@@ -12,66 +12,75 @@ Alive2 在同组规则上的验证能力合并呈现。
 
 \input{tables/tab4-1-synth-alive2}
 
-Z3 在 256 位位向量上求解典型窥孔等价性命题的平均耗时约为 60\,ms。256 位位宽
-对求解器的容量而言并非瓶颈：所有 70 条 dMIR 规则的 Z3 查询均在秒级完成，
-无超时或不可判定。
-
-表~\ref{tab:synth-alive2}$^\dagger$ 脚注给出这 10 条样本的 Alive2 对照：
-我们从合成管线中随机抽取 10 条典型 U256 规则，在 Alive2 上逐条测试等价验证。
-其中 6 条（不涉及多返回值进位结构的规则）可直接通过，4 条因涉及
-\texttt{adc}/\texttt{sbb} 的多返回值结构而无法直接表达——Alive2 对这些规则
-返回类型不匹配或不可判定。同样的 4 条规则在 dMIR 的位向量语义下被 Z3 直接通过，
-印证了第~2~节关于中间表示表达力瓶颈的分析。
+Z3 在 256 位位向量上求解典型窥孔等价性命题的平均耗时约 60\,ms；所有 70 条
+dMIR 规则的 Z3 查询均在秒级完成，无超时或不可判定，说明 256 位位宽对求解器
+容量并非瓶颈。表~\ref{tab:synth-alive2}$^\dagger$ 脚注给出 10 条样本的
+Alive2 对照：从合成管线随机抽取 10 条典型 U256 规则，其中 6 条（不涉及多
+返回值进位结构）可直接通过，4 条因涉及 \texttt{adc}/\texttt{sbb} 多返回值
+结构而无法直接表达——Alive2 对这些规则返回类型不匹配或不可判定；同样的 4 条
+在 dMIR 位向量语义下被 Z3 直接通过，印证了第~2~节关于中间表示表达力瓶颈的分析。
 
 \subsection{端到端性能}
 
-\paragraph{实验设置。}基线为上游主分支（已含 2 条硬编码 x86 窥孔，非本文新增），
-HEAD 在此之上启用本文 83 条规则（70 dMIR + 13 x86）；两侧动态链接库通过
-evmone-bench 接入评测。为降低跨配置的系统抖动，关闭 CPU turbo、将进程固定到
-专用核，每个基准重复 20 次采集；几何均值的 95\% 置信区间通过自举法
-（Bootstrap，$B = 10\,000$）估计。若出现变异系数大于 3\% 的基准，将其重复次数扩展到
-30 次。
+\paragraph{实验设置与噪声控制。}基线为上游主分支（已含 2 条硬编码 x86 窥孔，
+非本文新增），启用侧在此之上启用本文 83 条规则（70 dMIR + 13 x86），两侧动态
+链接库经 evmone-bench 接入。每个基准重复 20 次，几何均值的 95\% 置信区间通过
+自举法（Bootstrap，$B = 10\,000$）估计。为控制噪声，进程通过
+\texttt{taskset -c 2-3} 绑定专用物理核、\texttt{nice -5} 提升优先级，仅在 1
+分钟负载均值低于 0.5 时启动并关闭 CPU turbo；复测核验每基准两侧变异系数
+（CV）均低于 3\%，超阈值则扩展到 30 次再核验。该协议同时应用于两侧，置信
+区间估计不依赖事后样本筛选。
 
 \input{figures/fig4-speedup}
 
 \input{tables/tab4-2-attribution}
 
-在 27 个基准上，HEAD 相对于基线的加速几何均值为
-\textbf{+5.93\%}（95\% 置信区间 [+3.53\%, +8.78\%]），峰值加速
-\textbf{+24.7\%} 出现在 JUMPDEST\_n0/empty 基准，sha1 系列基准加速约
-\textbf{+11.5\%}（\texttt{sha1\_divs/5311} 与 \texttt{sha1\_shifts/5311}）。
-按规则族归因（表~\ref{tab:family-attribution}）：U256 相关规则在
-\texttt{memory\_grow} 系列上命中率达 99.9\%，在 \texttt{weierstrudel} 上为
-33.8\%，\texttt{snailtracer} 上为 25.3\%；sha1 系列的加速则主要来自 x86 层的
-分支与比较合并规则。
+在 27 个基准上，启用规则集相对于基线的加速几何均值为
+\textbf{+7.24\%}（95\% 置信区间 [+2.59\%, +12.11\%]，下界显著大于零），峰值
+加速 \textbf{+25.79\%} 出现在 \texttt{JUMPDEST\_n0/empty}；sha1 系列在长输入
+工况收益最大，\texttt{sha1\_shifts/5311} 与 \texttt{sha1\_divs/5311} 分别
+加速 \textbf{+24.81\%} 与 \textbf{+23.51\%}，空输入工况仍有
+\textbf{+19.59\%}--\textbf{+20.24\%}；\texttt{blake2b\_huff} 加速
+\textbf{+10.41\%}--\textbf{+11.54\%}。按规则族归因
+（表~\ref{tab:family-attribution}）：U256 相关规则在 \texttt{mg\_mload} 4 个
+变体上命中率接近 100\%，\texttt{weierstrudel} 33.8\%、\texttt{snailtracer}
+25.3\%；sha1 与 \texttt{blake2b} 的加速主要来自 x86 层的分支与比较合并规则。
+两级规则集形成互补而非替代：多字规则在 U256 密集合约上有集中收益，x86 层的
+机械冗余清理提供覆盖更广的常规收益。
 
-本文\emph{不}断言所有加速都来自 U256 感知规则。
-两级规则集的实际受益面是：多字运算类规则在 U256 密集合约上有集中收益——例如
-\texttt{memory\_grow} 系列几乎全部受益于空操作消除；x86 层的机械冗余清理则
-提供覆盖面更广的常规收益——sha1 系列即为典型。两者形成互补而非替代关系。
+\paragraph{回归面讨论。}27 个基准中有 5 个跨过 $\pm 2\%$ 向慢侧偏移：
+\texttt{memory\_grow\_mstore} 的 4 个变体分别慢 \textbf{8.85\%}、
+\textbf{8.21\%}、\textbf{8.53\%}、\textbf{7.74\%}，以及 \texttt{weierstrudel/1}
+慢 \textbf{2.71\%}（两侧变异系数均低于 2\%）。4 个 \texttt{mstore} 变体集中在
+同族的写路径上，并非分散扰动（初步分析见~\ref{sec:limitations}~节第 8 项）；
+作为对照，同族 \texttt{memory\_grow\_mload} 4 个变体在同口径下反而加速
+\textbf{+6.03\%}--\textbf{+7.26\%}。在生产工作负载意义上，sha1 与
+\texttt{blake2b} 的宏加速（\textbf{+10\%}--\textbf{+25\%}）随调用次数与输入
+长度线性放大，而 \texttt{mstore} 回归仅出现在约 0.7\,ns/op 的微基准上，两者
+量级不可比。
 
-\paragraph{编译开销。}窥孔重写规则引入后，整体编译延迟落在单毫秒量级的上界。
-我们在 EVMC 适配层加入了按模块输出编译耗时的可选开关，在 JIT 单元测试的
-\textbf{776} 个模块样本上，单次模块编译时间的中位数为 \textbf{0.45\,ms}，95
-百分位为 \textbf{0.87\,ms}。这一测量覆盖加载、分析、JIT 代码生成的完整流水线；
-dMIR 窥孔重写只是其中一遍局部匹配。99 百分位的尾部出现在代码体量大于
-16\,KB 的少量大合约上（此语料中共 19 个），与合约体量正相关，符合预期。
-本测量仅给出 HEAD 一侧的绝对量级作为上界；HEAD 与基线两侧的逐阶段插桩列为
-未来工作（见~\ref{sec:limitations}~节第~7~项）。
+\paragraph{编译开销。}我们在 EVMC 适配层加入按模块输出编译耗时的开关，
+在 JIT 单元测试的 \textbf{776} 个模块上，单次模块编译时间中位数为
+\textbf{0.45\,ms}，95 百分位为 \textbf{0.87\,ms}，覆盖加载、分析与 JIT 代码
+生成的完整流水线；dMIR 窥孔重写只是其中一遍局部匹配。99 百分位尾部出现在
+体量大于 16\,KB 的 19 个大合约上，与合约体量正相关。本测量仅给出启用侧的
+绝对量级作为上界，逐阶段插桩与 HEAD/基线对照列为未来工作
+（见~\ref{sec:limitations}~节第~7~项）。
 
 \subsection{正确性与规则覆盖}
 \label{sec:correctness}
 
 \input{tables/tab4-3-correctness}
 
-正确性验证的方法是：HEAD 与基线两侧分别运行完整测试套件
-（表~\ref{tab:correctness}），两侧结果完全一致且全部通过。基线侧通过，
-表明测试套件本身正确；HEAD 侧通过，表明新增 83 条规则未引入正确性回归。
-JIT 单元测试运行列表包含 223 个独立用例（Cancun 分叉 EVM 规范测试子集）；
-解释器单元测试运行列表包含 226 行，经 gtest 去重后为 215 个独立用例；
-evmone-statetest 的 Cancun 分叉测试覆盖 101 个测试套件，使用
-\texttt{-k fork\_Cancun} 过滤尚不支持的 Prague 分叉。三个数字对应不同测试
-维度，互不替代。
+正确性验证的方法是：启用规则集与基线两侧分别运行四类对照测试
+（表~\ref{tab:correctness}），两侧结果完全一致且全部通过，累计
+\textbf{5884}/\textbf{5884}。基线侧通过说明测试套件本身正确，启用侧通过
+说明新增 83 条规则未引入正确性回归。多阶段 JIT 单元测试包含 223 个独立
+用例（Cancun 分叉 EVM 规范子集）；解释器单元测试运行列表 226 行经
+gtest 去重后 215 个；\texttt{evmone-statetest} 的 Cancun 测试覆盖 101 个
+套件（使用 \texttt{-k fork\_Cancun} 过滤尚不支持的 Prague 分叉），分别在
+多阶段 JIT 与解释器两种执行模式下独立运行。两种模式的 statetest 交叉核对
+在相同测试矩阵下产出一致结果，是 EVM 共识一致性在本系统上的直接证据。
 
 与 Albert 等人~\cite{verified_evm_cav23}的 CAV 2023 规则集合比较，本文 83
 条规则中有 7 条与之重合：\texttt{dmir\_add\_zero}、

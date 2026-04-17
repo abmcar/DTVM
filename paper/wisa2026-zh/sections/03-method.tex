@@ -38,9 +38,8 @@ $\mathrm{BV}_1$ 专门承担进位输入（$c_{in}$）与进位输出（$c_{out}
 将进位传播完全嵌入位向量算术，无需引入多返回值结构或辅助谓词。
 
 \paragraph{可信基础。}本文的 SMT 等价性校验建立在 dMIR 位向量语义模型之上，
-我们假设该模型与真实 JIT 执行引擎的运行语义一致。这一一致性（model fidelity）
-的系统化测试是本文之外的未来工作，我们在第~\ref{sec:limitations}~节如实列出
-这一局限。
+假设该模型与真实 JIT 执行引擎的运行语义一致；此一致性（model fidelity）的
+系统化测试作为本文之外的未来工作（第~\ref{sec:limitations}~节）。
 
 \subsection{候选枚举与 SMT 准入}
 \label{sec:synthesis}
@@ -93,23 +92,16 @@ $\exists\,\vec{v}.\;\textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$。
 \texttt{dmir\_adc\_*}/\texttt{dmir\_sbb\_*}（进位-死消除族）。合成管线为未来扩充规则集提供
 能力上界与误漏率下界的实证支撑。
 
-\paragraph{反例示例。}以下两条被 Z3 以反例拒收的进位模板，展示了
-SMT 准入门在进位链场景下的必要性。
-
-\emph{示例 1：丢弃借位。}候选规则 $\texttt{sbb}(x, x, c_f) \to 0$。
-在无符号模运算语义下，Z3 给出反例 $x = 0,\; c_f = 1$：
-左式 $\texttt{sbb}(0, 0, 1) = 0 - 0 - 1 = \texttt{0xFF\ldots F}$（无符号
-回绕），右式为 $0$。语义错误在于右式忽略了借位输入 $c_f$。正确的通用形式为
-$\texttt{sbb}(x, x, c_f) \to \texttt{sub}(0, c_f)$，该形式通过了 Z3 校验。
-
-\emph{示例 2：极性错误。}候选规则 $\texttt{sbb}(x, 0, c_f) \to
-\texttt{sub}(0, c_f)$。Z3 给出反例 $x = 1,\; c_f = 0$：左式 $\texttt{sbb}(1, 0, 0) = 1$，右式
-$\texttt{sub}(0, 0) = 0$。语义错误在于右式将被减数从 $x$ 替换为 $0$，
-丢失了数据操作数。正确形式为
-$\texttt{sbb}(x, 0, c_f) \to \texttt{sub}(x, c_f)$。
-
-这两个示例均容易被人工审查通过，但在 256 位无符号模运算语义下是错误的。
-它们分别代表两类典型的进位链推理陷阱：丢弃进位输入与操作数极性混淆。
+\paragraph{反例示例。}以下两条被 Z3 以反例拒收的进位模板，展示了 SMT 准入门
+在进位链场景下的必要性。\emph{示例 1：丢弃借位。}候选 $\texttt{sbb}(x, x, c_f)
+\to 0$ 在无符号模运算下被 Z3 以 $x = 0,\; c_f = 1$ 反例拒收：左式
+$\texttt{sbb}(0, 0, 1) = \texttt{0xFF\ldots F}$（回绕），右式为 $0$；错误在于
+忽略借位输入。正确形式 $\texttt{sbb}(x, x, c_f) \to \texttt{sub}(0, c_f)$ 通过
+Z3 校验。\emph{示例 2：极性错误。}候选 $\texttt{sbb}(x, 0, c_f) \to
+\texttt{sub}(0, c_f)$ 被反例 $x = 1,\; c_f = 0$ 拒收（左式 $1$ 而右式 $0$），
+错误在于丢失被减数；正确形式为 $\texttt{sbb}(x, 0, c_f) \to \texttt{sub}(x, c_f)$。
+两个示例在 256 位无符号模运算下均代表典型进位链推理陷阱：丢弃进位输入与
+操作数极性混淆。
 
 \paragraph{Artifact 声明。}合成脚本（约 691 行 Python）、规则集 JSON 与
 Z3 查询脚本作为本文的 artifact 发布。
@@ -121,8 +113,8 @@ Z3 查询脚本作为本文的 artifact 发布。
 70 条规则都经 Z3 在 dMIR 位向量语义模型上完成等价性校验。x86 代码生成层
 负责寄存器、标志位与分支跳转等与硬件编码强相关的冗余清理，这一层的 13 条规则
 均为机械语法重写，\textbf{当前未配套独立的 SMT 校验脚本}——其正确性由
-第~\ref{sec:correctness}~节中 HEAD 与基线两侧的对照测试套件
-覆盖（JIT 与解释器单元测试 + Cancun 状态转换测试，共 3161 条用例）。
+第~\ref{sec:correctness}~节中 HEAD 与基线两侧的对照测试套件覆盖（多阶段 JIT
+与解释器单元测试 + 两种执行模式下的 Cancun 状态转换测试，共 5884 条用例）。
 我们把 x86 层的形式化语义模型与 SMT 校验列为未来工作
 （第~\ref{sec:limitations}~节）。
 

@@ -1,16 +1,24 @@
 # G5 Correctness — Authoritative Pass Rates (spec §4.3)
 
-Extracted from frozen logs (2026-04-15). No regression between HEAD
+> **2026-04-17 remeasurement (d1v2)**: added multipass-side `evmone-statetest`
+> 2723/2723 as a fourth anchor, bringing the cumulative total from 3161 to
+> **5884**; both sides still identical across all anchors. See the d1v2 logs
+> alongside 20260417 in
+> `docs/research/directions/peephole-optimization/submissions/experiments/e3-ablation/`.
+
+Original extract from frozen logs (2026-04-15). No regression between HEAD
 (`perf/x86-cg-peephole-rules`, peephole ENABLED) and baseline
 (`upstream/main`, peephole DISABLED).
 
-## Three Anchors
+## Four Anchors (d1v2)
 
-| Test category                      | HEAD        | Baseline    | Delta |
-|------------------------------------|-------------|-------------|-------|
-| evmone-unittests multipass (JIT)   | 223/223     | 223/223     | 0     |
-| evmone-unittests interpreter       | 215/215     | 215/215     | 0     |
-| evmone-statetest `-k fork_Cancun`  | 2723/2723   | 2723/2723   | 0     |
+| Test category                                 | HEAD        | Baseline    | Delta |
+|-----------------------------------------------|-------------|-------------|-------|
+| evmone-unittests multipass (JIT)              | 223/223     | 223/223     | 0     |
+| evmone-unittests interpreter                  | 215/215     | 215/215     | 0     |
+| evmone-statetest `-k fork_Cancun` multipass   | 2723/2723   | 2723/2723   | 0     |
+| evmone-statetest `-k fork_Cancun` interpreter | 2723/2723   | 2723/2723   | 0     |
+| **Total**                                     | **5884/5884** | **5884/5884** | 0 |
 
 ## Source Log Evidence
 
