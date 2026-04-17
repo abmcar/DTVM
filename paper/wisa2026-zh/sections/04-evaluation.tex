@@ -26,12 +26,10 @@ Z3 在 256 位位向量上求解典型窥孔等价性命题的平均耗时约为
 \subsection{端到端性能}
 
 \paragraph{实验设置。}基线为上游主分支（commit \texttt{a9928c4}），其 x86
-代码生成层已含 2 条硬编码的窥孔优化（\texttt{cmp}/\texttt{test}$\to$\texttt{setcc}$\to$\texttt{test}$\to$\texttt{jne}
-五连融合、无条件跳转紧邻块消除\footnote{见开源仓库
-\texttt{src/compiler/target/x86/x86\_cg\_peephole.cpp}，两条规则在上游
-主分支中已稳定启用，非本文新增。}），但无规则集 JSON 与 dMIR rewrite pass；
-HEAD 在此基础上追加 83 条新规则（70 dMIR + 13 x86）。动态链接库通过
-evmone-bench 外部接入评测。为降低跨配置的系统抖动，关闭 CPU turbo、将进程固定到
+代码生成层已含 2 条硬编码窥孔（\texttt{cmp}/\texttt{setcc}/\texttt{jne} 融合、
+\texttt{jmp} 紧邻块消除；非本文新增\footnote{\texttt{src/compiler/target/x86/x86\_cg\_peephole.cpp}}），无规则集
+JSON 与 dMIR rewrite pass；HEAD 在此基础上追加 83 条新规则（70 dMIR + 13
+x86），动态链接库通过 evmone-bench 外部接入评测。为降低跨配置的系统抖动，关闭 CPU turbo、将进程固定到
 专用核，每个基准重复 20 次采集；几何均值的 95\% 置信区间通过自举法
 （$B = 10\,000$）估计。若出现变异系数大于 3\% 的基准，将其重复次数扩展到
 30 次。
