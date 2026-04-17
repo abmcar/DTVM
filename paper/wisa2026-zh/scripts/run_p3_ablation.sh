@@ -13,10 +13,10 @@ case "${OUT_ROOT}" in
 esac
 mkdir -p "${OUT_ROOT}"
 
-HEAD_LIB="$(pwd)/build/lib/libdtvmapi.so"
-BASELINE_LIB="/home/abmcar/dtvm-baseline/build-baseline/lib/libdtvmapi.so"
-EVMONE_BENCH="/home/abmcar/evmone/build/bin/evmone-bench"
-BENCH_SUITE="/home/abmcar/evmone/test/evm-benchmarks/benchmarks"
+HEAD_LIB="${HEAD_LIB:-$(pwd)/build/lib/libdtvmapi.so}"
+BASELINE_LIB="${BASELINE_LIB:-${HOME}/dtvm-baseline/build-baseline/lib/libdtvmapi.so}"
+EVMONE_BENCH="${EVMONE_BENCH:-${HOME}/evmone/build/bin/evmone-bench}"
+BENCH_SUITE="${BENCH_SUITE:-${HOME}/evmone/test/evm-benchmarks/benchmarks}"
 REPS=20
 CORES="${P3_CORES:-0-1}"   # taskset 绑核；默认用 core 0-1
 

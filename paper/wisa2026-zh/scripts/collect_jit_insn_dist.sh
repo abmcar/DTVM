@@ -7,7 +7,7 @@
 # into build-jitlog/. The binary emits MIR/CgIR/Assembly dumps to stderr
 # (and objdump output to stdout). We merge with `2>&1`.
 #
-# Each benchmark JSON under /home/abmcar/evmone/test/evm-benchmarks/benchmarks
+# Each benchmark JSON under ${HOME}/evmone/test/evm-benchmarks/benchmarks
 # may declare multiple cases via `transaction.data[]`; we emit one .asm per
 # contract (deploy code compiled once), since JIT output is keyed on the
 # contract code, not the calldata.
@@ -16,7 +16,7 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(pwd)}"
 DTVM_BIN="${DTVM_BIN:-${REPO_ROOT}/build-jitlog/dtvm}"
-BENCH_ROOT="${BENCH_ROOT:-/home/abmcar/evmone/test/evm-benchmarks/benchmarks}"
+BENCH_ROOT="${BENCH_ROOT:-${HOME}/evmone/test/evm-benchmarks/benchmarks}"
 OUT_ROOT="${OUT_ROOT:-${REPO_ROOT}/docs/research/directions/peephole-optimization/submissions/experiments/e7-jit-insn-distribution}"
 REDUCE_PY="${REDUCE_PY:-${REPO_ROOT}/paper/wisa2026-zh/scripts/jit_insn_reduce.py}"
 

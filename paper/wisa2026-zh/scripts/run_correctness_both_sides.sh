@@ -8,8 +8,9 @@ set -euo pipefail
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT_ROOT="docs/research/directions/peephole-optimization/submissions/experiments/e6-correctness-both-sides"
 
-HEAD_LIB="$(pwd)/build/lib/libdtvmapi.so"
-BASELINE_LIB="/home/abmcar/dtvm-baseline/build-baseline/lib/libdtvmapi.so"
+HEAD_LIB="${HEAD_LIB:-$(pwd)/build/lib/libdtvmapi.so}"
+BASELINE_LIB="${BASELINE_LIB:-${HOME}/dtvm-baseline/build-baseline/lib/libdtvmapi.so}"
+EVMONE_BIN_DIR="${EVMONE_BIN_DIR:-${HOME}/evmone/build/bin}"
 
 for SIDE in with-peephole without-peephole; do
   case "${SIDE}" in
@@ -24,21 +25,21 @@ for SIDE in with-peephole without-peephole; do
   # 1) JIT (multipass) unittests → 预期 223/223
   rc_jit=0
   EVMONE_EXTERNAL_OPTIONS="${LIB},mode=multipass" \
-    /home/abmcar/evmone/build/bin/evmone-unittests \
+    "${EVMONE_BIN_DIR}/evmone-unittests" \
     --gtest_filter="$(paste -sd: tests/evmone_unittests/EVMOneMultipassUnitTestsRunList.txt)" \
     > "${OUT}/unittests-multipass.log" 2>&1 || rc_jit=$?
 
   # 2) 解释器 unittests → 预期 215/215
   rc_interp=0
   EVMONE_EXTERNAL_OPTIONS="${LIB},mode=interpreter" \
-    /home/abmcar/evmone/build/bin/evmone-unittests \
+    "${EVMONE_BIN_DIR}/evmone-unittests" \
     --gtest_filter="$(paste -sd: tests/evmone_unittests/EVMOneInterpreterUnitTestsRunList.txt)" \
     > "${OUT}/unittests-interpreter.log" 2>&1 || rc_interp=$?
 
   # 3) Cancun state tests → 预期 2723/2723
   rc_state=0
   EVMONE_EXTERNAL_OPTIONS="${LIB},mode=multipass,enable_gas_metering=true" \
-    /home/abmcar/evmone/build/bin/evmone-statetest \
+    "${EVMONE_BIN_DIR}/evmone-statetest" \
     tests/fixtures/fixtures/state_tests \
     --vm external_vm -k fork_Cancun \
     > "${OUT}/statetest-cancun.log" 2>&1 || rc_state=$?
