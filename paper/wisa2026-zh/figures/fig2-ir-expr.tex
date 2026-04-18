@@ -4,14 +4,13 @@
 \begin{tikzpicture}[
   >=Stealth,
   scale=0.75, every node/.style={scale=0.75},
-  panel/.style={draw, rounded corners=2pt, inner sep=4pt, align=left,
-                minimum width=3.0cm},
+  panel/.style={inner sep=4pt, align=left, minimum width=3.0cm},
   lbl/.style={font=\footnotesize\bfseries, anchor=south},
   code/.style={font=\scriptsize\ttfamily, align=left, anchor=north west},
   note/.style={font=\scriptsize, align=center},
 ]
-  % --- Left panel: LLVM IR ---
-  \node[panel, fill=black!8, minimum height=2.6cm] (left) {};
+  % --- Left: LLVM IR ---
+  \node[panel, minimum height=2.6cm] (left) {};
   \node[lbl] at (left.north) {通用 IR (LLVM)};
 
   \node[code] at ([shift={(2pt,-3pt)}]left.north west) {%
@@ -25,9 +24,9 @@
   \node[note, anchor=north] at ([yshift=-1pt]left.south) {%
     进位位以多返回值结构间接表达};
 
-  % --- Right panel: dMIR ---
-  \node[panel, fill=black!3, minimum height=2.6cm,
-        right=0.4cm of left] (right) {};
+  % --- Right: dMIR ---
+  \node[panel, minimum height=2.6cm,
+        right=0.8cm of left] (right) {};
   \node[lbl] at (right.north) {dMIR};
 
   \node[code] at ([shift={(2pt,-3pt)}]right.north west) (rcode) {%
@@ -41,12 +40,7 @@
   };
 
   \node[note, anchor=north] at ([yshift=-1pt]right.south) {%
-    进位位作为一等位向量算子};
-
-  % --- Contrast arrow ---
-  \draw[<->, thick, densely dashed]
-    ([yshift=-0.2cm]left.east) -- ([yshift=-0.2cm]right.west)
-    node[midway, above, font=\scriptsize] {对比};
+    进位位以独立位向量直接表达};
 
 \end{tikzpicture}
 \caption{通用 IR 与 dMIR 在带进位加法上的表达力对比}

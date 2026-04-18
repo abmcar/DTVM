@@ -38,7 +38,7 @@ sha1 系列、jump\_around）上的 U256 命中比例则远低于此区间，其
 \texttt{sub}、\texttt{mul}）仅对 $N$ 位整数 \texttt{iN} 定义。若需显式获取
 进位位，程序员必须调用内置函数 \texttt{@llvm.uadd.with.overflow.iN}，该函数
 返回一个 \texttt{\{iN, i1\}} 的多返回值结构——结果与进位位打包在同一个结构
-中。换言之，进位位在 LLVM IR 中\emph{不是一等公民}，而是隐藏在结构的第二个
+中。换言之，进位位在 LLVM IR 中\emph{不是原生类型}，而是隐藏在结构的第二个
 字段里。
 
 该设计限制了自动等价验证工具的表达能力。按 Lopes 等人在 Alive~\cite{alive}
@@ -62,7 +62,7 @@ U256 规则（不涉及多返回值进位传递），在 Alive2 中均可通过�
 
 图~\ref{fig:ir-expr}从结构上对比通用 IR 与 dMIR 在带进位加法上的表达力：
 左侧 LLVM IR 需 5 行代码调用 \texttt{uadd.with.overflow} 并从多返回值结构中
-提取结果与进位位，右侧 dMIR 一条 \texttt{ADC} 指令即完成。若将进位位作为一等算子，上述 4 条
+提取结果与进位位，右侧 dMIR 一条 \texttt{ADC} 指令即完成。若 IR 原生支持进位位，上述 4 条
 规则便可纳入自动等价验证的范围。dMIR 面向 EVM JIT，不追求
 通用性——以牺牲与 LLVM 的直接互操作换取进位链规则可被 SMT 自动验证。
 表~\ref{tab:cannot-express}中 4 条规则在通用 IR 下无法直接等价验证，
