@@ -71,7 +71,7 @@ evmone-bench 接入。每个基准重复 20 次，几何
 
 \input{tables/tab4-3-correctness}
 
-启用规则集与基线两侧分别运行四类对照测试（表~\ref{tab:correctness}），两侧
+启用规则集与基线两侧分别运行四类差分测试（表~\ref{tab:correctness}），两侧
 在状态与 gas 口径上逐项一致，累计 \textbf{5884}/\textbf{5884}。基线侧通过说明
 测试套件本身正确，启用侧通过说明新增 83 条规则未引入正确性回归。多阶段
 JIT 单元测试共 223 个独立 Cancun 用例；解释器单元测试运行列表 226 行，经
