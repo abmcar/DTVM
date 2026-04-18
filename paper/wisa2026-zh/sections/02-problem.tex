@@ -22,7 +22,8 @@ EVM 层面的 U256 加法在 JIT 代码生成后会展开为 4 条机器级加�
 \end{center}
 
 在 JIT 产出的全部指令中，与 U256 多字运算直接相关的指令占比约
-\textbf{2.15\%}（基于 14 个标准基准的加权统计）。这一比例虽低，进位链却有其特殊性质：链上每条
+\textbf{2.15\%}（基于 14 个标准基准的加权均值；单基准分布极不均匀，
+详见~\ref{sec:evaluation}~节表~\ref{tab:family-attribution}）。这一比例虽低，进位链却有其特殊性质：链上每条
 \texttt{adc}/\texttt{sbb} 都依赖前一条的进位输出，构成严格的
 \emph{串行数据依赖}，无法借助指令级并行掩盖延迟。
 因此，U256 指令虽少，却对执行时间产生不成比例的影响。
@@ -33,6 +34,7 @@ sha1 系列、jump\_around）上的 U256 命中比例则远低于此区间，其
 主要来自 x86 层的机械冗余清理。
 
 \subsection{通用中间表示对进位链的表达力限制}
+\label{sec:expressiveness}
 
 在 LLVM 这样的通用编译器中间表示中，基础算术运算（\texttt{add}、
 \texttt{sub}、\texttt{mul}）仅对 $N$ 位整数 \texttt{iN} 定义。若需显式获取
