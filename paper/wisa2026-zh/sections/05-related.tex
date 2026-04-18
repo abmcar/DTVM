@@ -4,17 +4,17 @@
 
 \subsection{可验证窥孔优化框架}
 
-我们从作用的抽象层次、验证方法与进位链覆盖三个维度定位本文工作。基于 SMT 求解器校验的窥孔优化工作，可追溯至 Lopes 等人的 Alive~\cite{alive}
-及后继 Alive2~\cite{alive2}，以及 Sasnauskas 等人的 Souper~\cite{souper}
-（基于 SMT 的 LLVM 窥孔合成工具）——这些工作共同确立了``先合成候选、再以
-SMT 等价性验证准入''的基本范式。本文沿用此范式，但将校验所基于的 IR 从通用 LLVM IR 换为 EVM JIT 的 dMIR。
-Alive 的 PLDI 2015 论文已明确指出 LLVM 以多返回值结构表达进位/溢出标志对
-窥孔验证的表达力限制——这一观察是本文的起点，而非新发现。
+我们从作用的抽象层次、验证方法与进位链覆盖三个维度定位本文工作。基于 SMT
+求解器校验的窥孔优化工作，可追溯至 Lopes 等人的 Alive~\cite{alive} 及后继
+Alive2~\cite{alive2}，以及 Sasnauskas 等人的 Souper~\cite{souper}——这些
+工作共同确立了``先合成候选、再以 SMT 等价性验证准入''的基本范式。本文沿用
+此范式，但将校验所基于的 IR 从通用 LLVM IR 换为 EVM JIT 的 dMIR。Alive 的
+PLDI 2015 论文已明确指出 LLVM 以多返回值结构表达进位/溢出标志对窥孔验证的
+表达力限制——这一观察是本文的起点，而非新发现。
 
-Bhat 等人在 ITP 2024（交互式定理证明会议）提出的 LeanMLIR~\cite{leanmlir}
-（MLIR 在 Lean~4 依赖类型证明系统中的形式化）在 Lean~4 中形式化了``将窥孔
-验证框架对 IR 参数化''的思想，与本文定位互补：LeanMLIR 关注证明框架对 IR
-的通用性，本文关注在具体 IR（dMIR）上的实例化规则集与端到端集成。
+Bhat 等人在 ITP 2024 提出的 LeanMLIR~\cite{leanmlir} 在 Lean~4 中形式化了
+``将窥孔验证框架对 IR 参数化''的思想，与本文定位互补：LeanMLIR 关注证明
+框架对 IR 的通用性，本文关注在具体 IR 上的实例化规则集与端到端集成。
 
 Mukherjee 与 Regehr 在 OOPSLA 2024 提出的 Hydra~\cite{hydra}能够自动发现
 与输入位宽无关的窥孔规则；但它与 Alive2 同样基于 LLVM IR，因此在多字进位链
@@ -22,13 +22,13 @@ Mukherjee 与 Regehr 在 OOPSLA 2024 提出的 Hydra~\cite{hydra}能够自动发
 解法。Schett 与 Nagele 在 FMBC 2020 发表的工作~\cite{fmbc20_evm_peephole}
 以相似的离线枚举加 SMT 流程为 EVM \emph{字节码}自动生成约 993 条规则；两者
 在等价性保证上对等，差别在抽象层次：本文规则集作用在 JIT 代码生成路径上，
-可同时利用 dMIR 的结构化匹配与 x86 层机械冗余清理（字节码层均不可见），
-规则数量差距（993 对 83）反映作用层次与覆盖策略不同。
+可同时利用 dMIR 的结构化匹配与 x86 层机械冗余清理，规则数量差距 993 对 83
+反映作用层次与覆盖策略不同。
 
 多字整数的 \texttt{adc}/\texttt{sbb} 进位链是 GMP、libsecp256k1 等密码学库
-在 64 位硬件上的标准实现形式，并映射到 Intel ADCX/ADOX（BMI2+ADX 扩展的
-带进位加法，支持双链并行传播进位）指令；由 4 段 64 位构成的进位链是 EVM
-256 位算术在 64 位硬件上的典型形状，并非刻意构造的边界情形。
+在 64 位硬件上的标准实现形式，并映射到 Intel ADCX/ADOX 指令；由 4 段 64 位
+构成的进位链是 EVM 256 位算术在 64 位硬件上的典型形状，并非刻意构造的边界
+情形。
 
 \subsection{面向共识关键路径的验证工作}
 
@@ -39,15 +39,14 @@ EVM 专用模式。规模不对等：Albert 的 14 条规则\footnote{以 artifa
 分支 Coq 源文件 \texttt{optimizations.v} 为准；原文 extended version 的
 Appendix A 可能列出更多 memory/storage 层规则，两侧系统均不涉及。}
 均作用于 stack 代数化简；本文 83 条与其重合 7 条，均为 verified 位向量窥孔
-系统几乎必然包含的代数恒等公理（加法/乘法幺元、乘零吸收、或零、双重否定、
-自减、与吸收等；在 Alive2、Souper、LLVM InstCombine 中均有同构实现），
-不构成衍生依赖。其余 76 条中 13 条位于 x86 层，63 条位于 dMIR 层——包含
+系统几乎必然包含的代数恒等公理——加法/乘法幺元、乘零吸收、双重否定、自减、
+与吸收等——不构成衍生依赖。其余 76 条中 13 条位于 x86 层，63 条位于 dMIR 层——包含
 256 位字长分解出的多字进位链规则、\texttt{adc}/\texttt{sbb} 代数简化、
 JIT 代码生成路径相关的常量传播与强度削减等。
 
-运行时对比验证工作（如 Breidenbach 等人 USENIX Security 2018 的 Hydra
-Framework~\cite{hydra_framework}，与前文 OOPSLA 2024 的 Hydra 同名异物——
-等多客户端共识检测系统、EVM 模糊测试、共识测试网络）在上线后检测分歧；
+运行时对比验证工作——Breidenbach 等人 USENIX Security 2018 的 Hydra
+Framework~\cite{hydra_framework}（与前文 OOPSLA 2024 的 Hydra 同名异物）
+等多客户端共识检测系统、EVM 模糊测试、共识测试网络——在上线后检测分歧；
 本文则定位为开发期的静态强化。
 
 \subsection{局限与未来工作}
@@ -73,11 +72,10 @@ Framework~\cite{hydra_framework}，与前文 OOPSLA 2024 的 Hydra 同名异物�
     无逐阶段计时钩子，基线对照需另行插桩，本文仅给出整体编译延迟的上界。
   \item \textbf{\texttt{memory\_grow\_mstore} 族微基准回归。}4 个
     \texttt{mstore} 变体稳定慢 \textbf{7.74\%}--\textbf{8.85\%}（两侧 CV 低于
-    2\%）。初步分析定位到 x86 层比较合并规则 \texttt{optimizeCmp} 在 memory-expand
-    控制流（EVM \texttt{MSTORE}/\texttt{MLOAD} 触发的内存扩展分支）下降路径上的
-    匹配行为——该路径以 \texttt{SETCC}$\to$ 零扩展$\to$\texttt{TEST}
-    $\to$\texttt{JCC} 链式下降，零扩展采用 \texttt{SUBREG\_TO\_REG}
-    （LLVM CodeGen 零扩展伪指令），与当前规则集所覆盖的紧凑链在模式上不完全
-    一致；具体根因留待后续工作。同族 \texttt{mload} 4 个变体不涉及此合并机会，
-    加速 \textbf{+6.03\%}--\textbf{+7.26\%}。
+    2\%）。初步分析定位到 x86 层比较合并规则 \texttt{optimizeCmp} 在
+    memory-expand 控制流下降路径上的匹配行为——该路径以
+    \texttt{SETCC}$\to$ 零扩展$\to$\texttt{TEST}$\to$\texttt{JCC} 链式下降，
+    零扩展采用 \texttt{SUBREG\_TO\_REG}，与当前规则集所覆盖的紧凑链在模式上
+    不完全一致；具体根因留待后续工作。同族 \texttt{mload} 4 个变体不涉及此
+    合并机会，加速 \textbf{+6.03\%}--\textbf{+7.26\%}。
 \end{enumerate}

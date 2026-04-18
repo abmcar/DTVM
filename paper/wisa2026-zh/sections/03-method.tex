@@ -19,8 +19,7 @@ $\mathrm{BV}_1$ 专门承担进位输入（$c_{in}$）与进位输出（$c_{out}
 1 位进位。带借位减法 \texttt{SBB} 的签名完全对称。
 
 在 Z3~\cite{demoura2008z3}中，上述进位传播可借位向量拼接与零扩展自然表达。
-以下代码框给出 \texttt{ADC} 的 Z3 编码（其中 \texttt{ZeroExt} 为零扩展、
-\texttt{Extract} 为位切片，均为 Z3 Python API）：
+以下代码框给出 \texttt{ADC} 的 Z3 编码：
 
 \begin{center}
 \small
@@ -39,8 +38,8 @@ $\mathrm{BV}_1$ 专门承担进位输入（$c_{in}$）与进位输出（$c_{out}
 将进位传播完全嵌入位向量算术，无需引入多返回值结构或辅助谓词。
 
 \paragraph{可信基础。}本文的 SMT 等价性校验建立在 dMIR 位向量语义模型之上，
-假设该模型与真实 JIT 执行引擎的运行语义一致；此一致性（model fidelity）的
-系统化测试作为本文之外的未来工作（第~\ref{sec:limitations}~节）。
+假设该模型与真实 JIT 执行引擎的运行语义一致；该模型保真度的系统化测试作为
+未来工作（第~\ref{sec:limitations}~节）。
 
 \subsection{候选枚举与 SMT 准入}
 \label{sec:synthesis}
@@ -48,9 +47,9 @@ $\mathrm{BV}_1$ 专门承担进位输入（$c_{in}$）与进位输出（$c_{out}
 \paragraph{准入判据。}对于候选规则 $\textit{LHS} \to \textit{RHS}$，我们向
 Z3 提交命题
 $\exists\,\vec{v}.\;\textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$。
-若 Z3 返回\emph{不可满足}（unsat），则规则在 dMIR 定长位向量模运算语义下
-对所有输入等价，准入通过；若返回\emph{可满足}（sat），求解器同时给出一组反例，
-规则被拒收；若超时，规则同样拒收。此处的等价性不依赖补码、有符号溢出或任何
+若 Z3 返回 unsat，则规则在 dMIR 定长位向量模运算语义下对所有输入等价，
+准入通过；若返回 sat，求解器同时给出一组反例，规则被拒收；若超时，规则
+同样拒收。此处的等价性不依赖补码、有符号溢出或任何
 超出定长模运算之外的假设。所有 70 条 dMIR 生产规则均已通过该判据，Z3 查询
 脚本随规则文件一起纳入代码仓，持续集成在每次规则变更时自动重新执行。
 
@@ -79,7 +78,7 @@ $\exists\,\vec{v}.\;\textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$。
 \paragraph{反例示例。}以下两条被 Z3 以反例拒收的进位模板，展示了 SMT 准入门
 在进位链场景下的必要性。\emph{示例 1：丢弃借位。}候选 $\texttt{SBB}(x, x, c_f)
 \to 0$ 在无符号模运算下被 Z3 以 $x = 0,\; c_f = 1$ 反例拒收：左式
-$\texttt{SBB}(0, 0, 1) = \texttt{0xFF\ldots F}$（回绕），右式为 $0$；错误在于
+$\texttt{SBB}(0, 0, 1) = \texttt{0xFF\ldots F}$，右式为 $0$；错误在于
 忽略借位输入。正确形式 $\texttt{SBB}(x, x, c_f) \to \texttt{sub}(0, c_f)$ 通过
 Z3 校验。\emph{示例 2：极性错误。}候选 $\texttt{SBB}(x, 0, c_f) \to
 \texttt{sub}(0, c_f)$ 被反例 $x = 1,\; c_f = 0$ 拒收（左式 $1$ 而右式 $0$），
@@ -94,9 +93,9 @@ Z3 查询脚本作为本文的 artifact 发布。
 \label{sec:two-level}
 
 \paragraph{分层动机。}dMIR 层负责与具体机器无关的代数化简，该层全部 70 条
-规则都经 Z3 在 dMIR 位向量语义模型上完成等价性校验。x86 CgIR
-（code-generation IR，代码生成中间表示，机器码前一级）层负责寄存器、标志位、
-分支跳转等与硬件编码强相关的冗余清理，该层 13 条规则均为机械语法重写，
+规则都经 Z3 在 dMIR 位向量语义模型上完成等价性校验。x86 CgIR 层负责寄存器、
+标志位、分支跳转等与硬件编码强相关的冗余清理，该层 13 条规则均为机械语法
+重写，
 \textbf{当前尚未配套独立的 SMT 校验脚本}——其正确性由第~\ref{sec:correctness}~节
 中基线与启用两侧的对照测试套件覆盖（多阶段 JIT 与解释器单元测试 + 两种执行
 模式下的 Cancun 状态转换测试，共 5884 条用例）。我们将 x86 层的形式化语义

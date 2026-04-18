@@ -5,10 +5,9 @@
 
 EVM 的原生字长为 256 位，而当前商用硬件的通用寄存器仅有 64 位。一条
 EVM 层面的 U256 加法在 JIT 代码生成后会展开为 4 条机器级加法：第一条是
-普通的 64 位加法，后续 3 条为带进位加法（\texttt{adc}），形成一条\emph{串行
-进位链}。减法类似，由 1 条 \texttt{sub} 与 3 条 \texttt{sbb}（带借位
-减法）构成。以下给出一次典型 U256 加法在 dMIR 与 x86 两侧的对照代码（其中
-limb 指多精度算术中的一个 64 位机器字，4-limb 即 $4 \times 64 = 256$ 位）：
+普通的 64 位加法，后续 3 条为带进位加法 \texttt{adc}，形成一条\emph{串行
+进位链}。减法类似，由 1 条 \texttt{sub} 与 3 条 \texttt{sbb} 构成。以下给出
+一次典型 U256 加法在 dMIR 与 x86 两侧的 4-limb 对照代码：
 
 \begin{center}
 \small
@@ -43,17 +42,16 @@ sha1 系列、jump\_around）上的 U256 命中比例则远低于此区间，其
 字段里。
 
 该设计限制了自动等价验证工具的表达能力。按 Lopes 等人在 Alive~\cite{alive}
-中提出、Alive2~\cite{alive2}（基于 SMT 的 LLVM 窥孔等价性验证工具）所继承的
-窥孔验证框架，表~\ref{tab:cannot-express}列出 4 条典型的进位链规则，它们在
-Alive2 上均无法直接完成等价验证——Alive2 对这些规则返回类型不匹配或不可判定。
+中提出、Alive2~\cite{alive2} 所继承的窥孔验证框架，表~\ref{tab:cannot-express}
+列出 4 条典型的进位链规则，它们在 Alive2 上均无法直接完成等价验证——Alive2
+对这些规则返回类型不匹配或不可判定。
 
 \input{tables/tab2-1-cannot-express}
 
 4 条规则的 Alive2 命令行、失败消息与版本号（2026-03-20 主线
-\texttt{v21.0-78-g28b9f9c9}，Z3 4.8.12）保存于 artifact（可复现材料包，
-\S\ref{sec:availability}）；与 Hydra~\cite{hydra}（Mukherjee 与 Regehr
-OOPSLA 2024 的 LLVM 窥孔合成器；与 \S\ref{sec:related} 所引 USENIX Security
-2018 的 Hydra Framework 同名异物）的关系见~\S\ref{sec:related}。
+\texttt{v21.0-78-g28b9f9c9}，Z3 4.8.12）保存于 artifact（\S\ref{sec:availability}）；
+与 Hydra~\cite{hydra}（OOPSLA 2024；与 \S\ref{sec:related} 所引 USENIX
+Security 2018 的 Hydra Framework 同名异物）的关系见~\S\ref{sec:related}。
 
 瓶颈不在 SMT 求解器~\cite{demoura2008z3}的容量。我们测试了同一类别其余 6 条
 U256 规则（不涉及多返回值进位传递），在 Alive2 中均可通过等价验证，平均耗时
