@@ -1,9 +1,7 @@
 % tables/tab2-1-cannot-express.tex — 4 条在通用 IR 下不可直接等价验证的规则
-% [Agent-B revision] 删除冗余"不可验证原因"列（三行共享同一字符串，信息冗余）；
-% caption 自包含，明确指明工具（Alive2 基于 LLVM IR）与失败模式（多返回值结构）。
 \begin{table}[t]
 \centering
-\caption{在 Alive2（基于 LLVM IR）下因多返回值结构表达限制而无法直接建立等价性的 4 条典型进位链规则。前 3 条为单条 \texttt{adc}/\texttt{sbb} 规则（右式丢弃进位输出），第 4 条为 4-limb 进位链合并规则。}
+\caption{在 Alive2（基于 LLVM IR）下因多返回值结构表达限制而无法直接建立等价性的 4 条典型进位链规则。前 3 条为单条 \texttt{ADC}/\texttt{SBB} 规则（右式丢弃进位输出），第 4 条为 4-limb 进位链合并规则。}
 \label{tab:cannot-express}
 \footnotesize
 \begin{tabular}{@{}ll@{}}

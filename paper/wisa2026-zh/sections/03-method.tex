@@ -40,7 +40,7 @@ $\mathrm{BV}_1$ 专门承担进位输入（$c_{in}$）与进位输出（$c_{out}
 \paragraph{可信基础。}本文的 SMT 等价性校验建立在 dMIR 位向量语义模型之上，
 假设该模型与真实 JIT 执行引擎的运行语义一致。该一致性由第~\ref{sec:correctness}~节
 的 5884 条差分测试间接佐证——若模型与实现存在语义分歧，启用规则集后会在状态
-或 gas 口径上产生偏差；基于随机字节码的模型—实现 fuzzing 作为未来工作
+或 gas 口径上产生偏差；基于随机字节码的模型—实现模糊测试作为未来工作
 （第~\ref{sec:limitations}~节）。
 
 \subsection{候选枚举与 SMT 准入}
@@ -92,7 +92,6 @@ Z3 校验。\emph{示例 2：极性错误。}候选 $\texttt{SBB}(x, 0, c_f) \to
 规则集 JSON 与 Z3 查询脚本。
 
 \subsection{两级规则集}
-\label{sec:two-level}
 
 \paragraph{分层动机。}dMIR 层负责与具体机器无关的代数化简，该层全部 70 条
 规则都经 Z3 在 dMIR 位向量语义模型上完成等价性校验。x86 CgIR 层负责寄存器、

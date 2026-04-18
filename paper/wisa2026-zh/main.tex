@@ -19,7 +19,6 @@
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{multirow}
-\usepackage{graphicx}
 \usepackage[breaklinks=true,hidelinks]{hyperref}
 \hypersetup{
   pdftitle={},
@@ -66,8 +65,8 @@
 \textbf{摘要：}区块链执行层 EVM 即时编译器（JIT）中的窥孔重写规则直接关系到
 共识一致性：任一规则的等价性判断出错，就可能导致节点间执行结果不一致，引发
 链分叉。LLVM IR 等通用中间表示以多返回值结构间接表达进位位，使部分多字进位链规则
-难以作为单条 peephole 规则直接表达（见表~\ref{tab:cannot-express}）。本文在 DTVM 的 dMIR 中将带进位加法
-\texttt{ADC} 与带借位减法 \texttt{SBB} 建模为 dMIR 原生算子，构建两级
+难以作为单条窥孔规则直接表达（见表~\ref{tab:cannot-express}）。本文在 DTVM 的 dMIR 中将带进位加法
+\texttt{ADC} 与带借位减法 \texttt{SBB} 建模为一等位向量算子，构建两级
 窥孔重写系统：dMIR 层由代数枚举与 ADC/SBB 模板合成 \textbf{853} 条候选，
 经 Z3 位向量等价性准入与筛选输出 \textbf{70} 条规则；x86 代码生成层
 \textbf{13} 条规则由对照测试套件覆盖。在 evmone-bench 的 \textbf{27} 个

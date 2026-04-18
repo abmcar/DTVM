@@ -18,13 +18,13 @@ Bhat 等人在 ITP 2024 提出的 LeanMLIR~\cite{leanmlir} 在 Lean~4 中形式�
 
 Mukherjee 与 Regehr 在 OOPSLA 2024 提出的 Hydra~\cite{hydra}能够自动发现
 与输入位宽无关的窥孔规则；但它与 Alive2 同样基于 LLVM IR，因此在多字进位链
-这族规则上继承第~2~节所述的表达力限制，本文通过更换 IR 基础给出一种工程
+这族规则上继承第~\ref{sec:problem}~节所述的表达力限制，本文通过更换 IR 基础给出一种工程
 解法。Schett 与 Nagele 在 FMBC 2020 发表的工作~\cite{fmbc20_evm_peephole}
 以相似的离线枚举加 SMT 流程为 EVM \emph{字节码}自动生成约 993 条规则；两者
 在等价性保证上对等，差别在抽象层次：本文规则集作用在 JIT 代码生成路径上，
 可同时利用 dMIR 的结构化匹配与 x86 层机械冗余清理，规则数量差距 993 对 83
-反映作用层次与覆盖策略不同。将字节码层规则集作为 JIT 前置预处理 pass 与
-本文规则组合后的残余加速（两者 orthogonal 组合的评估）是另一 design decision：
+反映作用层次与覆盖策略不同。将字节码层规则集作为 JIT 前置预处理阶段与
+本文规则组合后的残余加速（两者正交组合的评估）是另一设计选择：
 DTVM 生产管线当前不走字节码预处理路径，本文暂未覆盖此组合，留作未来工作。
 
 多字整数的 \texttt{adc}/\texttt{sbb} 进位链是 GMP、libsecp256k1 等密码学库
@@ -42,7 +42,7 @@ Appendix A 可能列出更多 memory/storage 层规则，两侧系统均不涉�
 均作用于 stack 代数化简；本文 83 条与其重合 7 条，均为 verified 位向量窥孔
 系统几乎必然包含的代数恒等公理——加法/乘法幺元、乘零吸收、双重否定、自减、
 与吸收等——不构成衍生依赖。其余 76 条中 13 条位于 x86 层，63 条位于 dMIR 层——包含
-256 位字长分解出的多字进位链规则、\texttt{adc}/\texttt{sbb} 代数简化、
+256 位字长分解出的多字进位链规则、\texttt{ADC}/\texttt{SBB} 代数简化、
 JIT 代码生成路径相关的常量传播与强度削减等。
 
 运行时对比验证工作——Breidenbach 等人 USENIX Security 2018 的 Hydra
