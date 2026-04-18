@@ -1,7 +1,7 @@
 % 03-method.tex — §3 方法
 \section{基于 dMIR 的 SMT 可验证窥孔重写规则合成}
 
-图~\ref{fig:pipeline}给出本文离线规则合成与两级集成的完整流水线。本节分三部分展开：dMIR 位向量语义模型（§3.1）、候选枚举与 SMT 准入判据
+图~\ref{fig:pipeline}展示了本文离线规则合成与两级集成的完整流水线。本节分三部分展开：dMIR 位向量语义模型（§3.1）、候选枚举与 SMT 准入判据
 （§3.2）、两级规则集的分层设计（§3.3）。
 
 \input{figures/fig1-pipeline}
@@ -18,7 +18,7 @@ $\mathrm{BV}_1$ 专门承担进位输入（$c_{in}$）与进位输出（$c_{out}
 \noindent 即输入两个 $n$ 位操作数与一个 1 位进位，输出一个 $n$ 位结果与一个
 1 位进位。带借位减法 \texttt{SBB} 的签名完全对称。
 
-在 Z3~\cite{demoura2008z3}中，上述进位传播可借位向量拼接与零扩展自然表达。
+在 Z3~\cite{demoura2008z3}中，上述进位传播可用位向量拼接与零扩展自然表达。
 以下代码框给出 \texttt{ADC} 的 Z3 编码：
 
 \begin{center}
@@ -50,7 +50,7 @@ $\exists\,\vec{v}.\;\textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$。
 若 Z3 返回 unsat，则规则在 dMIR 定长位向量模运算语义下对所有输入等价，
 准入通过；若返回 sat，求解器同时给出一组反例，规则被拒收；若超时，规则
 同样拒收。此处的等价性不依赖补码、有符号溢出或任何
-超出定长模运算之外的假设。所有 70 条 dMIR 生产规则均已通过该判据，Z3 查询
+定长模运算之外的假设。所有 70 条 dMIR 生产规则均已通过该判据，Z3 查询
 脚本随规则文件一起纳入代码仓，持续集成在每次规则变更时自动重新执行。
 
 \paragraph{两条枚举路径。}在已有规则集之外，我们做了一轮系统的候选探索来评估
@@ -75,7 +75,7 @@ $\exists\,\vec{v}.\;\textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$。
 \texttt{dmir\_adc\_*}/\texttt{dmir\_sbb\_*}（进位-死消除族）。合成管线为未来扩充规则集提供
 能力上界与误漏率下界的实证支撑。
 
-\paragraph{反例示例。}以下两条被 Z3 以反例拒收的进位模板，说明 SMT 准入门
+\paragraph{反例示例。}以下两条被 Z3 以反例拒收的进位模板，展示了 SMT 准入门
 在进位链场景下的必要性。\emph{示例 1：丢弃借位。}候选 $\texttt{SBB}(x, x, c_f)
 \to 0$ 在无符号模运算下被 Z3 以 $x = 0,\; c_f = 1$ 反例拒收：左式
 $\texttt{SBB}(0, 0, 1) = \texttt{0xFF\ldots F}$，右式为 $0$；错误在于
@@ -86,8 +86,8 @@ Z3 校验。\emph{示例 2：极性错误。}候选 $\texttt{SBB}(x, 0, c_f) \to
 两个示例在 256 位无符号模运算下均代表典型进位链推理陷阱：丢弃进位输入与
 操作数极性混淆。
 
-\paragraph{Artifact 声明。}合成脚本（约 691 行 Python）、规则集 JSON 与
-Z3 查询脚本作为本文的 artifact 发布。
+\paragraph{Artifact 声明。}本文 artifact 包含合成脚本（约 691 行 Python）、
+规则集 JSON 与 Z3 查询脚本。
 
 \subsection{两级规则集}
 \label{sec:two-level}
@@ -114,6 +114,6 @@ $\texttt{sub}(x,x) \to 0$、$\texttt{and}(x,x) \to x$ 等形式。x86 层以
 分支与比较清理主导。第~\ref{sec:evaluation}~节表~\ref{tab:family-attribution}
 给出按规则族的归因数据。
 
-\paragraph{不对等的验证工艺。}两层规则的产出与维护工艺有别：dMIR 层规则随
+\paragraph{不对等的验证流程。}两层规则的产出与维护方式有别：dMIR 层规则随
 合成管线与 Z3 准入一并维护，x86 层规则则由代码审阅与测试套件保障。这一不对等
 是当前系统的真实状态，我们在第~\ref{sec:limitations}~节明确列出。
