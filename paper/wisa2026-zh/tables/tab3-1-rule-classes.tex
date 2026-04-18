@@ -1,12 +1,14 @@
 % tables/tab3-1-rule-classes.tex — 两级规则分类 (Tab 3.1)
+% [Agent-B revision] 统一两行 \multirow 视觉：都不使用 parbox，采用较短名称；
+% 列宽用 p{} 固定避免换行不一致；字号统一到 \footnotesize 与其他表对齐。
 \begin{table}[t]
 \centering
-\caption{两级窥孔重写规则分类}
+\caption{两级窥孔重写规则分类。dMIR 层规则由 Z3 在位向量语义模型上完成等价性校验；x86 CgIR 层规则由对照测试套件覆盖。}
 \label{tab:rule-classes}
-\small
-\begin{tabular}{@{}llr@{}}
+\footnotesize
+\begin{tabular}{@{}l l r@{}}
 \toprule
-层 & 类别 & 条数 \\
+层（验证方式） & 类别 & 条数 \\
 \midrule
 \multirow{5}{*}{dMIR（Z3 校验）}
   & 布尔规范化       & 42 \\
@@ -17,7 +19,7 @@
 \cmidrule(l){2-3}
   & \textbf{小计}    & \textbf{70} \\
 \midrule
-\multirow{4}{*}{\parbox{2.1cm}{x86 CgIR\\（测试套件覆盖）}}
+\multirow{4}{*}{x86 CgIR（测试覆盖）}
   & 冗余比较/测试清理 &  8 \\
   & 分支贯通清理      &  2 \\
   & 空操作消除        &  2 \\
@@ -25,7 +27,7 @@
 \cmidrule(l){2-3}
   & \textbf{小计}     & \textbf{13} \\
 \midrule
-  & \textbf{合计}     & \textbf{83} \\
+\multicolumn{2}{@{}l}{\textbf{合计}}     & \textbf{83} \\
 \bottomrule
 \end{tabular}
 \end{table}

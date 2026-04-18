@@ -7,7 +7,8 @@ EVM 的原生字长为 256 位，而当前商用硬件的通用寄存器仅有 6
 EVM 层面的 U256 加法在 JIT 代码生成后会展开为 4 条机器级加法：第一条是
 普通的 64 位加法，后续 3 条为带进位加法（\texttt{adc}），形成一条\emph{串行
 进位链}。减法的情况类似，由 1 条 \texttt{sub} 与 3 条 \texttt{sbb}（带借位
-减法）构成。以下给出一个典型的 U256 加法在 dMIR 与 x86 两侧的对照代码框：
+减法）构成。以下给出一次典型 U256 加法在 dMIR 与 x86 两侧的对照代码（其中
+limb 指多精度算术中的一个 64 位机器字，4-limb 即 $4 \times 64 = 256$ 位）：
 
 \begin{center}
 \small
@@ -41,30 +42,30 @@ sha1 系列、jump\_around）上的 U256 命中比例则远低于此区间，其
 中。换言之，进位位在 LLVM IR 中\emph{不是一等公民}，而是隐藏在结构的第二个
 字段里。
 
-这一设计限制了自动等价验证工具的表达能力。参照 Lopes 等人在
-Alive~\cite{alive} 中提出并由 Alive2~\cite{alive2} 继承的窥孔验证框架，
-表~\ref{tab:cannot-express}列出了 4 条典型的进位链规则，它们在 Alive2 上均
-未能直接完成等价验证——工具对这些规则返回类型不匹配或不可判定。
+该设计限制了自动等价验证工具的表达能力。按 Lopes 等人在 Alive~\cite{alive}
+中提出、Alive2~\cite{alive2}（基于 SMT 的 LLVM 窥孔等价性验证工具）所继承的
+窥孔验证框架，表~\ref{tab:cannot-express}列出 4 条典型的进位链规则，它们在
+Alive2 上均无法直接完成等价验证——Alive2 对这些规则返回类型不匹配或不可判定。
 
 \input{tables/tab2-1-cannot-express}
 
-4 条规则的 Alive2 命令行、完整失败消息与版本号（2026-03-20 主线
-\texttt{v21.0-78-g28b9f9c9}，Z3 4.8.12）保存于 artifact（\S\ref{sec:availability}）；
-与 Hydra~\cite{hydra}（OOPSLA 2024）等 LLVM IR 合成工具的关系见~\S\ref{sec:related}。
+4 条规则的 Alive2 命令行、失败消息与版本号（2026-03-20 主线
+\texttt{v21.0-78-g28b9f9c9}，Z3 4.8.12）保存于 artifact（可复现材料包，
+\S\ref{sec:availability}）；与 Hydra~\cite{hydra}（Mukherjee 与 Regehr
+OOPSLA 2024 的 LLVM 窥孔合成器；与 \S\ref{sec:related} 所引 USENIX Security
+2018 的 Hydra Framework 同名异物）的关系见~\S\ref{sec:related}。
 
-值得注意的是，瓶颈并不在 SMT 求解器~\cite{demoura2008z3}的容量。我们测试了
-同一类别的其余 6 条 U256 规则（不涉及多返回值结构的进位传递），它们在 Alive2
-中均可直接通过等价验证，平均耗时约 60\,ms。这表明 256 位位向量的规模对
-求解器而言并非障碍，真正的瓶颈在于中间表示对进位位的表达方式。
+瓶颈不在 SMT 求解器~\cite{demoura2008z3}的容量。我们测试了同一类别其余 6 条
+U256 规则（不涉及多返回值进位传递），在 Alive2 中均可通过等价验证，平均耗时
+约 60\,ms。这表明 256 位位向量的规模对求解器并非障碍，瓶颈在中间表示如何
+表达进位位。
 
 \input{figures/fig2-ir-expr}
 
-图~\ref{fig:ir-expr}从结构层面对比了通用 IR 与 dMIR 在带进位加法上的表达力
-差异：左侧 LLVM IR 需要 5 行代码来调用 \texttt{uadd.with.overflow} 并从
-多返回值结构中提取结果与进位位，右侧 dMIR 将进位位作为一等位向量算子，
-一条 \texttt{ADC} 指令即完成。若以进位位为一等算子，上述 4 条规则便可纳入
-自动等价验证的范围。下一节将给出 dMIR 进位链原语的具体设计与 Z3 编码。
-dMIR 是一种面向 EVM JIT 的专用 IR，不追求通用性——我们以与 LLVM 的
-直接互操作为代价，换取进位链规则可被 SMT 自动等价验证。从工程验证角度看，表~\ref{tab:cannot-express}中列出的 4 条规则在
-通用中间表示下无法直接等价验证；在 dMIR 的位向量模型上，Z3~\cite{demoura2008z3}
-可以直接通过——这与上文揭示的表达力限制相印证。
+图~\ref{fig:ir-expr}从结构层面对比通用 IR 与 dMIR 在带进位加法上的表达力：
+左侧 LLVM IR 需 5 行代码调用 \texttt{uadd.with.overflow} 并从多返回值结构中
+提取结果与进位位，右侧 dMIR 一条 \texttt{ADC} 指令即完成。若以进位位为一等
+算子，上述 4 条规则便可纳入自动等价验证的范围。dMIR 面向 EVM JIT，不追求
+通用性——以牺牲与 LLVM 的直接互操作换取进位链规则可被 SMT 自动验证。
+表~\ref{tab:cannot-express}中 4 条规则在通用 IR 下无法直接等价验证，
+在 dMIR 位向量模型上 Z3 直接通过。

@@ -4,16 +4,17 @@
 
 \subsection{可验证窥孔优化框架}
 
-我们从作用的抽象层次、验证方法与进位链覆盖三个维度定位本文工作。基于 SMT 求解器校验的窥孔优化工作可追溯到 Lopes 等人提出的
-Alive~\cite{alive}及其后继 Alive2~\cite{alive2}，以及 Sasnauskas 等人的
-Souper~\cite{souper}——它们共同确立了“先合成候选、再用 SMT 等价性验证准入”的
-基本范式。本文沿用此范式，但将校验的 IR 从通用 LLVM IR 改为 EVM JIT 的 dMIR。
-值得说明的是，Alive 的 PLDI 2015 论文已明确指出 LLVM 以多返回值结构表达进位/溢出
-标志对窥孔验证的表达力限制——这一观察是本文的起点，而非新发现。
+我们从作用的抽象层次、验证方法与进位链覆盖三个维度定位本文工作。基于 SMT 求解器校验的窥孔优化工作，可追溯至 Lopes 等人的 Alive~\cite{alive}
+及后继 Alive2~\cite{alive2}，以及 Sasnauskas 等人的 Souper~\cite{souper}
+（基于 SMT 的 LLVM 窥孔合成工具）——这些工作共同确立了"先合成候选、再以
+SMT 等价性验证准入"的基本范式。本文沿用此范式，但将校验所基于的 IR 从通用 LLVM IR 换为 EVM JIT 的 dMIR。
+Alive 的 PLDI 2015 论文已明确指出 LLVM 以多返回值结构表达进位/溢出标志对
+窥孔验证的表达力限制——这一观察是本文的起点，而非新发现。
 
-Bhat 等人在 ITP 2024 提出的 LeanMLIR~\cite{leanmlir}在 Lean~4 中形式化了
-“将窥孔验证框架对 IR 参数化”的思想，与本文的定位互补：LeanMLIR 关注证明框架
-对 IR 的通用性，本文关注在具体 IR（dMIR）上的实例化规则集与端到端集成。
+Bhat 等人在 ITP 2024（交互式定理证明会议）提出的 LeanMLIR~\cite{leanmlir}
+（MLIR 在 Lean~4 依赖类型证明系统中的形式化）在 Lean~4 中形式化了"将窥孔
+验证框架对 IR 参数化"的思想，与本文定位互补：LeanMLIR 关注证明框架对 IR
+的通用性，本文关注在具体 IR（dMIR）上的实例化规则集与端到端集成。
 
 Mukherjee 与 Regehr 在 OOPSLA 2024 提出的 Hydra~\cite{hydra}可自动发现与
 输入位宽无关的窥孔规则；由于 Hydra 与 Alive2 同样建立在 LLVM IR 之上，在
@@ -25,41 +26,40 @@ Mukherjee 与 Regehr 在 OOPSLA 2024 提出的 Hydra~\cite{hydra}可自动发现
 规则数量差距（993 对 83）反映作用层次与覆盖策略不同。
 
 多字整数的 \texttt{adc}/\texttt{sbb} 进位链是 GMP、libsecp256k1 等密码学库的
-规范下降形态并对应 Intel ADCX/ADOX 指令；4 段 64 位链是 EVM 256 位算术在
-64 位硬件上的典型形状，并非刻意构造的边界情形。
+规范下降形态，并对应 Intel ADCX/ADOX（BMI2+ADX 扩展的带进位加法，支持双通道
+并行进位）指令；由 4 段 64 位构成的进位链是 EVM 256 位算术在 64 位硬件上的
+典型形状，并非刻意构造的边界情形。
 
 \subsection{面向共识关键路径的验证工作}
 
-Albert 等人于 CAV 2023 发表的工作~\cite{verified_evm_cav23}以 Coq 为证明基础，
-在 EVM 字节码块级 AOT 优化规则集合上完成形式化证明。其定位是字节码块级、
-离线证明、通用位向量与代数恒等；本文定位是 JIT 中间表示与机器码层、规则合成
-时的 SMT 准入、包含多字进位链的 EVM 专用模式。两者规模并不对等：Albert 的
-14 条规则\footnote{以 artifact 的 stack-only 分支 Coq 源文件
-\texttt{optimizations.v} 为准；原文 extended version 的 Appendix A 可能列出
-更多 memory/storage 层规则，两侧系统均不涉及，此处按 stack-only 口径对照。}
-均作用于字节码块级的 stack 代数化简；本文 83 条与其重合 7 条，均为 verified
-位向量窥孔系统几乎必然包含的代数恒等公理（加法/乘法幺元、乘零吸收、或零、
-双重否定、自减、与吸收等；在 Alive2、Souper 与 LLVM InstCombine 中均可见
-同构实现），不构成衍生依赖。其余 76 条中 13 条位于 x86 代码生成层，60 余条
-位于 dMIR 层且覆盖 Albert 未涉及的范畴——包含 256 位字长分解出的多字进位链
-规则、\texttt{adc}/\texttt{sbb} 语义的代数简化、与 JIT 代码生成路径相关的
-常量传播与强度削减等。
+Albert 等人 CAV 2023~\cite{verified_evm_cav23}在 EVM 字节码块级 AOT 优化规则集
+上完成 Coq 形式化证明。其定位是字节码块级、离线证明、通用位向量恒等；本文
+定位是 JIT 中间表示与机器码层、规则合成时的 SMT 准入、包含多字进位链的
+EVM 专用模式。规模不对等：Albert 的 14 条规则\footnote{以 artifact 的 stack-only
+分支 Coq 源文件 \texttt{optimizations.v} 为准；原文 extended version 的
+Appendix A 可能列出更多 memory/storage 层规则，两侧系统均不涉及。}
+均作用于 stack 代数化简；本文 83 条与其重合 7 条，均为 verified 位向量窥孔
+系统几乎必然包含的代数恒等公理（加法/乘法幺元、乘零吸收、或零、双重否定、
+自减、与吸收等；在 Alive2、Souper、LLVM InstCombine 中均有同构实现），
+不构成衍生依赖。其余 76 条中 13 条位于 x86 层，60 余条位于 dMIR 层——包含
+256 位字长分解出的多字进位链规则、\texttt{adc}/\texttt{sbb} 代数简化、
+JIT 代码生成路径相关的常量传播与强度削减等。
 
-运行时对比验证工作（如 Breidenbach 等人 USENIX Security 2018 发表的 Hydra
-Framework~\cite{hydra_framework}所代表的多客户端共识检测系统、EVM 模糊测试
-以及共识测试网络）在上线后检测分歧；本文定位为开发期的静态强化。
+运行时对比验证工作（如 Breidenbach 等人 USENIX Security 2018 的 Hydra
+Framework~\cite{hydra_framework}，与前文 OOPSLA 2024 的 Hydra 同名异物——
+等多客户端共识检测系统、EVM 模糊测试、共识测试网络）在上线后检测分歧；
+本文则定位为开发期的静态强化。
 
 \subsection{局限与未来工作}
 \label{sec:limitations}
 
 \begin{enumerate}[leftmargin=1.8em]
-  \item \textbf{可信基础。}SMT 等价性校验建立在 dMIR 位向量语义模型之上，
-    我们假设该模型与真实 JIT 执行引擎的运行语义一致；这一一致性的系统化测试
-    作为未来工作。
-  \item \textbf{x86 代码生成层规则的校验覆盖。}13 条 x86 层规则均为机械语法
-    重写，未配套独立 SMT 校验，其正确性由第~\ref{sec:correctness}~节两侧对照
-    测试套件保障；x86 寄存器与标志位语义的形式化建模作为未来工作。
-  \item \textbf{工作负载覆盖。}本文加速数据来自 evmone-bench 的 27 个基准，
+  \item \textbf{可信基础。}SMT 校验建立在 dMIR 位向量语义模型之上，假设该模型
+    与真实 JIT 执行引擎运行语义一致；一致性的系统化测试作为未来工作。
+  \item \textbf{x86 层校验覆盖。}13 条 x86 层规则均为机械语法重写，未配套独立
+    SMT 校验，其正确性由第~\ref{sec:correctness}~节对照测试套件保障；x86 寄存器
+    与标志位语义的形式化建模作为未来工作。
+  \item \textbf{工作负载覆盖。}加速数据来自 evmone-bench 的 27 个基准，
     不能代表全部生产合约。
   \item \textbf{规则建模范围。}本文只对窥孔重写前后的算术与标志位语义做等价性
     校验，不建模气体计费、内存别名与存储槽等副作用。
@@ -69,15 +69,15 @@ Framework~\cite{hydra_framework}所代表的多客户端共识检测系统、EVM
   \item \textbf{评测精度与编译开销对照。}\texttt{weierstrudel/15} 与
     \texttt{signextend/one} 落在 $\pm 2\%$ 噪声带内；\texttt{weierstrudel/1}
     稳定慢 \textbf{2.71\%}，逐一关闭新增规则对照未发现稳定负贡献。单模块编译
-    时间中位数 0.45\,ms、95 百分位 0.87\,ms 均来自启用侧单边测量；EVMC 接口
-    无逐阶段计时钩子，基线对照与窥孔重写单步开销分离均需另行插桩，本文仅以
-    启用侧作为整体编译延迟的上界。
+    时间中位数 0.45\,ms、95 百分位 0.87\,ms 均来自启用侧单边测量，EVMC 接口
+    无逐阶段计时钩子，基线对照需另行插桩，本文仅给出整体编译延迟的上界。
   \item \textbf{\texttt{memory\_grow\_mstore} 族微基准回归。}4 个
-    \texttt{memory\_grow\_mstore} 变体稳定慢 \textbf{7.74\%}--\textbf{8.85\%}
-    （两侧 CV 均低于 2\%）。初步分析把回归定位到 x86 层比较合并规则
-    \texttt{optimizeCmp} 在 memory-expand 控制流下降路径上的匹配行为——该
-    路径以 \texttt{SETCC}$\to$ 零扩展$\to$\texttt{TEST}$\to$\texttt{JCC}
-    链式下降，其中零扩展使用 \texttt{SUBREG\_TO\_REG} 形式，与当前规则集覆盖
-    的紧凑链在模式上不完全一致；具体根因留作后续工作。同族 \texttt{mload}
-    4 个变体不涉及此合并机会，加速 \textbf{+6.03\%}--\textbf{+7.26\%}。
+    \texttt{mstore} 变体稳定慢 \textbf{7.74\%}--\textbf{8.85\%}（两侧 CV 低于
+    2\%）。初步分析定位到 x86 层比较合并规则 \texttt{optimizeCmp} 在 memory-expand
+    控制流（EVM \texttt{MSTORE}/\texttt{MLOAD} 触发的内存扩展分支）下降路径上的
+    匹配行为——该路径以 \texttt{SETCC}$\to$ 零扩展$\to$\texttt{TEST}
+    $\to$\texttt{JCC} 链式下降，零扩展采用 \texttt{SUBREG\_TO\_REG}
+    （LLVM CodeGen 零扩展伪指令），与当前规则集所覆盖的紧凑链在模式上不完全
+    一致；具体根因留待后续工作。同族 \texttt{mload} 4 个变体不涉及此合并机会，
+    加速 \textbf{+6.03\%}--\textbf{+7.26\%}。
 \end{enumerate}

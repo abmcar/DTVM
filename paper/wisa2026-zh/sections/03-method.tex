@@ -18,8 +18,9 @@ $\mathrm{BV}_1$ 专门承担进位输入（$c_{in}$）与进位输出（$c_{out}
 \noindent 即输入两个 $n$ 位操作数与一个 1 位进位，输出一个 $n$ 位结果与一个
 1 位进位。带借位减法 \texttt{SBB} 的签名完全对称。
 
-在 Z3~\cite{demoura2008z3}中，上述进位传播可以用位向量拼接与零扩展自然地
-表达。以下代码框给出 \texttt{ADC} 的 Z3 编码：
+在 Z3~\cite{demoura2008z3}中，上述进位传播可借位向量拼接与零扩展自然表达。
+以下代码框给出 \texttt{ADC} 的 Z3 编码（其中 \texttt{ZeroExt} 为零扩展、
+\texttt{Extract} 为位切片，均为 Z3 Python API）：
 
 \begin{center}
 \small
@@ -62,28 +63,11 @@ $\exists\,\vec{v}.\;\textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$。
     手工构造带进位加减法的候选重写模板。
 \end{enumerate}
 
-\paragraph{吞吐与准入率。}表~\ref{tab:admission}汇总两条路径的准入结果；
-本文的核心贡献集中在第二条路径。
-
-\begin{table}[h]
-\centering
-\caption{候选枚举的吞吐与准入率}
-\label{tab:admission}
-\small
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
-候选来源 & 输入 & 通过 & 拒收 & 准入率 \\
-\midrule
-深度 2 代数枚举    & 775 & 765 &  10$^*$ & 98.7\% \\
-进位加减法模板     &  78 &  17 &  61     & 21.8\% \\
-\bottomrule
-\multicolumn{5}{@{}l}{\scriptsize $^*$\,10 条均为超时拒收，无语义反例。}
-\end{tabular}
-\end{table}
-
-\noindent 代数枚举拒收的 10 条均为超时（无语义反例），说明管线可高效处理已成立的
-代数恒等式。进位模板的 61 条语义拒收恰好说明手工进位模板的形态
-比代数枚举更容易触发不等价的边界——这正是需要 SMT 准入门的场景。
+\paragraph{吞吐与准入率。}两条路径的准入统计：代数枚举输入 775 条，通过 765
+条（准入率 98.7\%，拒收 10 条均为超时，无语义反例）；进位模板输入 78 条，
+通过 17 条（准入率 21.8\%，其余 61 条为语义拒收）。完整数据（含 Alive2 对照）
+见第~\ref{sec:evaluation}~节表~\ref{tab:synth-alive2}。进位模板 61 条语义拒收
+恰好表明，手工进位模板在形态上更易触发不等价的边界——这正是 SMT 准入门所需的场景。
 
 通过准入的候选并非直接进入生产规则集，70 条 dMIR 规则来自两条独立路径的
 并行贡献：代数式枚举的 765 条通过规则经规范化去重后剩余 458 条，人工筛选
@@ -109,14 +93,14 @@ Z3 查询脚本作为本文的 artifact 发布。
 \subsection{两级规则集}
 \label{sec:two-level}
 
-\paragraph{分层动机。}dMIR 层负责与具体机器无关的代数化简，这一层的所有
-70 条规则都经 Z3 在 dMIR 位向量语义模型上完成等价性校验。x86 代码生成层
-负责寄存器、标志位与分支跳转等与硬件编码强相关的冗余清理，这一层的 13 条规则
-均为机械语法重写，\textbf{当前未配套独立的 SMT 校验脚本}——其正确性由
-第~\ref{sec:correctness}~节中 HEAD 与基线两侧的对照测试套件覆盖（多阶段 JIT
-与解释器单元测试 + 两种执行模式下的 Cancun 状态转换测试，共 5884 条用例）。
-我们把 x86 层的形式化语义模型与 SMT 校验列为未来工作
-（第~\ref{sec:limitations}~节）。
+\paragraph{分层动机。}dMIR 层负责与具体机器无关的代数化简，该层全部 70 条
+规则都经 Z3 在 dMIR 位向量语义模型上完成等价性校验。x86 CgIR
+（code-generation IR，代码生成中间表示，机器码前一级）层负责寄存器、标志位、
+分支跳转等与硬件编码强相关的冗余清理，该层 13 条规则均为机械语法重写，
+\textbf{当前尚未配套独立的 SMT 校验脚本}——其正确性由第~\ref{sec:correctness}~节
+中基线与启用两侧的对照测试套件覆盖（多阶段 JIT 与解释器单元测试 + 两种执行
+模式下的 Cancun 状态转换测试，共 5884 条用例）。我们将 x86 层的形式化语义
+模型与 SMT 校验列为未来工作（第~\ref{sec:limitations}~节）。
 
 \input{tables/tab3-1-rule-classes}
 

@@ -1,23 +1,22 @@
 % tables/tab4-1-synth-alive2.tex — 合成管线产出与 Alive2 对照 (Tab 4.1)
+% [Agent-B revision]
+%   - $^\dagger$ 长脚注删除（§4.1 正文已覆盖相同内容，避免三重复述）；
+%   - 保留 $^*$ 简短脚注；
+%   - caption 改为自包含；
+%   - 若采纳 Issue A，§3.2 内联表 tab:admission 应删除，保留本表为唯一合成管线产出表。
 \begin{table}[t]
 \centering
-\caption{合成管线产出与通用中间表示验证对照}
+\caption{合成管线产出：候选规则的输入数、Z3 通过数、拒收数与准入率。两条枚举路径的详细构造见§\ref{sec:synthesis}。}
 \label{tab:synth-alive2}
 \footnotesize
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
 候选来源 & 输入 & 通过 & 拒收 & 准入率 \\
 \midrule
-代数枚举
-  & 775 & 765 & 10$^*$ & 98.7\% \\
-进位模板
-  &  78 &  17 & 61     & 21.8\% \\
+代数枚举   & 775 & 765 & 10$^*$ & 98.7\% \\
+进位模板   &  78 &  17 & 61     & 21.8\% \\
 \bottomrule
-\multicolumn{5}{@{}l}{\scriptsize $^*$\,10 条均为超时拒收，无语义反例。} \\
-\multicolumn{5}{@{}p{0.95\columnwidth}}{\scriptsize $^\dagger$\,Alive2 对照
-为同一批 10 条典型 U256 规则抽样：6 条不涉及多返回值进位结构的规则可在
-Alive2 上直接通过（平均约 60\,ms），4 条涉及 \texttt{adc}/\texttt{sbb}
-多返回值结构的规则 Alive2 返回类型不匹配或不可判定；同样的 4 条在 dMIR
-位向量语义下被 Z3 直接通过。} \\
 \end{tabular}
+\vspace{2pt}
+\par\noindent{\scriptsize $^*$\,10 条均为超时拒收，无语义反例。}
 \end{table}

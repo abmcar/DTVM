@@ -1,20 +1,26 @@
 % tables/tab4-3-correctness.tex — 正确性与规则覆盖 (Tab 4.3)
+% [Agent-B revision]
+%   - caption 自包含，明确"启用 vs 基线"语义与判定标准；
+%   - 列头改为"启用侧"与"基线侧"；
+%   - "方法"列改为"测试套件"；
+%   - 合计行"测试套件"列改为"—"；
+%   - 字号从 \scriptsize 放宽到 \footnotesize，对齐其他表。
 \begin{table}[t]
 \centering
-\caption{正确性测试与规则覆盖}
+\caption{启用 83 条新规则（启用侧）与上游主分支（基线侧）在四类对照测试上的通过结果（通过数/总数）。两列完全相同即表示启用规则集未引入正确性回归。}
 \label{tab:correctness}
-\scriptsize
-\setlength{\tabcolsep}{3pt}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}lccl@{}}
 \toprule
-维度 & 启用 & 基线 & 方法 \\
+测试维度 & 启用侧 & 基线侧 & 测试套件来源 \\
 \midrule
-单元测试（JIT）     & 223/223   & 223/223   & EVM 规范 \\
+单元测试（JIT）     & 223/223   & 223/223   & EVM 规范子集 \\
 单元测试（解释器）  & 215/215   & 215/215   & 运行列表 \\
-statetest（JIT）    & 2723/2723 & 2723/2723 & 101 套件 \\
-statetest（解释器） & 2723/2723 & 2723/2723 & 101 套件 \\
+statetest（JIT）    & 2723/2723 & 2723/2723 & 101 个 Cancun 套件 \\
+statetest（解释器） & 2723/2723 & 2723/2723 & 101 个 Cancun 套件 \\
 \midrule
-合计                & 5884/5884 & 5884/5884 & \\
+合计                & \textbf{5884/5884} & \textbf{5884/5884} & —— \\
 \bottomrule
 \end{tabular}
 \end{table}
