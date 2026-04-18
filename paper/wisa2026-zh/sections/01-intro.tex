@@ -17,21 +17,21 @@ Albert 等人~\cite{verified_evm_cav23}在字节码块级提出了经 Coq 形式
 对后者的覆盖不足。
 
 这一空白的根源在于中间表示对进位位的建模。在通用编译器中间表示（如 LLVM IR）中，
-基础算术运算只定义在 $N$ 位整数上；进位位须通过返回 \{结果, 进位位\} 多返回值
+基础算术运算只定义在 $N$ 位整数上；进位位须通过返回 \{结果、进位位\} 多返回值
 结构的内置函数（如 \texttt{@llvm.uadd.with.overflow}）间接获取——进位位并非
 一等公民（first-class，可被直接作为独立操作数的 IR 元素）。
 因此，依赖进位位的多字规则在自动等价验证工具（如 Alive~\cite{alive}）中只能
 借助间接结构来表达；瓶颈不在 SMT（Satisfiability Modulo Theories，可满足性模
 理论）求解器~\cite{demoura2008z3}的容量，而在 IR 的模式匹配能力。
-本文在 DTVM 的 dMIR（确定性中间表示；此处的"确定性"指同一字节码在所有共识
+本文在 DTVM 的 dMIR（确定性中间表示；此处的``确定性''指同一字节码在所有共识
 节点上产生一致的执行结果，为此放弃与通用 IR 的直接互操作，详见
-第~\ref{sec:two-level}~节）中将 \texttt{adc}/\texttt{sbb} 带进位加减法作为
+第~\ref{sec:two-level}~节）中将 \texttt{ADC}/\texttt{SBB} 带进位加减法作为
 一等位向量算子，使这类以多字进位链为核心的规则进入 SMT 可自动验证的范围。
 
 \paragraph{贡献。}本文的具体贡献如下：
 \begin{enumerate}
   \item 构建了面向确定性 EVM JIT 的两级窥孔重写系统：在 dMIR 中把
-    \texttt{adc}/\texttt{sbb} 作为一等位向量算子，共得到 \textbf{70} 条
+    \texttt{ADC}/\texttt{SBB} 作为一等位向量算子，共得到 \textbf{70} 条
     dMIR 规则与 \textbf{13} 条 x86 代码生成层规则；dMIR 层由 Z3 位向量等价性
     校验~\cite{demoura2008z3}，x86 层由对照测试套件覆盖。
   \item 揭示与已有形式化 EVM 优化工作的层次互补：与

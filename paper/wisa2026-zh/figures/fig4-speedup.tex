@@ -6,7 +6,7 @@
   width=\textwidth,
   height=6cm,
   ybar,
-  bar width=5pt,
+  bar width=6pt,
   xtick={0,...,26},
   xticklabels={
     {mg\_mload/nogr},
@@ -37,7 +37,7 @@
     {loop\_jd/emp},
     {jump\_ar/emp}
   },
-  xticklabel style={rotate=45, anchor=east, font=\scriptsize},
+  xticklabel style={rotate=45, anchor=east, font=\scriptsize\ttfamily},
   x tick label style={rotate=45, anchor=east},
   ylabel={加速比 (\%)},
   ylabel style={font=\small},
@@ -118,7 +118,7 @@
 
 \end{axis}
 \end{tikzpicture}
-\caption{27 个基准上启用/关闭窥孔重写规则集的加速比（95\% 置信区间误差棒，按工作负载类型分组）}
+\caption{27 个基准上启用/关闭窥孔重写规则集的加速比（95\% 置信区间误差棒）。自左至右按工作负载类型分 4 簇：U256 密集（1--11）、哈希（12--18）、算术/逻辑（19--24）、控制流（25--27）。}
 \label{fig:speedup}
 \end{figure*}
 

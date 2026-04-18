@@ -6,29 +6,29 @@
 
 我们从作用的抽象层次、验证方法与进位链覆盖三个维度定位本文工作。基于 SMT 求解器校验的窥孔优化工作，可追溯至 Lopes 等人的 Alive~\cite{alive}
 及后继 Alive2~\cite{alive2}，以及 Sasnauskas 等人的 Souper~\cite{souper}
-（基于 SMT 的 LLVM 窥孔合成工具）——这些工作共同确立了"先合成候选、再以
-SMT 等价性验证准入"的基本范式。本文沿用此范式，但将校验所基于的 IR 从通用 LLVM IR 换为 EVM JIT 的 dMIR。
+（基于 SMT 的 LLVM 窥孔合成工具）——这些工作共同确立了``先合成候选、再以
+SMT 等价性验证准入''的基本范式。本文沿用此范式，但将校验所基于的 IR 从通用 LLVM IR 换为 EVM JIT 的 dMIR。
 Alive 的 PLDI 2015 论文已明确指出 LLVM 以多返回值结构表达进位/溢出标志对
 窥孔验证的表达力限制——这一观察是本文的起点，而非新发现。
 
 Bhat 等人在 ITP 2024（交互式定理证明会议）提出的 LeanMLIR~\cite{leanmlir}
-（MLIR 在 Lean~4 依赖类型证明系统中的形式化）在 Lean~4 中形式化了"将窥孔
-验证框架对 IR 参数化"的思想，与本文定位互补：LeanMLIR 关注证明框架对 IR
+（MLIR 在 Lean~4 依赖类型证明系统中的形式化）在 Lean~4 中形式化了``将窥孔
+验证框架对 IR 参数化''的思想，与本文定位互补：LeanMLIR 关注证明框架对 IR
 的通用性，本文关注在具体 IR（dMIR）上的实例化规则集与端到端集成。
 
-Mukherjee 与 Regehr 在 OOPSLA 2024 提出的 Hydra~\cite{hydra}可自动发现与
-输入位宽无关的窥孔规则；由于 Hydra 与 Alive2 同样建立在 LLVM IR 之上，在
-多字进位链这族规则上承袭第~2~节所述的表达力限制，本文通过更换 IR 基础给出
-一种工程解法。Schett 与 Nagele 在 FMBC 2020 发表的工作~\cite{fmbc20_evm_peephole}
+Mukherjee 与 Regehr 在 OOPSLA 2024 提出的 Hydra~\cite{hydra}能够自动发现
+与输入位宽无关的窥孔规则；但它与 Alive2 同样基于 LLVM IR，因此在多字进位链
+这族规则上继承第~2~节所述的表达力限制，本文通过更换 IR 基础给出一种工程
+解法。Schett 与 Nagele 在 FMBC 2020 发表的工作~\cite{fmbc20_evm_peephole}
 以相似的离线枚举加 SMT 流程为 EVM \emph{字节码}自动生成约 993 条规则；两者
 在等价性保证上对等，差别在抽象层次：本文规则集作用在 JIT 代码生成路径上，
 可同时利用 dMIR 的结构化匹配与 x86 层机械冗余清理（字节码层均不可见），
 规则数量差距（993 对 83）反映作用层次与覆盖策略不同。
 
-多字整数的 \texttt{adc}/\texttt{sbb} 进位链是 GMP、libsecp256k1 等密码学库的
-规范下降形态，并对应 Intel ADCX/ADOX（BMI2+ADX 扩展的带进位加法，支持双通道
-并行进位）指令；由 4 段 64 位构成的进位链是 EVM 256 位算术在 64 位硬件上的
-典型形状，并非刻意构造的边界情形。
+多字整数的 \texttt{adc}/\texttt{sbb} 进位链是 GMP、libsecp256k1 等密码学库
+在 64 位硬件上的标准实现形式，并映射到 Intel ADCX/ADOX（BMI2+ADX 扩展的
+带进位加法，支持双链并行传播进位）指令；由 4 段 64 位构成的进位链是 EVM
+256 位算术在 64 位硬件上的典型形状，并非刻意构造的边界情形。
 
 \subsection{面向共识关键路径的验证工作}
 
@@ -41,7 +41,7 @@ Appendix A 可能列出更多 memory/storage 层规则，两侧系统均不涉�
 均作用于 stack 代数化简；本文 83 条与其重合 7 条，均为 verified 位向量窥孔
 系统几乎必然包含的代数恒等公理（加法/乘法幺元、乘零吸收、或零、双重否定、
 自减、与吸收等；在 Alive2、Souper、LLVM InstCombine 中均有同构实现），
-不构成衍生依赖。其余 76 条中 13 条位于 x86 层，60 余条位于 dMIR 层——包含
+不构成衍生依赖。其余 76 条中 13 条位于 x86 层，63 条位于 dMIR 层——包含
 256 位字长分解出的多字进位链规则、\texttt{adc}/\texttt{sbb} 代数简化、
 JIT 代码生成路径相关的常量传播与强度削减等。
 

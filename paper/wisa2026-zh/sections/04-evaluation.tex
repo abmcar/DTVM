@@ -51,7 +51,7 @@ evmone-bench（evmone 项目的 EVMC 基准驱动）接入。每个基准重复 
 \texttt{memory\_grow\_mstore} 的 4 个变体分别慢 \textbf{8.85\%}、
 \textbf{8.21\%}、\textbf{8.53\%}、\textbf{7.74\%}，以及 \texttt{weierstrudel/1}
 慢 \textbf{2.71\%}（两侧变异系数均低于 2\%）。4 个 \texttt{mstore} 变体集中在
-同族的写路径上，并非分散扰动（初步分析见~\ref{sec:limitations}~节第 8 项）；
+同族的写路径上，并非分散扰动（初步分析见~\ref{sec:limitations}~节第 7 项）；
 作为对照，同族 \texttt{memory\_grow\_mload} 4 个变体在同口径下反而加速
 \textbf{+6.03\%}--\textbf{+7.26\%}。在生产工作负载意义上，sha1 与
 \texttt{blake2b} 的宏加速（\textbf{+10\%}--\textbf{+25\%}）随调用次数与输入
@@ -72,15 +72,16 @@ evmone-bench（evmone 项目的 EVMC 基准驱动）接入。每个基准重复 
 \input{tables/tab4-3-correctness}
 
 启用规则集与基线两侧分别运行四类对照测试（表~\ref{tab:correctness}），两侧
-结果完全一致且全部通过，累计 \textbf{5884}/\textbf{5884}。基线侧通过说明
+结果逐项一致，累计 \textbf{5884}/\textbf{5884}。基线侧通过说明
 测试套件本身正确，启用侧通过说明新增 83 条规则未引入正确性回归。多阶段
 JIT 单元测试共 223 个独立用例（Cancun 分叉，即以太坊 2024 年 Cancun/Deneb
 升级规范）；解释器单元测试运行列表 226 行，经 gtest（Google Test）去重后
 215 个；\texttt{evmone-statetest}（状态转换测试驱动）Cancun 测试覆盖 101 个
 套件（用 \texttt{-k fork\_Cancun} 过滤 DTVM 尚不支持的 Prague 分叉），分别
-在多阶段 JIT 与解释器两种执行模式下独立进行。两种模式的 statetest 交叉核对
-在相同测试矩阵下产出一致结果，是 EVM 共识一致性的直接证据。
+在多阶段 JIT 与解释器两种执行模式下独立进行。两种模式的 statetest 交叉校验
+在相同测试矩阵下结果一致，直接佐证 EVM 共识一致性。
 
+\begingroup\sloppy\emergencystretch=3em
 与 Albert 等人~\cite{verified_evm_cav23}的 CAV 2023 规则集合比较，本文 83
 条规则中有 7 条与之重合：\texttt{dmir\_add\_zero}、
 \texttt{dmir\_mul\_one\_rhs}、\texttt{dmir\_mul\_zero\_rhs}、
@@ -92,9 +93,10 @@ JIT 单元测试共 223 个独立用例（Cancun 分叉，即以太坊 2024 年 
 \texttt{optimize\_and\_and\_l}，均为通用位向量代数恒等式（例如
 $\texttt{add}(x,0) \to x$、$\texttt{mul}(x,0) \to 0$、
 $\texttt{not}(\texttt{not}(x)) \to x$），在任何 SMT 可验证的窥孔工作中
-几乎都会出现。其余 76 条覆盖 dMIR 层的代数化简与多字清理（61 条）以及
+几乎都会出现。其余 76 条覆盖 dMIR 层的代数化简与多字清理（63 条）以及
 x86 层的寄存器/分支/标志位清理（13 条），对应字节码优化所处抽象层次无法
 直接表达的变换——这恰好印证了两套规则集指向不同抽象层次的论点。
+\par\endgroup
 
 持续集成可审计性：每条 dMIR 规则的等价性命题与 Z3 证明脚本一同存入代码仓，
 随代码改动自动重新验证。全部 70 条 dMIR 规则重新验证耗时约 \textbf{0.5} 秒，

@@ -77,13 +77,13 @@ $\exists\,\vec{v}.\;\textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$。
 能力上界与误漏率下界的实证支撑。
 
 \paragraph{反例示例。}以下两条被 Z3 以反例拒收的进位模板，展示了 SMT 准入门
-在进位链场景下的必要性。\emph{示例 1：丢弃借位。}候选 $\texttt{sbb}(x, x, c_f)
+在进位链场景下的必要性。\emph{示例 1：丢弃借位。}候选 $\texttt{SBB}(x, x, c_f)
 \to 0$ 在无符号模运算下被 Z3 以 $x = 0,\; c_f = 1$ 反例拒收：左式
-$\texttt{sbb}(0, 0, 1) = \texttt{0xFF\ldots F}$（回绕），右式为 $0$；错误在于
-忽略借位输入。正确形式 $\texttt{sbb}(x, x, c_f) \to \texttt{sub}(0, c_f)$ 通过
-Z3 校验。\emph{示例 2：极性错误。}候选 $\texttt{sbb}(x, 0, c_f) \to
+$\texttt{SBB}(0, 0, 1) = \texttt{0xFF\ldots F}$（回绕），右式为 $0$；错误在于
+忽略借位输入。正确形式 $\texttt{SBB}(x, x, c_f) \to \texttt{sub}(0, c_f)$ 通过
+Z3 校验。\emph{示例 2：极性错误。}候选 $\texttt{SBB}(x, 0, c_f) \to
 \texttt{sub}(0, c_f)$ 被反例 $x = 1,\; c_f = 0$ 拒收（左式 $1$ 而右式 $0$），
-错误在于丢失被减数；正确形式为 $\texttt{sbb}(x, 0, c_f) \to \texttt{sub}(x, c_f)$。
+错误在于丢失被减数；正确形式为 $\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(x, c_f)$。
 两个示例在 256 位无符号模运算下均代表典型进位链推理陷阱：丢弃进位输入与
 操作数极性混淆。
 

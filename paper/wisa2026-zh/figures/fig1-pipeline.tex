@@ -3,7 +3,7 @@
 \centering
 \begin{tikzpicture}[
   >=Stealth,
-  scale=0.70, every node/.style={scale=0.70},
+  scale=0.72, every node/.style={scale=0.72},
   box/.style={draw, rounded corners=2pt, minimum height=0.65cm,
               inner sep=3pt, align=center, font=\footnotesize},
   arr/.style={->, thick},
@@ -31,7 +31,7 @@
 
   % --- Arrows: enum paths -> merge ---
   \draw[arr] (enum1.east) -- ++(0.25,0) |- (merge);
-  \draw[-,thick] (enum2.east) -- ++(0.25,0) |- (merge);
+  \draw[arr] (enum2.east) -- ++(0.25,0) |- (merge);
 
   % --- Arrow: merge -> Z3 ---
   \draw[arr] (merge) -- (z3.west);
@@ -40,12 +40,12 @@
   \draw[arr] (z3) -- (json);
 
   % --- Arrows: JSON -> dMIR / x86 ---
-  \draw[arr] (json.east) -- node[above, font=\scriptsize, pos=0.4] {70} (dmir.west);
-  \draw[arr] (json.east) -- node[below, font=\scriptsize, pos=0.4] {13} (x86.west);
+  \draw[arr] (json.east) -- node[above, font=\scriptsize, pos=0.55] {70} (dmir.west);
+  \draw[arr] (json.east) -- node[below, font=\scriptsize, pos=0.55] {13} (x86.west);
 
   % --- Arrows: dMIR / x86 -> CI ---
   \draw[arr] (dmir.east) -- ++(0.15,0) |- (ci.west);
-  \draw[-,thick] (x86.east) -- ++(0.15,0) |- (ci.west);
+  \draw[arr] (x86.east) -- ++(0.15,0) |- (ci.west);
 
 \end{tikzpicture}
 \caption{离线规则合成与两级集成流水线}

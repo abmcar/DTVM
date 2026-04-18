@@ -6,7 +6,7 @@
 EVM 的原生字长为 256 位，而当前商用硬件的通用寄存器仅有 64 位。一条
 EVM 层面的 U256 加法在 JIT 代码生成后会展开为 4 条机器级加法：第一条是
 普通的 64 位加法，后续 3 条为带进位加法（\texttt{adc}），形成一条\emph{串行
-进位链}。减法的情况类似，由 1 条 \texttt{sub} 与 3 条 \texttt{sbb}（带借位
+进位链}。减法类似，由 1 条 \texttt{sub} 与 3 条 \texttt{sbb}（带借位
 减法）构成。以下给出一次典型 U256 加法在 dMIR 与 x86 两侧的对照代码（其中
 limb 指多精度算术中的一个 64 位机器字，4-limb 即 $4 \times 64 = 256$ 位）：
 
@@ -16,9 +16,9 @@ limb 指多精度算术中的一个 64 位机器字，4-limb 即 $4 \times 64 = 
 \textbf{dMIR（4-limb 加法）} & \textbf{x86-64 产出} \\
 \hline
 \texttt{r0 = add(a0, b0)}   & \texttt{add rax, rcx}  \\
-\texttt{r1 = adc(a1, b1, cout0)} & \texttt{adc rbx, rdx}  \\
-\texttt{r2 = adc(a2, b2, cout1)} & \texttt{adc rsi, rdi}  \\
-\texttt{r3 = adc(a3, b3, cout2)} & \texttt{adc r8,\enspace r9} \\
+\texttt{r1 = ADC(a1, b1, cout0)} & \texttt{adc rbx, rdx}  \\
+\texttt{r2 = ADC(a2, b2, cout1)} & \texttt{adc rsi, rdi}  \\
+\texttt{r3 = ADC(a3, b3, cout2)} & \texttt{adc r8,\enspace r9} \\
 \end{tabular}
 \end{center}
 
@@ -62,7 +62,7 @@ U256 规则（不涉及多返回值进位传递），在 Alive2 中均可通过�
 
 \input{figures/fig2-ir-expr}
 
-图~\ref{fig:ir-expr}从结构层面对比通用 IR 与 dMIR 在带进位加法上的表达力：
+图~\ref{fig:ir-expr}从结构上对比通用 IR 与 dMIR 在带进位加法上的表达力：
 左侧 LLVM IR 需 5 行代码调用 \texttt{uadd.with.overflow} 并从多返回值结构中
 提取结果与进位位，右侧 dMIR 一条 \texttt{ADC} 指令即完成。若以进位位为一等
 算子，上述 4 条规则便可纳入自动等价验证的范围。dMIR 面向 EVM JIT，不追求

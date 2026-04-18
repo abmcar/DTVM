@@ -10,11 +10,11 @@
 \toprule
 规则 & 重写形式 \\
 \midrule
-\texttt{adc\_zero\_carry}  & $\texttt{adc}(x,y,0)\!\to\!\texttt{add}(x,y)$ \\
-\texttt{sbb\_zero\_borrow} & $\texttt{sbb}(x,y,0)\!\to\!\texttt{sub}(x,y)$ \\
-\texttt{sbb\_self\_zero}   & $\texttt{sbb}(x,x,0)\!\to\!0$ \\
+\texttt{adc\_zero\_carry}  & $\texttt{ADC}(x,y,0) \to \texttt{add}(x,y)$ \\
+\texttt{sbb\_zero\_borrow} & $\texttt{SBB}(x,y,0) \to \texttt{sub}(x,y)$ \\
+\texttt{sbb\_self\_zero}   & $\texttt{SBB}(x,x,0) \to 0$ \\
 \midrule
-4-limb ADC 链 & $4\!\times\!\texttt{uadd.w.overflow}\to\texttt{add.i256}$ \\
+4-limb ADC 链 & $4 \times \texttt{uadd.w.overflow} \to \texttt{add.i256}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
