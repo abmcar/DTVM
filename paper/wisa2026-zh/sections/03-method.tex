@@ -1,12 +1,12 @@
 % 03-method.tex — §3 方法
 \section{基于 dMIR 的 SMT 可验证窥孔重写规则合成}
 
-图~\ref{fig:pipeline}展示了本文离线规则合成与两级集成的完整流水线。本节分三部分展开：dMIR 位向量语义模型（§3.1）、候选枚举与 SMT 准入判据
+图~\ref{fig:pipeline}给出本文离线规则合成与两级集成的完整流水线。本节分三部分展开：dMIR 位向量语义模型（§3.1）、候选枚举与 SMT 准入判据
 （§3.2）、两级规则集的分层设计（§3.3）。
 
 \input{figures/fig1-pipeline}
 
-\subsection{dMIR 的位向量语义与进位链原语}
+\subsection{dMIR 的位向量语义与进位链算子}
 
 dMIR 的核心数据类型是参数化位宽的位向量 $\mathrm{BV}_n$。其中
 $\mathrm{BV}_1$ 专门承担进位输入（$c_{in}$）与进位输出（$c_{out}$）。
@@ -75,7 +75,7 @@ $\exists\,\vec{v}.\;\textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$。
 \texttt{dmir\_adc\_*}/\texttt{dmir\_sbb\_*}（进位-死消除族）。合成管线为未来扩充规则集提供
 能力上界与误漏率下界的实证支撑。
 
-\paragraph{反例示例。}以下两条被 Z3 以反例拒收的进位模板，展示了 SMT 准入门
+\paragraph{反例示例。}以下两条被 Z3 以反例拒收的进位模板，说明 SMT 准入门
 在进位链场景下的必要性。\emph{示例 1：丢弃借位。}候选 $\texttt{SBB}(x, x, c_f)
 \to 0$ 在无符号模运算下被 Z3 以 $x = 0,\; c_f = 1$ 反例拒收：左式
 $\texttt{SBB}(0, 0, 1) = \texttt{0xFF\ldots F}$，右式为 $0$；错误在于
