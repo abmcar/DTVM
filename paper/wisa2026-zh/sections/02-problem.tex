@@ -47,7 +47,9 @@ sha1 系列、jump\_around）上的 U256 命中比例则远低于此区间，其
 该设计限制了自动等价验证工具的表达能力。按 Lopes 等人在 Alive~\cite{alive}
 中提出、Alive2~\cite{alive2} 所继承的窥孔验证框架，表~\ref{tab:cannot-express}
 列出 4 条典型的进位链规则，它们在 Alive2 上均无法直接完成等价验证——Alive2
-对这些规则返回类型不匹配或不可判定。
+对这些规则返回类型不匹配或不可判定。这 4 条规则在 Alive/Alive2 框架下属于
+\textbf{不可自动验证}的情形；限制在于通用 IR 对进位位的建模方式，与规则实现
+和求解器能力无关。
 
 \input{tables/tab2-1-cannot-express}
 
