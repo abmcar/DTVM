@@ -79,6 +79,15 @@ Cancun 差分测试中启用/关闭两侧的账户状态、存储与 gas 消耗�
 \vspace{0.3em}
 
 \textbf{关键词：}区块链信息系统；EVM JIT；dMIR；窥孔优化；SMT 等价性校验；进位链
+\vspace{0.8em}
+
+\noindent\textbf{Title: }Verifiable Peephole Optimization for the Execution Layer of Blockchain Information Systems: dMIR Carry-Chain Operator Extension and SMT Equivalence Checking
+\vspace{0.3em}
+
+\noindent\textbf{Abstract: }Blockchain JIT peephole rewrites must preserve transaction semantics bit-for-bit; unverified rules risk consensus forks. General-purpose intermediate representations such as LLVM IR carry bit-level side-products (carry, overflow) through multi-return tuples, spreading a single rewrite rule across several IR nodes so that the rule cannot be stated as a single verifiable unit in Alive/Alive2; engineers therefore face three options: dropping the rule, deploying it unverified, or verifying it on paper. The middle IR dMIR (Deterministic Middle IR) of the Deterministic Virtual Machine (DTVM) is extended with first-class bit-vector operators: bit-level patterns are modeled as dMIR first-class operators without modifying the solver, so the resulting rules enter the Z3 bit-vector equivalence check. A two-tier verifiable peephole rewrite system is built on this extension, with \textbf{70} dMIR rules checked rule-by-rule by Z3, \textbf{13} x86 mechanical-redundancy rules covered by a matched test suite, and a synthesis pipeline enumerating \textbf{853} candidates. The \textbf{27} evmone-bench benchmarks show a \textbf{7.24\%} geometric-mean speedup with a \textbf{25.79\%} peak; across \textbf{5884} Cancun differential tests, the enabled and disabled sides produce byte-identical account state, storage, and gas consumption.
+\vspace{0.3em}
+
+\noindent\textbf{Keywords: }Blockchain Information Systems; EVM JIT; dMIR; Peephole Optimization; SMT Equivalence Checking; Carry Chain
 }
 \end{center}
 \vspace{1.0em}
