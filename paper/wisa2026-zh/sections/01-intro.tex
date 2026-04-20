@@ -28,16 +28,17 @@ dMIR 中将 \texttt{ADC}/\texttt{SBB} 带进位加减法作为一等位向量算
 
 \paragraph{贡献。}本文的具体贡献如下：
 \begin{enumerate}
-  \item 构建了面向确定性 EVM JIT 的两级窥孔重写系统：在 dMIR 中把
-    \texttt{ADC}/\texttt{SBB} 作为一等位向量算子，共得到 \textbf{70} 条
-    dMIR 规则与 \textbf{13} 条 x86 代码生成层规则；dMIR 层由 Z3 位向量等价性
-    校验~\cite{demoura2008z3}，x86 层由对照测试套件覆盖。
-  \item 揭示与已有形式化 EVM 优化工作的层次互补：与
-    Albert 等人~\cite{verified_evm_cav23}的 EVM 字节码块级优化规则集合相比，
-    规则重合度仅 \textbf{8.4\%}（7/83 条），其余 76 条分布在字节码层无法
-    触及的抽象层次。
-  \item 在 27 个标准 EVM 基准上验证性能与正确性：加速比的几何均值为
-    \textbf{+7.24\%}（95\% 置信区间 [+2.59\%, +12.11\%]，下界显著大于零），
-    峰值 \textbf{+25.79\%}；\textbf{5884} 条对照测试在启用/关闭规则集两侧
-    均全部通过且结果一致。
+  \item \textbf{dMIR 上的进位链算子扩展与 SMT 等价验证。}将 \texttt{ADC}
+    与 \texttt{SBB} 建模为 dMIR 的一等进位链算子，使此前 Alive/Alive2 框架
+    无法自动等价验证的多字进位规则进入 Z3 位向量等价判据~\cite{demoura2008z3}
+    的范围；\textbf{70} 条 dMIR 生产规则（其中 5 条为通用 IR 无法表达的
+    进位链规则）与 \textbf{13} 条 x86 代码生成层规则组成两级重写系统。
+  \item \textbf{候选合成管线的能力评估。}以 \textbf{853} 条候选
+    （775 代数枚举 + 78 进位模板）在同一 Z3 准入判据下完成容量与误漏率
+    刻画，准入率分别为 \textbf{98.7\%} 与 \textbf{21.8\%}；合成管线独立于
+    生产规则集，结果作为未来规则扩充的 Z3 准入率参考。
+  \item \textbf{端到端性能与正确性。}在 evmone-bench 的 \textbf{27} 个
+    EVM 基准上加速比几何均值 \textbf{+7.24\%}（95\% 置信区间
+    [+2.59\%, +12.11\%]，下界显著大于零），峰值 \textbf{+25.79\%}；
+    \textbf{5884} 条差分测试在启用/关闭规则集两侧状态与 gas 口径一致。
 \end{enumerate}
