@@ -36,9 +36,10 @@ DTVM 生产管线当前不走字节码预处理路径，本文暂未覆盖此组
 Albert 等人 CAV 2023~\cite{verified_evm_cav23}在 EVM 字节码块级 AOT 优化规则集
 上完成 Coq 形式化证明。其定位是字节码块级、离线证明、通用位向量恒等；本文
 定位是 JIT 中间表示与机器码层、规则合成时的 SMT 准入、包含多字进位链的
-EVM 专用模式。规模不对等：Albert 的 14 条规则\footnote{以 artifact 的 stack-only
-分支 Coq 源文件 \texttt{optimizations.v} 为准；原文 extended version 的
-Appendix A 可能列出更多 memory/storage 层规则，两侧系统均不涉及。}
+EVM 专用模式。规模不对等：Albert 的 14 条规则\footnote{以公开 artifact \texttt{forves} 的 stack-only
+发布分支（Coq 源文件 \texttt{optimizations.v}，14 条）为比较基线；CAV 2023
+论文正文讨论 15 条，extended version Appendix A 可能列出更多 memory/storage
+层规则，两侧系统均不涉及。}
 均作用于 stack 代数化简；本文 83 条与其重合 7 条，均为 verified 位向量窥孔
 系统几乎必然包含的代数恒等公理——加法/乘法幺元、乘零吸收、双重否定、自减、
 与吸收等——不构成衍生依赖。其余 76 条中 13 条位于 x86 层，63 条位于 dMIR 层——包含
