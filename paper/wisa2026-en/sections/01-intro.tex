@@ -1,0 +1,88 @@
+% 01-intro.tex — §1 Introduction
+\section{Introduction}
+
+The execution layer of a blockchain information system is, in essence, a
+replicated consensus state machine: every node on the consensus path must
+produce bit-identical results for the same transaction. The EVM is the most
+widely deployed smart-contract execution environment, and its just-in-time
+(JIT) compiler is progressively replacing the interpreter in mainstream
+clients, becoming a core component on the consensus-critical path. Peephole
+rewrite rules in the JIT act directly on the machine-code generation stage,
+so their correctness bears directly on the determinism of on-chain
+execution.
+
+If the equivalence judgment of a peephole rewrite rule is wrong and the
+rule is deployed on only some clients, the nodes may produce inconsistent
+execution results and trigger a chain fork---one of the most expensive
+failure modes in a blockchain information system. Existing formal
+verification work on EVM peephole rewrites focuses mostly on the bytecode
+block-level abstraction. The machine-level patterns emitted by a JIT
+compiler during code generation---especially the multi-word carry chains
+that arise when the 256-bit word length is lowered onto 64-bit
+hardware---sit at an adjacent but different abstraction layer, and an
+end-to-end automatically verifiable rule set with a concrete deployment
+path is still missing.
+
+The root cause of this gap is how intermediate representations model the
+bit-level side-products of arithmetic (such as the carry bit). In a
+general-purpose intermediate representation such as LLVM IR, the basic
+arithmetic operations are defined only on $N$-bit integers; the carry bit
+must be retrieved indirectly through an intrinsic that returns a
+multi-return tuple of \{result, carry\}. The bit-level side-product is not
+a native type. Rules that depend on such side-products can therefore only
+be expressed through indirect structures in Alive~\cite{alive} and similar
+automatic equivalence-checking tools; the bottleneck is not the capacity
+of the SMT solver~\cite{demoura2008z3} but the expressiveness of the IR
+and its pattern matching. For a consensus-critical JIT, if a rule class
+cannot be verified automatically, the engineer is left with three
+choices: drop the rule, ship it without formal verification, or rely on a
+hand-written paper proof. Each choice sacrifices performance, endangers
+consensus, or fails to scale. The result is that such rules are
+systematically excluded from the optimization surface.
+
+The direction taken in this paper is the following: \emph{without
+modifying the solver and without loosening the differential-test
+threshold, expand the coverage of SMT-verifiable peephole rules by
+extending the IR with first-class bit-vector operators.} In dMIR, the
+bit-level patterns that previously required an indirect multi-return
+encoding become first-class operators, so the corresponding rules fall
+naturally within the decidable fragment of the Z3 bit-vector equivalence
+check.
+
+\paragraph{Contributions.} The contributions of this paper are as follows:
+\begin{enumerate}
+  \item \textbf{An automatically verifiable peephole system through
+    IR-side extension.} Bit-level side-products that a general-purpose IR
+    can only carry through a multi-return tuple become first-class
+    bit-vector operators of dMIR. Without modifying the solver and
+    without loosening the differential-test threshold, the IR extension
+    moves a rule class that previously sat outside the Alive/Alive2
+    automatic equivalence-verification framework into the decidable
+    fragment of the Z3 bit-vector equivalence
+    check~\cite{demoura2008z3}. A two-tier rewrite system is built on
+    \textbf{70} dMIR production rules (5 of which rely on the
+    first-class modeling and cannot be expressed as a single peephole
+    rule on general IR) together with \textbf{13} rules at the x86
+    code-generation layer.
+  \item \textbf{Capacity and admission-rate characterization of the
+    synthesis pipeline.} \textbf{853} candidates are evaluated under the
+    same Z3 admission check, producing a single capacity-and-false-miss
+    measurement. The admission rates on the two enumeration paths are
+    \textbf{98.7\%} for algebraic enumeration and \textbf{21.8\%} for
+    hand-constructed carry templates. The synthesis pipeline is
+    independent of the production rule set and its results serve as a
+    Z3 admission-rate reference for future rule expansion.
+  \item \textbf{End-to-end performance and correctness.} Across the
+    \textbf{27} EVM benchmarks of evmone-bench, the geometric-mean
+    speedup is \textbf{+7.24\%} (95\% confidence interval
+    [+2.59\%, +12.11\%], lower bound significantly greater than zero),
+    with a peak of \textbf{+25.79\%}; \textbf{5884} differential tests
+    agree byte-for-byte on state and gas between the rules-enabled and
+    rules-disabled sides.
+\end{enumerate}
+
+Relative to the EVM bytecode block-level formal rule set of
+Albert et al.~\cite{verified_evm_cav23} at CAV 2023, the rule set in this
+paper operates at the JIT intermediate representation and machine-code
+layers that the bytecode abstraction cannot reach (quantitative comparison
+in \S\ref{sec:related}).

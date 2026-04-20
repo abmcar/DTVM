@@ -1,0 +1,150 @@
+% 04-evaluation.tex — §4 Evaluation
+\section{Evaluation}
+\label{sec:evaluation}
+
+This section evaluates the two-tier peephole rewrite system along three
+axes: the output of the rule synthesis pipeline against the
+general-purpose IR checker (\S4.1), end-to-end execution performance
+(\S4.2), and correctness with rule coverage (\S4.3).
+
+\subsection{Rule Synthesis Output Against the General-Purpose IR}
+
+Table~\ref{tab:synth-alive2} combines the admission results from the
+synthesis pipeline of \S\ref{sec:synthesis} with the verification
+ability of Alive2 on the same rule groups.
+
+\input{tables/tab4-1-synth-alive2}
+
+Z3 solves a typical 256-bit bit-vector peephole equivalence proposition
+in about 60\,ms on average; all 70 dMIR rule queries finish within
+seconds, with no timeout or undecidable outcome, showing that the 256-bit
+width is not a bottleneck for the solver's capacity. From the synthesis
+pipeline, 10 typical U256 rules were sampled at random and compared
+against Alive2: 6 of them do not involve a multi-return carry structure
+and Alive2 discharges them directly; the other 4 involve
+\texttt{adc}/\texttt{sbb} multi-return structures, for which Alive2
+either reports a type mismatch or times out (the mechanism is of the same
+type as Table~\ref{tab:cannot-express} in \S\ref{sec:expressiveness},
+while these 4 are an independent sample from the production rule set),
+whereas Z3 discharges all of them directly under the dMIR bit-vector
+semantics, confirming the analysis of the IR expressiveness bottleneck in
+\S\ref{sec:expressiveness}.
+
+\subsection{End-to-End Performance}
+
+\paragraph{Experimental setup and noise control.} The baseline is the
+upstream main branch (which already contains 2 hard-coded x86 peephole
+rules that are not new in this paper); the enabled side adds the 83 new
+rules (70 dMIR + 13 x86). Both sides run through evmone-bench. Every
+benchmark is repeated 20 times, and the 95\% confidence interval of the
+geometric mean is estimated by bootstrap ($B = 10\,000$). To suppress
+noise, the process is pinned to dedicated physical cores with
+\texttt{taskset -c 2-3} and raised to \texttt{nice -5};
+measurement starts only when the 1-minute load average is below 0.5, with
+CPU turbo disabled; every benchmark is then re-measured to confirm that
+the coefficient of variation (CV) on both sides is below 3\%, and if any
+benchmark exceeds the threshold, it is rerun with 30 repetitions.
+
+\input{figures/fig4-speedup}
+
+\input{tables/tab4-2-attribution}
+
+Across the 27 benchmarks (Figure~\ref{fig:speedup}), the geometric-mean
+speedup of the enabled rule set over the baseline is \textbf{+7.24\%}
+(95\% confidence interval [+2.59\%, +12.11\%]), with a peak of
+\textbf{+25.79\%} on \texttt{JUMPDEST\_n0/empty}. The sha1 family gains
+the most on long inputs: \texttt{sha1\_shifts/5311} and
+\texttt{sha1\_divs/5311} accelerate by \textbf{+24.81\%} and
+\textbf{+23.51\%} respectively, with the empty-input workloads still at
+\textbf{+19.59\%}--\textbf{+20.24\%}; \texttt{blake2b\_huff} accelerates
+by \textbf{+10.41\%}--\textbf{+11.54\%}. Attribution by rule family
+appears in Table~\ref{tab:family-attribution} (the hit rate is defined as
+the fraction of executed instructions matched by a given rule family):
+the U256-related rules reach almost 100\% hit rate on the four
+\texttt{mg\_mload} variants, 33.8\% on \texttt{weierstrudel}, and 25.3\%
+on \texttt{snailtracer}; the speedup on sha1 and \texttt{blake2b} comes
+mainly from the branch- and compare-merging rules at the x86 layer. Hit
+rate and speedup are not proportional: on \texttt{mg\_mload} almost 100\%
+of the instructions are matched by no-op elimination, yet the saving per
+rewrite is small, and the final speedup depends on both the trigger
+count and the cost of each rewrite. The two rule layers are
+complementary rather than substitutive: the multi-word rules yield
+concentrated gains on U256-heavy contracts, while the mechanical cleanup
+at the x86 layer provides broader, ordinary gains.
+
+\paragraph{Discussion of the regressed surface.} Five of the 27
+benchmarks move beyond $\pm 2\%$ toward the slower side: the 4 variants
+of \texttt{memory\_grow\_mstore} are slower by
+\textbf{8.85\%}, \textbf{8.21\%}, \textbf{8.53\%}, and \textbf{7.74\%},
+and \texttt{weierstrudel/1} is slower by \textbf{2.71\%} (CV below 2\%
+on both sides). The 4 \texttt{mstore} variants cluster on the same
+same-family write path and are not a diffuse disturbance (preliminary
+analysis in \S\ref{sec:limitations}, item 7). As a control, the 4
+\texttt{memory\_grow\_mload} variants of the same family accelerate by
+\textbf{+6.03\%}--\textbf{+7.26\%} under the same measurement recipe. In
+production-workload terms, the macro speedups on sha1 and
+\texttt{blake2b} (\textbf{+10\%}--\textbf{+25\%}) scale linearly with
+call count and input length, while the \texttt{mstore} regressions appear
+only in a microbenchmark of about 0.7\,ns/op; the two magnitudes are not
+comparable.
+
+\paragraph{Compilation overhead.} A per-module timing switch was added to
+the EVMC adapter. Across the \textbf{776} modules of the JIT unit test
+set, the median single-module compilation time is \textbf{0.45\,ms} and
+the 95th percentile is \textbf{0.87\,ms}, covering the full pipeline of
+loading, analysis, and JIT code generation; dMIR peephole rewriting is
+only one local-matching pass within it. The 99th-percentile tail lands
+on the 19 large contracts that exceed 16\,KB and correlates with
+contract size. The 0.87\,ms at the 95th percentile is an upper bound on
+the wall-clock time of the entire compilation pipeline (loading,
+analysis, and JIT code generation combined), not the incremental cost of
+the dMIR peephole rewrite pass alone; per-pass baseline comparison is
+listed as future work in \S\ref{sec:limitations}, item 6.
+
+\subsection{Correctness and Rule Coverage}
+\label{sec:correctness}
+
+\input{tables/tab4-3-correctness}
+
+The enabled side and the baseline side each run four differential test
+categories (Table~\ref{tab:correctness}); the two sides agree
+item-by-item on state and gas, for a cumulative
+\textbf{5884}/\textbf{5884}. A pass on the baseline side shows that the
+test suite itself is correct; a pass on the enabled side shows that the
+83 new rules introduce no correctness regression. The multipass JIT unit
+tests contain 223 independent Cancun cases; the interpreter run list
+contains 226 lines, reducing to 215 after the gtest deduplication;
+\texttt{evmone-statetest} on Cancun covers 101 suites (with
+\texttt{-k fork\_Cancun} filtering out the Prague fork that DTVM does
+not yet support) and runs independently in both the multipass JIT mode
+and the interpreter mode. The cross-check between the two modes on the
+same test matrix produces identical outcomes, which is direct evidence
+of EVM consensus consistency.
+
+\begingroup\sloppy\emergencystretch=3em
+Compared with the CAV 2023 rule set of
+Albert et al.~\cite{verified_evm_cav23}, 7 of the 83 rules in this paper
+overlap: \texttt{dmir\_add\_zero}, \texttt{dmir\_mul\_one\_rhs},
+\texttt{dmir\_mul\_zero\_rhs}, \texttt{dmir\_or\_zero},
+\texttt{dmir\_double\_not}, \texttt{dmir\_sub\_self}, and
+\texttt{dmir\_and\_factor\_lhs}, which correspond respectively to the
+CAV'23 rules \texttt{optimize\_add\_zero}, \texttt{optimize\_mul\_one},
+\texttt{optimize\_mul\_zero}, \texttt{optimize\_or\_zero},
+\texttt{optimize\_not\_not}, \texttt{optimize\_sub\_x\_x}, and
+\texttt{optimize\_and\_and\_l}. All 7 are general bit-vector algebraic
+identities ($\texttt{add}(x,0) \to x$, $\texttt{mul}(x,0) \to 0$,
+$\texttt{not}(\texttt{not}(x)) \to x$, and so on) that appear in almost
+every SMT-verifiable peephole effort. The remaining 76 rules cover dMIR
+algebraic simplification and multi-word cleanup (63 rules) and x86
+register/branch/flag cleanup (13 rules). These transformations live at
+abstraction layers that the bytecode layer cannot reach directly---which
+is precisely the point that the two rule sets target different
+abstraction layers.
+\par\endgroup
+
+Continuous-integration auditability: the equivalence proposition and the
+Z3 query script of each dMIR rule are stored with the rule file and are
+re-verified automatically on every code change. Re-verifying all 70 dMIR
+rules takes about \textbf{0.5} seconds in total and is not a bottleneck;
+the 0.5\,s figure is the total CI offline re-verification time and is
+not on the same scale as the runtime compilation latency in \S4.2.

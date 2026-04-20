@@ -1,0 +1,15 @@
+bench,total_insn,u256_insn,u256_share_pct
+main__blake2b_huff,319939,6830,2.13
+main__blake2b_shifts,71951,1166,1.62
+main__sha1_divs,8945,301,3.37
+main__sha1_shifts,8949,260,2.91
+main__snailtracer,309072,8644,2.80
+main__structarray_alloc,4651,82,1.76
+main__swap_math,20927,380,1.82
+main__weierstrudel,234448,6005,2.56
+micro__JUMPDEST_n0,131,6,4.58
+micro__jump_around,32843,3,0.01
+micro__loop_with_many_jumpdests,110317,38,0.03
+micro__memory_grow_mload,123099,12291,9.98
+micro__memory_grow_mstore,151772,12291,8.10
+micro__signextend,852305,5,0.00

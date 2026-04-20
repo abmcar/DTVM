@@ -1,0 +1,53 @@
+\begin{thebibliography}{1}
+\providecommand{\url}[1]{\texttt{#1}}
+\providecommand{\urlprefix}{URL }
+\providecommand{\doi}[1]{https://doi.org/#1}
+
+\bibitem{verified_evm_cav23}
+Albert, E., Genaim, S., Kirchner, D., Martin-Martin, E.: Formally verified
+  {EVM} block-optimizations. In: Computer Aided Verification (CAV). LNCS, vol.
+  13966, pp. 176--189 (2023). \doi{10.1007/978-3-031-37709-9_9}
+
+\bibitem{leanmlir}
+Bhat, S., Keizer, A., Hughes, C., Goens, A., Grosser, T.: Verifying peephole
+  rewriting in {SSA} compiler {IR}s. In: 15th International Conference on
+  Interactive Theorem Proving (ITP). LIPIcs, vol.~309, pp. 9:1--9:20 (2024).
+  \doi{10.4230/LIPIcs.ITP.2024.9}
+
+\bibitem{hydra_framework}
+Breidenbach, L., Daian, P., Tram{\`e}r, F., Juels, A.: Hydra: Principled bug
+  bounties for smart contract security. In: 27th USENIX Security Symposium
+  (USENIX Security 18) (2018)
+
+\bibitem{alive2}
+Lopes, N.P., Lee, J., Hur, C.K., Liu, Z., Regehr, J.: Alive2: Bounded
+  translation validation for {LLVM}. In: Proceedings of the 42nd ACM SIGPLAN
+  International Conference on Programming Language Design and Implementation
+  (PLDI) (2021). \doi{10.1145/3453483.3454030}
+
+\bibitem{alive}
+Lopes, N.P., Menendez, D., Nagarakatte, S., Regehr, J.: Provably correct
+  peephole optimizations with alive. In: Proceedings of the 36th ACM SIGPLAN
+  Conference on Programming Language Design and Implementation (PLDI) (2015).
+  \doi{10.1145/2737924.2737965}
+
+\bibitem{demoura2008z3}
+de~Moura, L., Bj{\o}rner, N.: Z3: An efficient {SMT} solver. In: Tools and
+  Algorithms for the Construction and Analysis of Systems (TACAS) (2008).
+  \doi{10.1007/978-3-540-78800-3_24}
+
+\bibitem{hydra}
+Mukherjee, M., Regehr, J.: Hydra: Generalizing peephole optimizations with
+  program synthesis. Proc. ACM Program. Lang.  \textbf{8}(OOPSLA1) (2024).
+  \doi{10.1145/3649837}
+
+\bibitem{souper}
+Sasnauskas, R., Chen, Y., Collingbourne, P., Ketema, J., Taneja, J., Regehr,
+  J.: Souper: A synthesizing superoptimizer (2017)
+
+\bibitem{fmbc20_evm_peephole}
+Schett, M.A., Nagele, J.: Populating the peephole optimizer of a smart contract
+  compiler. In: 2nd Workshop on Formal Methods for Blockchains (FMBC 2020).
+  OASIcs (2020). \doi{10.4230/OASIcs.FMBC.2020.3}
+
+\end{thebibliography}

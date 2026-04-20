@@ -1,0 +1,23 @@
+% tables/tab4-3-correctness.tex — Correctness and rule coverage
+\begin{table}[t]
+\centering
+\caption{Results on four differential test categories for the enabled
+side (83 new rules) and the baseline side (upstream main): passes/total.
+Identical numbers in both columns indicate that the enabled rule set
+introduces no correctness regression.}
+\label{tab:correctness}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}l c c p{2.6cm}@{}}
+\toprule
+Test dimension & Enabled & Baseline & Suite source \\
+\midrule
+Unit (JIT)              & 223/223   & 223/223   & EVM spec subset \\
+Unit (interpreter)      & 215/215   & 215/215   & Run list \\
+statetest (JIT)         & 2723/2723 & 2723/2723 & Cancun 101 suites \\
+statetest (interpreter) & 2723/2723 & 2723/2723 & Cancun 101 suites \\
+\midrule
+Total & \textbf{5884/5884} & \textbf{5884/5884} & --- \\
+\bottomrule
+\end{tabular}
+\end{table}

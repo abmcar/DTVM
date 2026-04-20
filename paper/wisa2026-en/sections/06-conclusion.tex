@@ -1,0 +1,14 @@
+% 06-conclusion.tex — §6 Conclusion
+\section{Conclusion}
+
+This paper builds a two-tier peephole rewrite system for the
+deterministic EVM JIT: the 70 dMIR rules pass the Z3 bit-vector
+equivalence check, and the 13 x86 rules are guaranteed by the matched
+test suites. A small intersection with the bytecode block-level rule
+set of Albert et al.\ at CAV 2023~\cite{verified_evm_cav23} consists of
+general bit-vector identities, and the rest is complementary. The
+methodology---modeling carry-propagating add/sub as first-class
+bit-vector operators in a domain-specific IR so that automatic
+equivalence checking covers a larger surface---applies in principle to
+other deterministic execution environments with multi-word arithmetic,
+such as the WebAssembly big-integer extensions and zk-VM back-ends.

@@ -1,0 +1,33 @@
+% tables/tab3-1-rule-classes.tex — Two-tier rule classification
+\begin{table}[t]
+\centering
+\caption{Classification of the two-tier peephole rewrite rules. The dMIR
+rules are checked for equivalence by Z3 on the bit-vector semantic
+model; the x86 CgIR rules are covered by the matched test suites.}
+\label{tab:rule-classes}
+\footnotesize
+\begin{tabular}{@{}l l r@{}}
+\toprule
+Layer (verification) & Category & Count \\
+\midrule
+\multirow{5}{*}{dMIR (Z3 check)}
+  & Boolean normalization  & 42 \\
+  & Algebraic identity     & 15 \\
+  & Identity elimination   & 10 \\
+  & Constant folding       &  2 \\
+  & Dead-code elimination  &  1 \\
+\cmidrule(l){2-3}
+  & \textbf{Subtotal}      & \textbf{70} \\
+\midrule
+\multirow{4}{*}{x86 CgIR (test coverage)}
+  & Redundant compare/test cleanup &  8 \\
+  & Branch-fallthrough cleanup     &  2 \\
+  & No-op elimination              &  2 \\
+  & test-setcc merge               &  1 \\
+\cmidrule(l){2-3}
+  & \textbf{Subtotal}              & \textbf{13} \\
+\midrule
+\multicolumn{2}{@{}l}{\textbf{Total}} & \textbf{83} \\
+\bottomrule
+\end{tabular}
+\end{table}

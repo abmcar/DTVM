@@ -1,0 +1,139 @@
+% 05-related.tex — §5 Related work and discussion
+\section{Related Work and Discussion}
+\label{sec:related}
+
+\subsection{Verifiable Peephole Optimization Frameworks}
+
+This paper positions its work along three axes: the abstraction layer it
+targets, the verification method, and carry-chain coverage. Work on
+SMT-based verifiable peephole optimization traces back to Alive by Lopes
+et al.~\cite{alive} and its successor Alive2~\cite{alive2}, and to Souper
+by Sasnauskas et al.~\cite{souper}. Together, this line of work
+established the ``synthesize candidates, then admit through SMT
+equivalence'' paradigm. This paper follows the same paradigm, but
+changes the IR on which the check is performed from general-purpose LLVM
+IR to the dMIR of the EVM JIT. The PLDI 2015 Alive paper already points
+out that the multi-return encoding of carry and overflow flags in LLVM
+limits the expressiveness of peephole verification---this observation is
+the starting point of the present paper, not a new finding.
+
+LeanMLIR by Bhat et al.\ at ITP 2024~\cite{leanmlir} formalizes in
+Lean~4 the idea of ``parameterizing the peephole verification framework
+over the IR'', and its positioning is complementary to ours: LeanMLIR
+focuses on the generality of the proof framework across IRs, whereas
+this paper focuses on the instantiated rule set and end-to-end
+integration on a concrete IR.
+
+Hydra by Mukherjee and Regehr at OOPSLA 2024~\cite{hydra} automatically
+discovers peephole rules that are independent of the input bit width.
+Like Alive2, however, it builds on LLVM IR, and therefore inherits the
+expressiveness limit on multi-word carry chains described in
+\S\ref{sec:problem}; the present paper offers one engineering solution
+by changing the underlying IR. The FMBC 2020 work of Schett and
+Nagele~\cite{fmbc20_evm_peephole} uses a similar offline
+enumeration-plus-SMT pipeline to automatically generate about 993 rules
+for EVM \emph{bytecode}; the equivalence guarantee is on par, and the
+difference is in the abstraction layer: the rule set of this paper acts
+on the JIT code-generation path and can exploit both structured
+matching on dMIR and mechanical cleanup on x86, while the gap between
+993 and 83 rules reflects the difference in abstraction layer and
+coverage strategy. Adopting the bytecode-layer rule set as a JIT
+pre-processing stage and measuring the residual speedup after
+composition with the rules of this paper (an orthogonal-composition
+evaluation) is a separate design choice: the current DTVM production
+pipeline does not take the bytecode pre-processing path, so the present
+paper does not cover this combination and leaves it for future work.
+
+The \texttt{adc}/\texttt{sbb} carry chain of multi-word integers is the
+standard implementation form used by GMP and libsecp256k1 on 64-bit
+hardware, and maps to the Intel ADCX/ADOX instructions; a carry chain of
+four 64-bit limbs is the standard lowered shape of EVM 256-bit
+arithmetic on 64-bit hardware.
+
+\subsection{Verification Work on the Consensus-Critical Path}
+
+Albert et al.\ at CAV 2023~\cite{verified_evm_cav23} complete a Coq
+formal proof for an AOT optimization rule set on EVM bytecode blocks.
+Their positioning is bytecode-block level, offline-proof based, and
+built on general bit-vector identities; the positioning of this paper is
+at the JIT IR and machine-code layers, with SMT admission at rule
+synthesis time, and covers EVM-specific multi-word carry chains. The
+scales are not comparable: the 14 rules of
+Albert\footnote{The \texttt{forves} public artifact, stack-only
+release branch (Coq source \texttt{optimizations.v}, 14 rules) is used
+as the comparison baseline; the CAV 2023 paper text discusses 15 rules,
+and the extended-version Appendix A may list additional
+memory/storage-layer rules, but neither the present paper nor the
+Albert work touches those layers.}
+all target stack-layer algebraic simplification; the 7 rules that
+overlap with our 83 are the algebraic-identity axioms (additive and
+multiplicative identities, multiplicative absorption, double negation,
+self-subtraction, absorption, etc.) that any SMT-verifiable bit-vector
+peephole system almost inevitably contains, and they do not imply a
+derivative dependency on the Albert rule set. Among the remaining 76
+rules, 13 live at the x86 layer and 63 at the dMIR layer---covering the
+multi-word carry-chain rules that emerge from decomposing the 256-bit
+word, the \texttt{ADC}/\texttt{SBB} algebraic simplifications, and the
+constant propagation and strength reduction tied to the JIT
+code-generation path.
+
+Runtime comparison-verification work---Breidenbach et al.\ at USENIX
+Security 2018, the Hydra Framework~\cite{hydra_framework} (a different
+system from the OOPSLA 2024 Hydra above, sharing only the name),
+multi-client consensus-divergence detection systems, EVM fuzz testing,
+and consensus test networks---detects divergence after deployment; the
+present paper, in contrast, positions itself as static hardening during
+development.
+
+\subsection{Limitations and Future Work}
+\label{sec:limitations}
+
+\begin{enumerate}[leftmargin=1.8em]
+  \item \textbf{Trusted base.} The SMT check rests on the dMIR bit-vector
+    semantic model and assumes its agreement with the runtime semantics
+    of the actual JIT engine; systematic testing of that agreement is
+    future work.
+  \item \textbf{x86-layer verification coverage.} All 13 x86 rules are
+    mechanical syntactic rewrites without a separate SMT check. Their
+    correctness is guaranteed by the matched test suites of
+    \S\ref{sec:correctness}; a formal model of x86 register and flag
+    semantics is future work.
+  \item \textbf{Workload coverage.} The speedup figures come from the
+    27 evmone-bench benchmarks and do not represent all production
+    contracts.
+  \item \textbf{Scope of rule modeling.} Only the arithmetic and flag
+    semantics before and after each peephole rewrite are checked for
+    equivalence; gas accounting, memory aliasing, and storage-slot side
+    effects are not modeled.
+  \item \textbf{Dead-carry elimination is ineffective at the head of
+    U256 add/sub chains.} At the head of a U256 add/sub chain, the
+    third operand of the carry-propagating addition is a runtime value
+    rather than a matchable zero constant, so the rule has no effect
+    there by construction; the rule is kept because it remains
+    effective on the independent carry-propagating additions inside the
+    U256 multiplication lowering.
+  \item \textbf{Measurement precision and compilation-overhead
+    comparison.} \texttt{weierstrudel/15} and \texttt{signextend/one}
+    fall within the $\pm 2\%$ noise band; \texttt{weierstrudel/1}
+    stably slows down by \textbf{2.71\%}, and disabling each new rule
+    in turn revealed no consistent negative contribution. The median
+    compilation time of 0.45\,ms and the 95th percentile of 0.87\,ms per
+    module are single-side measurements on the enabled build; the EVMC
+    interface has no per-stage timing hook, a baseline comparison needs
+    separate instrumentation, and this paper only reports an upper bound
+    on the overall compilation latency.
+  \item \textbf{Microbenchmark regression on the
+    \texttt{memory\_grow\_mstore} family.} The 4 \texttt{mstore}
+    variants slow down stably by \textbf{7.74\%}--\textbf{8.85\%} (CV
+    below 2\% on both sides). A preliminary analysis localizes the
+    regression to the matching behavior of the x86-layer
+    compare-merging rule \texttt{optimizeCmp} on the memory-expand
+    control-flow lowering path---that path lowers as a
+    \texttt{SETCC}$\to$ zero-extend$\to$\texttt{TEST}$\to$\texttt{JCC}
+    chain with the zero extension using \texttt{SUBREG\_TO\_REG}, which
+    does not exactly match the compact chain covered by the current
+    rule set; the exact root cause is left for future work. The 4
+    \texttt{mload} variants of the same family do not expose this
+    merging opportunity and accelerate by
+    \textbf{+6.03\%}--\textbf{+7.26\%}.
+\end{enumerate}

@@ -1,0 +1,102 @@
+% 02-problem.tex — §2 Background and motivation
+\section{Background and Motivation}
+\label{sec:problem}
+
+\subsection{Hardware Cost and Carry-Chain Shape of U256 Arithmetic}
+
+The native word length of the EVM is 256 bits, whereas general-purpose
+registers on current commodity hardware are 64 bits wide. An EVM-level
+U256 addition expands, after JIT code generation, into four machine-level
+additions: one ordinary 64-bit \texttt{add} followed by three
+carry-propagating \texttt{adc} instructions that form a \emph{serial
+carry chain}. Subtraction is analogous, using one \texttt{sub} and three
+\texttt{sbb} instructions. The listing below shows the 4-limb code on
+both sides for a typical U256 addition:
+
+\begin{center}
+\small
+\begin{tabular}{@{}l|l@{}}
+\textbf{dMIR (4-limb addition)} & \textbf{x86-64 output} \\
+\hline
+\texttt{r0 = add(a0, b0)}   & \texttt{add rax, rcx}  \\
+\texttt{r1 = ADC(a1, b1, cout0)} & \texttt{adc rbx, rdx}  \\
+\texttt{r2 = ADC(a2, b2, cout1)} & \texttt{adc rsi, rdi}  \\
+\texttt{r3 = ADC(a3, b3, cout2)} & \texttt{adc r8,\enspace r9} \\
+\end{tabular}
+\end{center}
+
+Among all instructions emitted by the JIT, instructions directly tied to
+U256 multi-word arithmetic account for about \textbf{2.15\%} (a weighted
+mean across 14 U256-heavy benchmarks; these 14 are the U256-heavy subset
+of the 27 benchmarks in \S\ref{sec:evaluation}, and the per-benchmark
+distribution is very uneven---see
+Table~\ref{tab:family-attribution} in \S\ref{sec:evaluation}). The share
+is small, but the carry chain has a special property: every
+\texttt{adc}/\texttt{sbb} on the chain depends on the carry output of the
+previous instruction, forming a strict \emph{serial data dependency}
+that instruction-level parallelism cannot hide.
+U256 instructions are therefore few in number yet contribute
+disproportionately to execution time.
+The family-attribution experiment in \S\ref{sec:evaluation}
+(Table~\ref{tab:family-attribution}) shows that the hit rate of
+U256-related rules on U256-heavy benchmarks ranges from 25\% to
+99.9\% with a very uneven distribution, indicating that the carry-chain
+pattern dominates those contracts. On non-U256-heavy benchmarks such as
+the sha1 family and \texttt{jump\_around}, the U256 hit rate is well below
+that range, and the performance gain comes mainly from the
+mechanical-redundancy cleanup at the x86 layer.
+
+\subsection{Expressiveness Limit of General-Purpose IR on the Carry Chain}
+\label{sec:expressiveness}
+
+In a general-purpose compiler IR such as LLVM, the basic arithmetic
+operations (\texttt{add}, \texttt{sub}, \texttt{mul}) are defined only on
+$N$-bit integers \texttt{iN}. To obtain the carry bit explicitly, the
+programmer must call the intrinsic
+\texttt{@llvm.uadd.with.overflow.iN}, which returns a \texttt{\{iN, i1\}}
+multi-return tuple---the result and the carry bit are packed into the
+same structure. The carry bit is therefore \emph{not a native type} in
+LLVM IR but is hidden in the second field of a struct.
+
+This design limits the expressiveness of automatic equivalence checkers.
+Following the peephole verification framework proposed by Lopes et al.\
+in Alive~\cite{alive} and inherited by Alive2~\cite{alive2},
+Table~\ref{tab:cannot-express} lists four typical carry-chain rules that
+Alive2 cannot directly verify for equivalence---Alive2 returns a
+type mismatch or reports an undecidable outcome. Under the Alive/Alive2
+framework these four rules fall in the \textbf{not automatically
+verifiable} category; the limitation stems from how the general-purpose
+IR models the carry bit and is independent of the rule implementation
+and the solver capacity.
+
+\input{tables/tab2-1-cannot-express}
+
+The Alive2 command lines, failure messages, and version numbers
+(2026-03-20 mainline \texttt{v21.0-78-g28b9f9c9}, Z3 4.8.12) for all four
+rules are archived in the artifact
+(\S\ref{sec:availability}); the relation to Hydra~\cite{hydra}
+(OOPSLA 2024, a different system from the Hydra Framework at USENIX
+Security 2018 cited in \S\ref{sec:related}) is discussed in
+\S\ref{sec:related}.
+
+The bottleneck is not the capacity of the SMT
+solver~\cite{demoura2008z3}. The remaining six U256 rules of the same
+class, which do not involve multi-return carry propagation, all pass
+Alive2 equivalence checking with an average runtime of about
+60\,ms. The 256-bit bit-vector size is not an obstacle for the solver;
+the bottleneck lies in how the IR expresses the carry bit.
+
+\input{figures/fig2-ir-expr}
+
+Figure~\ref{fig:ir-expr} contrasts the two IRs structurally on
+carry-propagating addition: the LLVM IR on the left needs five lines of
+code to call \texttt{uadd.with.overflow} and extract the result and the
+carry bit from the multi-return tuple, whereas on the right a single
+\texttt{ADC} instruction in dMIR suffices. If the IR natively supports the
+carry bit, the four rules above fall within the scope of automatic
+equivalence checking. dMIR targets the EVM JIT and does not aim at
+generality: it trades direct interoperability with LLVM for automatic SMT
+verification of carry-chain rules. The four rules in
+Table~\ref{tab:cannot-express} cannot be verified for equivalence
+directly on a general-purpose IR, but Z3 discharges them directly under
+the dMIR bit-vector model.
