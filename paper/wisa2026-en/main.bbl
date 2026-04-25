@@ -1,12 +1,34 @@
-\begin{thebibliography}{1}
+\begin{thebibliography}{10}
 \providecommand{\url}[1]{\texttt{#1}}
 \providecommand{\urlprefix}{URL }
 \providecommand{\doi}[1]{https://doi.org/#1}
+
+\bibitem{ist25_neural_superopt}
+Aguiar, M.A., Albert, E., Genaim, S., Gordillo, P., Hern{\'a}ndez-Cerezo, A.,
+  Kirchner, D., Rubio, A.: Neural-guided superoptimization in {Ethereum}.
+  Information and Software Technology  (2025).
+  \doi{10.1016/j.infsof.2025.107800}
 
 \bibitem{verified_evm_cav23}
 Albert, E., Genaim, S., Kirchner, D., Martin-Martin, E.: Formally verified
   {EVM} block-optimizations. In: Computer Aided Verification (CAV). LNCS, vol.
   13966, pp. 176--189 (2023). \doi{10.1007/978-3-031-37709-9_9}
+
+\bibitem{maxsmt_evm}
+Albert, E., Gordillo, P., Rubio, A., Schett, M.A.: Synthesis of super-optimized
+  smart contracts using {Max-SMT}. In: Computer Aided Verification (CAV). LNCS
+  (2020). \doi{10.1007/978-3-030-53288-8_10}
+
+\bibitem{jar25_proof_producing}
+Avigad, J., Goldberg, L., Levit, D., Seginer, Y., Titelman, A.: A
+  proof-producing compiler for blockchain applications. Journal of Automated
+  Reasoning  (2025). \doi{10.1007/s10817-025-09723-y}
+
+\bibitem{bansal_aiken_asplos06}
+Bansal, S., Aiken, A.: Automatic generation of peephole superoptimizers. In:
+  Proceedings of the 12th International Conference on Architectural Support for
+  Programming Languages and Operating Systems (ASPLOS) (2006).
+  \doi{10.1145/1168857.1168906}
 
 \bibitem{leanmlir}
 Bhat, S., Keizer, A., Hughes, C., Goens, A., Grosser, T.: Verifying peephole
@@ -18,6 +40,28 @@ Bhat, S., Keizer, A., Hughes, C., Goens, A., Grosser, T.: Verifying peephole
 Breidenbach, L., Daian, P., Tram{\`e}r, F., Juels, A.: Hydra: Principled bug
   bounties for smart contract security. In: 27th USENIX Security Symposium
   (USENIX Security 18) (2018)
+
+\bibitem{stratified}
+Heule, S., Schkufza, E., Sharma, R., Aiken, A.: Stratified synthesis:
+  Automatically learning the x86-64 instruction set. In: Proceedings of the
+  37th ACM SIGPLAN Conference on Programming Language Design and Implementation
+  (PLDI) (2016). \doi{10.1145/2908080.2908121}
+
+\bibitem{vmil24_superinst}
+Hu, X., Zhao, D., Scholz, B.: Synthesizing efficient super-instruction sets for
+  {Ethereum} virtual machine. In: Proceedings of the 16th ACM SIGPLAN
+  International Workshop on Virtual Machines and Intermediate Languages (VMIL)
+  (2024). \doi{10.1145/3689490.3690403}
+
+\bibitem{denali_pldi02}
+Joshi, R., Nelson, G., Randall, K.: Denali: A goal-directed superoptimizer. In:
+  Proceedings of the ACM SIGPLAN 2002 Conference on Programming Language Design
+  and Implementation (PLDI) (2002). \doi{10.1145/512529.512566}
+
+\bibitem{scico24_translation_cert}
+Krijnen, J.O., Chakravarty, M.M., Keller, G., Swierstra, W.: Translation
+  certification for smart contracts. Science of Computer Programming  (2024).
+  \doi{10.1016/j.scico.2023.103051}
 
 \bibitem{alive2}
 Lopes, N.P., Lee, J., Hur, C.K., Liu, Z., Regehr, J.: Alive2: Bounded
@@ -36,10 +80,21 @@ de~Moura, L., Bj{\o}rner, N.: Z3: An efficient {SMT} solver. In: Tools and
   Algorithms for the Construction and Analysis of Systems (TACAS) (2008).
   \doi{10.1007/978-3-540-78800-3_24}
 
+\bibitem{dataflow_pruning}
+Mukherjee, M., Kant, P., Liu, Z., Regehr, J.: Dataflow-based pruning for
+  speeding up superoptimization. Proc. ACM Program. Lang.  \textbf{4}(OOPSLA)
+  (2020). \doi{10.1145/3428245}
+
 \bibitem{hydra}
 Mukherjee, M., Regehr, J.: Hydra: Generalizing peephole optimizations with
   program synthesis. Proc. ACM Program. Lang.  \textbf{8}(OOPSLA1) (2024).
   \doi{10.1145/3649837}
+
+\bibitem{peek}
+Mullen, E., Zuniga, D., Tatlock, Z., Grossman, D.: Verified peephole
+  optimizations for {CompCert}. In: Proceedings of the 37th ACM SIGPLAN
+  Conference on Programming Language Design and Implementation (PLDI) (2016).
+  \doi{10.1145/2908080.2908109}
 
 \bibitem{souper}
 Sasnauskas, R., Chen, Y., Collingbourne, P., Ketema, J., Taneja, J., Regehr,
@@ -49,5 +104,16 @@ Sasnauskas, R., Chen, Y., Collingbourne, P., Ketema, J., Taneja, J., Regehr,
 Schett, M.A., Nagele, J.: Populating the peephole optimizer of a smart contract
   compiler. In: 2nd Workshop on Formal Methods for Blockchains (FMBC 2020).
   OASIcs (2020). \doi{10.4230/OASIcs.FMBC.2020.3}
+
+\bibitem{stoke}
+Schkufza, E., Sharma, R., Aiken, A.: Stochastic superoptimization. In:
+  Proceedings of the 18th International Conference on Architectural Support for
+  Programming Languages and Operating Systems (ASPLOS) (2013).
+  \doi{10.1145/2451116.2451150}
+
+\bibitem{egg}
+Willsey, M., Nandi, C., Wang, Y.R., Flatt, O., Tatlock, Z., Panchekha, P.: egg:
+  Fast and extensible equality saturation. Proc. ACM Program. Lang.
+  \textbf{5}(POPL) (2021). \doi{10.1145/3434304}
 
 \end{thebibliography}

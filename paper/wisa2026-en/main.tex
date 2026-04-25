@@ -37,16 +37,18 @@ dMIR Carry-Chain Operator Extension and SMT Equivalence Checking}
 
 \titlerunning{Verifiable Peephole Optimization on dMIR with SMT Checking}
 
-\author{Anonymous Author}
-\authorrunning{Anonymous}
-\institute{Anonymous Institution}
+\author{Yihao Wei \and Rui Zhang \and Haiyang Yu \and Chunyan Zhao \and Cheqing Jin}
+\authorrunning{Y. Wei et al.}
+\institute{East China Normal University, Shanghai, China\\
+\email{\{51285900022, 51285900011, 52305903001\}@stu.ecnu.edu.cn}\\
+\email{\{cyzhao, cqjin\}@dase.ecnu.edu.cn}}
 
 \maketitle
 
 \begin{abstract}
-Blockchain JIT peephole rewrites must preserve transaction semantics bit-for-bit; unverified rules risk consensus forks. General-purpose intermediate representations such as LLVM IR carry bit-level side-products (carry, overflow) through multi-return tuples. A single rewrite rule therefore spans several IR nodes and cannot be stated as a single verifiable unit in Alive/Alive2. Engineers consequently choose among dropping the rule, deploying it unverified, or proving it on paper. dMIR (Deterministic Middle IR), the middle IR of DTVM (Deterministic Virtual Machine), is extended with IR-side first-class bit-vector operators: bit-level patterns are modeled as dMIR first-class operators without modifying the solver, so the resulting rules enter the Z3 bit-vector equivalence check. A two-tier verifiable peephole rewrite system is built on this extension, with 70 dMIR rules checked rule-by-rule by Z3, 13 x86 mechanical-redundancy rules covered by a matched test suite, and a synthesis pipeline enumerating 853 candidates. The 27 evmone-bench workloads show a 7.24\% geometric-mean speedup with a 25.79\% peak; on 5884 Cancun differential tests, account state, storage, and gas consumption are byte-identical between the enabled and disabled sides.
+Blockchain JIT peephole rewrites must strictly preserve transaction semantics bit-for-bit, as any divergence in consensus VMs will induce consensus forks. In LLVM IR, extracting carry and overflow from aggregate intrinsic returns fragments carry-dependent rewrites across SSA nodes, blocking single Alive2 queries and compelling engineers to adopt suboptimal trade-offs (sacrificing coverage, safety, or efficiency). We elevate carry and overflow to first-class bit-vector operators in dMIR (DTVM's middle IR), with Z3-aligned operators enabling single Z3 equivalence queries for rewrites and a two-tier system. The production rule set comprises 70 Z3-verified dMIR rules and 13 differentially tested x86 rules; separately, we evaluate the synthesis pipeline as a capability measurement on 853 candidates (98.7\% admission for algebraic enumeration, 21.8\% for carry templates). The system achieves a 7.24\% geometric-mean speedup on 27 evmone-bench workloads, with 5884 Cancun tests confirming byte-identical results. It resolves verification bottlenecks for consensus VM peephole rewrites; more broadly, domain-specific IR with first-class bit-vector operators provides a reusable path for verifiable optimization in consensus-critical engines.
 
-\keywords{Blockchain information systems \and EVM JIT \and dMIR \and Peephole optimization \and SMT equivalence checking \and Carry chain}
+\keywords{Blockchain information systems \and EVM JIT \and dMIR \and Peephole optimization \and SMT equivalence checking \and Carry chain \and Translation validation}
 \end{abstract}
 
 \input{sections/01-intro}

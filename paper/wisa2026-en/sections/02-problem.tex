@@ -63,17 +63,16 @@ Following the peephole verification framework proposed by Lopes et al.\
 in Alive~\cite{alive} and inherited by Alive2~\cite{alive2},
 Table~\ref{tab:cannot-express} lists four typical carry-chain rules that
 Alive2 cannot directly verify for equivalence---Alive2 returns a
-type mismatch or reports an undecidable outcome. Under the Alive/Alive2
-framework these four rules fall in the \textbf{not automatically
-verifiable} category; the limitation stems from how the general-purpose
+type mismatch or reports an undecidable outcome. Under Alive2 these
+four rules fall in the \textbf{not automatically verifiable} category; the limitation stems from how the general-purpose
 IR models the carry bit and is independent of the rule implementation
 and the solver capacity.
 
 \input{tables/tab2-1-cannot-express}
 
 The Alive2 command lines, failure messages, and version numbers
-(2026-03-20 mainline \texttt{v21.0-78-g28b9f9c9}, Z3 4.8.12) for all four
-rules are archived in the artifact
+(Alive2 mainline v21.0, Z3 4.8.12) for all four rules are archived
+in the artifact
 (\S\ref{sec:availability}); the relation to Hydra~\cite{hydra}
 (OOPSLA 2024, a different system from the Hydra Framework at USENIX
 Security 2018 cited in \S\ref{sec:related}) is discussed in

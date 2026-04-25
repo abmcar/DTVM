@@ -5,17 +5,25 @@
 \subsection{Verifiable Peephole Optimization Frameworks}
 
 This paper positions its work along three axes: the abstraction layer it
-targets, the verification method, and carry-chain coverage. Work on
-SMT-based verifiable peephole optimization traces back to Alive by Lopes
-et al.~\cite{alive} and its successor Alive2~\cite{alive2}, and to Souper
-by Sasnauskas et al.~\cite{souper}. Together, this line of work
-established the ``synthesize candidates, then admit through SMT
-equivalence'' paradigm. This paper follows the same paradigm, but
-changes the IR on which the check is performed from general-purpose LLVM
-IR to the dMIR of the EVM JIT. The PLDI 2015 Alive paper already points
-out that the multi-return encoding of carry and overflow flags in LLVM
-limits the expressiveness of peephole verification---this observation is
-the starting point of the present paper, not a new finding.
+targets, the verification method, and carry-chain coverage. The
+synthesis-then-validation paradigm dates back to Denali by Joshi et
+al.~\cite{denali_pldi02} and the peephole superoptimizer of Bansal and
+Aiken~\cite{bansal_aiken_asplos06}; STOKE~\cite{stoke} and Stratified
+Synthesis~\cite{stratified} explored stochastic and learning-based
+alternatives, while equality saturation as embodied by
+egg~\cite{egg} offers a non-SMT route. SMT-based verifiable peephole
+optimization is exemplified by Alive~\cite{alive}, its successor
+Alive2~\cite{alive2}, Souper~\cite{souper}, and---in the verified-compiler
+setting---PEEK for CompCert by Mullen et al.~\cite{peek}. Pruning
+techniques such as dataflow-based filtering~\cite{dataflow_pruning}
+further accelerate this pipeline. This paper follows the same
+``synthesize candidates, then admit through SMT equivalence'' paradigm,
+but changes the IR on which the check is performed from general-purpose
+LLVM IR to the dMIR of the EVM JIT. The PLDI 2015 Alive paper already
+points out that the multi-return encoding of carry and overflow flags in
+LLVM limits the expressiveness of peephole verification---this
+observation is the starting point of the present paper, not a new
+finding.
 
 LeanMLIR by Bhat et al.\ at ITP 2024~\cite{leanmlir} formalizes in
 Lean~4 the idea of ``parameterizing the peephole verification framework
@@ -59,9 +67,9 @@ built on general bit-vector identities; the positioning of this paper is
 at the JIT IR and machine-code layers, with SMT admission at rule
 synthesis time, and covers EVM-specific multi-word carry chains. The
 scales are not comparable: the 14 rules of
-Albert\footnote{The \texttt{forves} public artifact, stack-only
-release branch (Coq source \texttt{optimizations.v}, 14 rules) is used
-as the comparison baseline; the CAV 2023 paper text discusses 15 rules,
+Albert\footnote{The public \texttt{forves} artifact accompanying~\cite{verified_evm_cav23}
+(Coq source \texttt{optimizations.v}, 14 rules) is used as the
+comparison baseline; the CAV 2023 paper text discusses 15 rules,
 and the extended-version Appendix A may list additional
 memory/storage-layer rules, but neither the present paper nor the
 Albert work touches those layers.}
@@ -85,9 +93,21 @@ and consensus test networks---detects divergence after deployment; the
 present paper, in contrast, positions itself as static hardening during
 development.
 
+A complementary line of EVM-targeted research synthesizes higher-level
+optimizations on the bytecode side. Max-SMT-based smart-contract
+superoptimization~\cite{maxsmt_evm}, super-instruction
+synthesis~\cite{vmil24_superinst}, neural-guided
+exploration~\cite{ist25_neural_superopt}, and proof-producing
+compilation for blockchain applications~\cite{jar25_proof_producing}
+operate at the contract or bytecode-block level and are orthogonal to
+the JIT IR/code-generation focus of this paper; translation
+certification for smart contracts~\cite{scico24_translation_cert}
+likewise targets a different abstraction boundary.
+
 \subsection{Limitations and Future Work}
 \label{sec:limitations}
 
+\begingroup\sloppy\emergencystretch=3em
 \begin{enumerate}[leftmargin=1.8em]
   \item \textbf{Trusted base.} The SMT check rests on the dMIR bit-vector
     semantic model and assumes its agreement with the runtime semantics
@@ -95,7 +115,7 @@ development.
     future work.
   \item \textbf{x86-layer verification coverage.} All 13 x86 rules are
     mechanical syntactic rewrites without a separate SMT check. Their
-    correctness is guaranteed by the matched test suites of
+    correctness is covered by the paired baseline/enabled differential test runs of
     \S\ref{sec:correctness}; a formal model of x86 register and flag
     semantics is future work.
   \item \textbf{Workload coverage.} The speedup figures come from the
@@ -137,3 +157,4 @@ development.
     merging opportunity and accelerate by
     \textbf{+6.03\%}--\textbf{+7.26\%}.
 \end{enumerate}
+\endgroup

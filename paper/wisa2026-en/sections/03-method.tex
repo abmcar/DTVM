@@ -53,11 +53,11 @@ adds.
 
 \paragraph{Trusted base.} The SMT equivalence check rests on the dMIR
 bit-vector semantic model and assumes that the model agrees with the
-runtime semantics of the actual JIT engine. On the 5884 differential
-tests of \S\ref{sec:correctness} no divergence has been observed;
-systematic consistency outside that distribution---model-versus-implementation
-fuzzing driven by random bytecode---is left as future work
-(\S\ref{sec:limitations}).
+runtime semantics of the actual JIT engine. The 5884 self-A/B
+differential tests of \S\ref{sec:correctness} cannot falsify this
+assumption, since both sides run the same engine; systematic
+model-versus-implementation fuzzing driven by random bytecode is left
+as future work (\S\ref{sec:limitations}).
 
 \subsection{Candidate Enumeration and SMT Admission}
 \label{sec:synthesis}
@@ -71,14 +71,14 @@ granted; if Z3 returns \emph{sat}, the solver also returns a
 counterexample and the rule is rejected; a timeout is treated as a
 rejection as well. The notion of equivalence here does not depend on
 two's complement, signed overflow, or any assumption beyond fixed-width
-modular arithmetic. All 70 production dMIR rules pass this check, the Z3
-query scripts are committed alongside the rule files in the repository,
-and the continuous integration pipeline re-runs the checks on every rule
-change.
+modular arithmetic. All 70 production dMIR rules pass this check; the Z3 query scripts
+are committed alongside the rule files in the accompanying artifact
+(\S\ref{sec:availability}), and an anonymized CI pipeline re-runs the
+checks on every rule change.
 
 \paragraph{Two enumeration paths.} Outside the existing rule set, a
 systematic candidate exploration was performed once to measure the
-capacity and false-miss rate of the synthesis pipeline. The two paths
+capacity and admission rate of the synthesis pipeline. The two paths
 cover different shape spaces:
 \begin{enumerate}
   \item \textbf{Depth-2 algebraic enumeration}---with the dMIR
@@ -142,9 +142,9 @@ layer pass the Z3 equivalence check on the dMIR bit-vector model. The
 x86 CgIR layer handles hardware-specific redundancy cleanup on registers,
 flags, and branches; all 13 rules at this layer are mechanical syntactic
 rewrites and \textbf{currently have no separate SMT-check script}. Their
-correctness is covered by the matched test suites on the baseline and
-enabled sides of \S\ref{sec:correctness} (multipass JIT and interpreter
-unit tests plus Cancun state-transition tests in both execution modes,
+correctness is validated by paired baseline/enabled differential test
+runs of \S\ref{sec:correctness} (multipass JIT and interpreter unit
+tests plus Cancun state-transition tests in both execution modes,
 5884 tests in total). A formal semantic model and SMT check for the x86
 layer are listed as future work (\S\ref{sec:limitations}).
 
@@ -173,5 +173,5 @@ rules are designed manually and submitted one by one to the Z3
 equivalence check (\S\ref{sec:synthesis}); the synthesis pipeline is an
 independent capability-evaluation channel that does not participate in
 production rule maintenance; the x86-layer rules are covered by code
-review and the matched test suites. The limitations from this asymmetry
+review and the paired baseline/enabled differential test runs. The limitations from this asymmetry
 are listed explicitly in \S\ref{sec:limitations}.

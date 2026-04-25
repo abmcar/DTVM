@@ -61,6 +61,11 @@
 % zero reference line
 \draw[black, thin] (axis cs:-0.8,0) -- (axis cs:26.8,0);
 
+% geometric-mean reference line (+7.24%)
+\draw[blue!70!black, dashed, thick] (axis cs:-0.8,7.24) -- (axis cs:26.8,7.24);
+\node[blue!70!black, font=\scriptsize, anchor=west, fill=white, inner sep=1pt]
+  at (axis cs:-0.5,7.24) {geomean +7.24\%};
+
 % group: U256-heavy
 \addplot[fill=black!20, draw=black, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
   table[x=x, y=y, y error minus=ym, y error plus=yp] {

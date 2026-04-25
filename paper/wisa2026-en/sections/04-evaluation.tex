@@ -35,7 +35,11 @@ semantics, confirming the analysis of the IR expressiveness bottleneck in
 \paragraph{Experimental setup and noise control.} The baseline is the
 upstream main branch (which already contains 2 hard-coded x86 peephole
 rules that are not new in this paper); the enabled side adds the 83 new
-rules (70 dMIR + 13 x86). Both sides run through evmone-bench. Every
+rules (70 dMIR + 13 x86). Both sides run through evmone-bench.
+All measurements use a 20-core x86\_64 host (Intel Core Ultra 7 265KF,
+20 logical cores, 30\,MiB L3) running Ubuntu~22.04 (Linux kernel 6.6),
+with the project built by GCC~11.4 in \texttt{Release} mode and the
+SMT admission scripts using Z3~4.15. Every
 benchmark is repeated 20 times, and the 95\% confidence interval of the
 geometric mean is estimated by bootstrap ($B = 10\,000$). To suppress
 noise, the process is pinned to dedicated physical cores with
@@ -67,10 +71,11 @@ mainly from the branch- and compare-merging rules at the x86 layer. Hit
 rate and speedup are not proportional: on \texttt{mg\_mload} almost 100\%
 of the instructions are matched by no-op elimination, yet the saving per
 rewrite is small, and the final speedup depends on both the trigger
-count and the cost of each rewrite. The two rule layers are
-complementary rather than substitutive: the multi-word rules yield
-concentrated gains on U256-heavy contracts, while the mechanical cleanup
-at the x86 layer provides broader, ordinary gains.
+count and the cost of each rewrite. The two rule layers appear
+complementary in attribution: the multi-word rules yield concentrated
+gains on U256-heavy contracts, while the mechanical cleanup at the
+x86 layer provides broader, ordinary gains; layer-wise ablation is
+left as future work.
 
 \paragraph{Discussion of the regressed surface.} Five of the 27
 benchmarks move beyond $\pm 2\%$ toward the slower side: the 4 variants
@@ -78,7 +83,7 @@ of \texttt{memory\_grow\_mstore} are slower by
 \textbf{8.85\%}, \textbf{8.21\%}, \textbf{8.53\%}, and \textbf{7.74\%},
 and \texttt{weierstrudel/1} is slower by \textbf{2.71\%} (CV below 2\%
 on both sides). The 4 \texttt{mstore} variants cluster on the same
-same-family write path and are not a diffuse disturbance (preliminary
+write path and are not a diffuse disturbance (preliminary
 analysis in \S\ref{sec:limitations}, item 7). As a control, the 4
 \texttt{memory\_grow\_mload} variants of the same family accelerate by
 \textbf{+6.03\%}--\textbf{+7.26\%} under the same measurement recipe. In
@@ -109,17 +114,20 @@ listed as future work in \S\ref{sec:limitations}, item 6.
 The enabled side and the baseline side each run four differential test
 categories (Table~\ref{tab:correctness}); the two sides agree
 item-by-item on state and gas, for a cumulative
-\textbf{5884}/\textbf{5884}. A pass on the baseline side shows that the
-test suite itself is correct; a pass on the enabled side shows that the
-83 new rules introduce no correctness regression. The multipass JIT unit
+\textbf{5884}/\textbf{5884}. A pass on the baseline side serves as a
+sanity check that the test harness executes cleanly against the
+upstream main; a pass on the enabled side, combined with byte-identical
+state and gas across all 5884 items, indicates that the 83 new rules
+introduce no correctness regression observable by this test suite (the
+guarantee is bounded by the suite's coverage, not absolute). The multipass JIT unit
 tests contain 223 independent Cancun cases; the interpreter run list
 contains 226 lines, reducing to 215 after the gtest deduplication;
 \texttt{evmone-statetest} on Cancun covers 101 suites (with
 \texttt{-k fork\_Cancun} filtering out the Prague fork that DTVM does
 not yet support) and runs independently in both the multipass JIT mode
 and the interpreter mode. The cross-check between the two modes on the
-same test matrix produces identical outcomes, which is direct evidence
-of EVM consensus consistency.
+same test matrix produces identical outcomes, demonstrating cross-mode
+determinism within DTVM.
 
 \begingroup\sloppy\emergencystretch=3em
 Compared with the CAV 2023 rule set of
@@ -131,10 +139,11 @@ overlap: \texttt{dmir\_add\_zero}, \texttt{dmir\_mul\_one\_rhs},
 CAV'23 rules \texttt{optimize\_add\_zero}, \texttt{optimize\_mul\_one},
 \texttt{optimize\_mul\_zero}, \texttt{optimize\_or\_zero},
 \texttt{optimize\_not\_not}, \texttt{optimize\_sub\_x\_x}, and
-\texttt{optimize\_and\_and\_l}. All 7 are general bit-vector algebraic
-identities ($\texttt{add}(x,0) \to x$, $\texttt{mul}(x,0) \to 0$,
-$\texttt{not}(\texttt{not}(x)) \to x$, and so on) that appear in almost
-every SMT-verifiable peephole effort. The remaining 76 rules cover dMIR
+\texttt{optimize\_and\_and\_l}. These 7 rules are well-known
+bit-vector algebraic identities ($\texttt{add}(x,0) \to x$,
+$\texttt{mul}(x,0) \to 0$, $\texttt{not}(\texttt{not}(x)) \to x$,
+and so on), also covered by~\cite{verified_evm_cav23}. The remaining
+76 rules cover dMIR
 algebraic simplification and multi-word cleanup (63 rules) and x86
 register/branch/flag cleanup (13 rules). These transformations live at
 abstraction layers that the bytecode layer cannot reach directly---which
@@ -145,6 +154,6 @@ abstraction layers.
 Continuous-integration auditability: the equivalence proposition and the
 Z3 query script of each dMIR rule are stored with the rule file and are
 re-verified automatically on every code change. Re-verifying all 70 dMIR
-rules takes about \textbf{0.5} seconds in total and is not a bottleneck;
+rules takes about \textbf{0.5\,s} in total and is not a bottleneck;
 the 0.5\,s figure is the total CI offline re-verification time and is
 not on the same scale as the runtime compilation latency in \S4.2.

@@ -56,17 +56,18 @@ check.
     can only carry through a multi-return tuple become first-class
     bit-vector operators of dMIR. Without modifying the solver and
     without loosening the differential-test threshold, the IR extension
-    moves a rule class that previously sat outside the Alive/Alive2
+    moves a rule class that previously sat outside the Alive2
     automatic equivalence-verification framework into the decidable
     fragment of the Z3 bit-vector equivalence
     check~\cite{demoura2008z3}. A two-tier rewrite system is built on
     \textbf{70} dMIR production rules (5 of which rely on the
     first-class modeling and cannot be expressed as a single peephole
     rule on general IR) together with \textbf{13} rules at the x86
-    code-generation layer.
+    code-generation layer (covered by differential tests; no separate
+    SMT check).
   \item \textbf{Capacity and admission-rate characterization of the
     synthesis pipeline.} \textbf{853} candidates are evaluated under the
-    same Z3 admission check, producing a single capacity-and-false-miss
+    same Z3 admission check, producing a single capacity-and-admission-rate
     measurement. The admission rates on the two enumeration paths are
     \textbf{98.7\%} for algebraic enumeration and \textbf{21.8\%} for
     hand-constructed carry templates. The synthesis pipeline is
@@ -78,7 +79,7 @@ check.
     [+2.59\%, +12.11\%], lower bound significantly greater than zero),
     with a peak of \textbf{+25.79\%}; \textbf{5884} differential tests
     agree byte-for-byte on state and gas between the rules-enabled and
-    rules-disabled sides.
+    rules-disabled sides (DTVM self-A/B, same engine).
 \end{enumerate}
 
 Relative to the EVM bytecode block-level formal rule set of
