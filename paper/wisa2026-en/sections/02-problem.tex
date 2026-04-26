@@ -88,17 +88,11 @@ Alive2 equivalence checking with an average runtime of about
 60\,ms. The 256-bit bit-vector size is not an obstacle for the solver;
 the bottleneck lies in how the IR expresses the carry bit.
 
-\input{figures/fig2-ir-expr}
-
-Figure~\ref{fig:ir-expr} contrasts the two IRs structurally on
-carry-propagating addition: the LLVM IR on the left needs five lines of
-code to call \texttt{uadd.with.overflow} and extract the result and the
-carry bit from the multi-return tuple, whereas on the right a single
-\texttt{ADC} instruction in dMIR suffices. If the IR natively supports the
-carry bit, the four rules above fall within the scope of automatic
-equivalence checking. dMIR targets the EVM JIT and does not aim at
-generality: it trades direct interoperability with LLVM for automatic SMT
-verification of carry-chain rules. The four rules in
-Table~\ref{tab:cannot-express} cannot be verified for equivalence
-directly on a general-purpose IR, but Z3 discharges them directly under
-the dMIR bit-vector model.
+Concretely, expressing carry-propagating addition in LLVM IR requires
+five lines around \texttt{uadd.with.overflow} to extract the result and
+carry bit from a multi-return tuple, whereas a single \texttt{ADC}
+suffices in dMIR. Native carry-bit support brings the four rules above
+into the scope of automatic equivalence checking; dMIR trades LLVM
+interoperability for automatic SMT verification of carry-chain rules,
+and Z3 discharges all four rules of Table~\ref{tab:cannot-express}
+directly under the dMIR bit-vector model.
