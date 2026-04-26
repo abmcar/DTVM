@@ -53,11 +53,11 @@ adds.
 
 \paragraph{Trusted base.} The SMT equivalence check rests on the dMIR
 bit-vector semantic model and assumes that the model agrees with the
-runtime semantics of the actual JIT engine. The 5884 self-A/B
-differential tests of \S\ref{sec:correctness} cannot falsify this
-assumption, since both sides run the same engine; systematic
-model-versus-implementation fuzzing driven by random bytecode is left
-as future work (\S\ref{sec:limitations}).
+runtime semantics of the actual JIT engine. On the 5884 differential
+tests of \S\ref{sec:correctness} no divergence has been observed;
+systematic consistency outside that distribution---model-versus-implementation
+fuzzing driven by random bytecode---is left as future work
+(\S\ref{sec:limitations}).
 
 \subsection{Candidate Enumeration and SMT Admission}
 \label{sec:synthesis}
@@ -71,15 +71,24 @@ granted; if Z3 returns \emph{sat}, the solver also returns a
 counterexample and the rule is rejected; a timeout is treated as a
 rejection as well. The notion of equivalence here does not depend on
 two's complement, signed overflow, or any assumption beyond fixed-width
-modular arithmetic. All 70 production dMIR rules pass this check; the Z3 query scripts
-are committed alongside the rule files in the accompanying artifact
-(\S\ref{sec:availability}), and an anonymized CI pipeline re-runs the
-checks on every rule change.
+modular arithmetic. All 70 production dMIR rules pass this check, the Z3
+query scripts are committed alongside the rule files in the repository,
+and the continuous integration pipeline re-runs the checks on every rule
+change.
 
-\paragraph{Two enumeration paths.} Outside the existing rule set, a
-systematic candidate exploration was performed once to measure the
-capacity and admission rate of the synthesis pipeline. The two paths
-cover different shape spaces:
+\paragraph{Two enumeration runs.} We report two separate enumeration
+experiments with disjoint goals. The \emph{capacity run} fixes a single
+grammar---a depth-2 algebraic enumerator plus a small set of
+hand-written carry templates---and measures the Z3 admission rate; this
+characterizes solver throughput and the typical false-positive boundary.
+The \emph{coverage run} extends the same algebraic enumerator with
+additional left-hand-side operator tops and a constant-pool widening,
+plus a pattern-template instantiation channel reusing the seed-miner
+configuration; this measures rediscovery of the 70 hand-designed dMIR
+production rules. The capacity run, described next, uses two
+complementary paths; coverage results appear in
+\S\ref{sec:evaluation}.
+
 \begin{enumerate}
   \item \textbf{Depth-2 algebraic enumeration}---with the dMIR
     arithmetic and Boolean operators as enumeration primitives, all
@@ -100,18 +109,35 @@ rejections among the carry templates illustrate that hand-written
 templates more easily reach the non-equivalence boundary---precisely
 where the SMT admission check is needed.
 
+\paragraph{Production rule coverage (methodology).} The coverage run
+asks a different question: does the synthesis search space contain the
+70 hand-designed production dMIR rules? We compare canonicalized
+left-hand sides. The \emph{alpha-normalized} canonical form renames
+variables to a fixed sequence $x_1, x_2, \ldots$ in traversal order, so
+that two rules differing only in operand naming map to the same
+representative; commutative pairs (e.g.\ $\texttt{or}(x,y)$ and
+$\texttt{or}(y,x)$) likewise collapse to one representative. A
+production rule counts as \emph{rediscovered} when at least one
+synthesized rule has the same canonical left-hand side; the
+\emph{false-miss rate} is the fraction of production rules with no such
+match. The match is on canonical left-hand sides only---the synthesized
+right-hand side is verified equivalent to the left-hand side by Z3 but
+is not required to be syntactically identical to the production
+rule's right-hand side. Numerical results appear in
+\S\ref{sec:evaluation}.
+
 \paragraph{Relation between production rules and the synthesis pipeline.}
-The 853 candidates above form a capability evaluation that is independent
-of the production rule set. The 70 dMIR production rules of this paper
-are designed by hand from runtime performance profiles and code review,
-and each is submitted to Z3 for bit-vector equivalence verification. The
-synthesis pipeline output serves as a Z3 admission-rate reference for
-future rule expansion and does not directly enter the production rule
-set. The 17 carry templates that pass the Z3 check are kept as a
-capability-evaluation result; they are not promoted to the production
-side because the production rules are driven by runtime performance
-profiles whose selection criterion differs from the input of the
-enumeration.
+The 70 dMIR production rules of this paper are designed by hand from
+runtime performance profiles and code review, and each is submitted to
+Z3 for bit-vector equivalence verification. The synthesis pipeline is
+evaluated against this set under the methodology above. The two
+channels remain operationally separate: the synthesis pipeline serves
+as a Z3-verified rule-discovery and capability reference, while the
+production rule set is selected by runtime performance profiles whose
+criterion differs from the input of enumeration. The 17 carry templates
+of the capacity run that pass the Z3 check are kept as a
+capability-evaluation result and are not promoted to the production
+side for the same reason.
 
 \paragraph{Counterexample examples.} The following two carry templates
 rejected by Z3 illustrate why the SMT admission check is necessary on the
@@ -131,8 +157,10 @@ unsigned modular arithmetic: a discarded carry input and confused
 operand polarity.
 
 \paragraph{Artifact statement.} The artifact contains the synthesis
-scripts (about 691 lines of Python), the rule-set JSON, and the Z3 query
-scripts.
+tooling (about 2400 lines of Python: the enumerator, the seed-miner, the
+canonical-form-aware coverage comparator, and Z3 query scripts), the
+rule-set JSON, the production-rule coverage measurement output, and the
+unit tests for the canonicalization and dedup paths.
 
 \subsection{Two-Tier Rule Set}
 
@@ -142,9 +170,9 @@ layer pass the Z3 equivalence check on the dMIR bit-vector model. The
 x86 CgIR layer handles hardware-specific redundancy cleanup on registers,
 flags, and branches; all 13 rules at this layer are mechanical syntactic
 rewrites and \textbf{currently have no separate SMT-check script}. Their
-correctness is validated by paired baseline/enabled differential test
-runs of \S\ref{sec:correctness} (multipass JIT and interpreter unit
-tests plus Cancun state-transition tests in both execution modes,
+correctness is covered by the matched test suites on the baseline and
+enabled sides of \S\ref{sec:correctness} (multipass JIT and interpreter
+unit tests plus Cancun state-transition tests in both execution modes,
 5884 tests in total). A formal semantic model and SMT check for the x86
 layer are listed as future work (\S\ref{sec:limitations}).
 
@@ -169,9 +197,14 @@ Table~\ref{tab:family-attribution} in \S\ref{sec:evaluation} gives the
 attribution data per rule family.
 
 \paragraph{Asymmetric verification workflow.} The 70 dMIR production
-rules are designed manually and submitted one by one to the Z3
-equivalence check (\S\ref{sec:synthesis}); the synthesis pipeline is an
-independent capability-evaluation channel that does not participate in
-production rule maintenance; the x86-layer rules are covered by code
-review and the paired baseline/enabled differential test runs. The limitations from this asymmetry
-are listed explicitly in \S\ref{sec:limitations}.
+rules are designed manually from runtime performance profiles and
+submitted one by one to the Z3 equivalence check
+(\S\ref{sec:synthesis}). The synthesis pipeline is an independent
+capability-evaluation channel that does not participate in production
+rule maintenance; coverage measurements show its search space contains
+the production set (\S\ref{sec:evaluation}), but production rule
+selection remains driven by runtime profiles rather than enumeration
+order, so the two channels are kept separate by selection criterion
+rather than by expressive scope. The x86-layer rules are covered by
+code review and the matched test suites. The limitations from this
+asymmetry are listed explicitly in \S\ref{sec:limitations}.

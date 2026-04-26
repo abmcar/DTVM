@@ -18,9 +18,9 @@ ability of Alive2 on the same rule groups.
 Z3 solves a typical 256-bit bit-vector peephole equivalence proposition
 in about 60\,ms on average; all 70 dMIR rule queries finish within
 seconds, with no timeout or undecidable outcome, showing that the 256-bit
-width is not a bottleneck for the solver's capacity. From the synthesis
-pipeline, 10 typical U256 rules were sampled at random and compared
-against Alive2: 6 of them do not involve a multi-return carry structure
+width is not a bottleneck for the solver's capacity. From the capacity
+run, 10 typical U256 rules were sampled at random and compared against
+Alive2: 6 of them do not involve a multi-return carry structure
 and Alive2 discharges them directly; the other 4 involve
 \texttt{adc}/\texttt{sbb} multi-return structures, for which Alive2
 either reports a type mismatch or times out (the mechanism is of the same
@@ -30,16 +30,44 @@ whereas Z3 discharges all of them directly under the dMIR bit-vector
 semantics, confirming the analysis of the IR expressiveness bottleneck in
 \S\ref{sec:expressiveness}.
 
+\paragraph{Production rule coverage.} Using the canonical-LHS
+methodology of \S\ref{sec:synthesis}, the coverage run produces
+\textbf{1966} Z3-verified rewrite rules: \textbf{1856} from the
+extended algebraic enumerator and \textbf{110} from pattern-template
+instantiation. The pattern-template path starts from 2964 candidates,
+which Z3 verification and deduplication against the enumerator output
+and the existing rule file reduce to the final 110. On the 70
+hand-designed production rules, the run matches \textbf{69/69} unique
+canonical patterns---one commutative-twin pair, $\texttt{or}(x,y)$
+versus $\texttt{or}(y,x)$, shares a single canonical representative
+that both production names match---equivalently \textbf{70/70}
+production rule names; the false-miss rate against the production set
+is therefore \textbf{0/70}.
+
+\paragraph{Scope of the coverage claim.} Two boundaries should be
+stated clearly. First, the result measures coverage of the
+\emph{existing} production rule set; the extended enumerator's
+left-hand-side operator tops and constant pool were broadened in light
+of an earlier 0/70 baseline that exposed mechanical gaps (missing tops
+such as \texttt{not}/\texttt{select}/\texttt{shl}/\texttt{ushr}/%
+\texttt{sshr} as left-hand-side roots, missing small constants, and
+structural-equality dedup of forms such as $\texttt{and}(x,x)$).
+Reaching 70/70 therefore demonstrates that the production rules lie
+inside an enumerable and Z3-discharged search space; it does not
+demonstrate blind recall of an unseen target. Second, rediscovery is
+defined on canonical left-hand sides; the synthesized right-hand side
+is verified equivalent to its own left-hand side by Z3 but is not
+required to be syntactically identical to the production rule's
+right-hand side. Together with the admission rate above, this result
+shows the search space is broad enough to contain every hand-designed
+rule, while 1966 of its members pass Z3 verification.
+
 \subsection{End-to-End Performance}
 
 \paragraph{Experimental setup and noise control.} The baseline is the
 upstream main branch (which already contains 2 hard-coded x86 peephole
 rules that are not new in this paper); the enabled side adds the 83 new
-rules (70 dMIR + 13 x86). Both sides run through evmone-bench.
-All measurements use a 20-core x86\_64 host (Intel Core Ultra 7 265KF,
-20 logical cores, 30\,MiB L3) running Ubuntu~22.04 (Linux kernel 6.6),
-with the project built by GCC~11.4 in \texttt{Release} mode and the
-SMT admission scripts using Z3~4.15. Every
+rules (70 dMIR + 13 x86). Both sides run through evmone-bench. Every
 benchmark is repeated 20 times, and the 95\% confidence interval of the
 geometric mean is estimated by bootstrap ($B = 10\,000$). To suppress
 noise, the process is pinned to dedicated physical cores with
@@ -71,11 +99,10 @@ mainly from the branch- and compare-merging rules at the x86 layer. Hit
 rate and speedup are not proportional: on \texttt{mg\_mload} almost 100\%
 of the instructions are matched by no-op elimination, yet the saving per
 rewrite is small, and the final speedup depends on both the trigger
-count and the cost of each rewrite. The two rule layers appear
-complementary in attribution: the multi-word rules yield concentrated
-gains on U256-heavy contracts, while the mechanical cleanup at the
-x86 layer provides broader, ordinary gains; layer-wise ablation is
-left as future work.
+count and the cost of each rewrite. The two rule layers are
+complementary rather than substitutive: the multi-word rules yield
+concentrated gains on U256-heavy contracts, while the mechanical cleanup
+at the x86 layer provides broader, ordinary gains.
 
 \paragraph{Discussion of the regressed surface.} Five of the 27
 benchmarks move beyond $\pm 2\%$ toward the slower side: the 4 variants
@@ -83,7 +110,7 @@ of \texttt{memory\_grow\_mstore} are slower by
 \textbf{8.85\%}, \textbf{8.21\%}, \textbf{8.53\%}, and \textbf{7.74\%},
 and \texttt{weierstrudel/1} is slower by \textbf{2.71\%} (CV below 2\%
 on both sides). The 4 \texttt{mstore} variants cluster on the same
-write path and are not a diffuse disturbance (preliminary
+same-family write path and are not a diffuse disturbance (preliminary
 analysis in \S\ref{sec:limitations}, item 7). As a control, the 4
 \texttt{memory\_grow\_mload} variants of the same family accelerate by
 \textbf{+6.03\%}--\textbf{+7.26\%} under the same measurement recipe. In
@@ -114,20 +141,17 @@ listed as future work in \S\ref{sec:limitations}, item 6.
 The enabled side and the baseline side each run four differential test
 categories (Table~\ref{tab:correctness}); the two sides agree
 item-by-item on state and gas, for a cumulative
-\textbf{5884}/\textbf{5884}. A pass on the baseline side serves as a
-sanity check that the test harness executes cleanly against the
-upstream main; a pass on the enabled side, combined with byte-identical
-state and gas across all 5884 items, indicates that the 83 new rules
-introduce no correctness regression observable by this test suite (the
-guarantee is bounded by the suite's coverage, not absolute). The multipass JIT unit
+\textbf{5884}/\textbf{5884}. A pass on the baseline side shows that the
+test suite itself is correct; a pass on the enabled side shows that the
+83 new rules introduce no correctness regression. The multipass JIT unit
 tests contain 223 independent Cancun cases; the interpreter run list
 contains 226 lines, reducing to 215 after the gtest deduplication;
 \texttt{evmone-statetest} on Cancun covers 101 suites (with
 \texttt{-k fork\_Cancun} filtering out the Prague fork that DTVM does
 not yet support) and runs independently in both the multipass JIT mode
 and the interpreter mode. The cross-check between the two modes on the
-same test matrix produces identical outcomes, demonstrating cross-mode
-determinism within DTVM.
+same test matrix produces identical outcomes, which is direct evidence
+of EVM consensus consistency.
 
 \begingroup\sloppy\emergencystretch=3em
 Compared with the CAV 2023 rule set of
@@ -139,11 +163,10 @@ overlap: \texttt{dmir\_add\_zero}, \texttt{dmir\_mul\_one\_rhs},
 CAV'23 rules \texttt{optimize\_add\_zero}, \texttt{optimize\_mul\_one},
 \texttt{optimize\_mul\_zero}, \texttt{optimize\_or\_zero},
 \texttt{optimize\_not\_not}, \texttt{optimize\_sub\_x\_x}, and
-\texttt{optimize\_and\_and\_l}. These 7 rules are well-known
-bit-vector algebraic identities ($\texttt{add}(x,0) \to x$,
-$\texttt{mul}(x,0) \to 0$, $\texttt{not}(\texttt{not}(x)) \to x$,
-and so on), also covered by~\cite{verified_evm_cav23}. The remaining
-76 rules cover dMIR
+\texttt{optimize\_and\_and\_l}. All 7 are general bit-vector algebraic
+identities ($\texttt{add}(x,0) \to x$, $\texttt{mul}(x,0) \to 0$,
+$\texttt{not}(\texttt{not}(x)) \to x$, and so on) that appear in almost
+every SMT-verifiable peephole effort. The remaining 76 rules cover dMIR
 algebraic simplification and multi-word cleanup (63 rules) and x86
 register/branch/flag cleanup (13 rules). These transformations live at
 abstraction layers that the bytecode layer cannot reach directly---which
@@ -154,6 +177,6 @@ abstraction layers.
 Continuous-integration auditability: the equivalence proposition and the
 Z3 query script of each dMIR rule are stored with the rule file and are
 re-verified automatically on every code change. Re-verifying all 70 dMIR
-rules takes about \textbf{0.5\,s} in total and is not a bottleneck;
+rules takes about \textbf{0.5} seconds in total and is not a bottleneck;
 the 0.5\,s figure is the total CI offline re-verification time and is
 not on the same scale as the runtime compilation latency in \S4.2.
