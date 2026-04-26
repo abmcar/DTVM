@@ -104,34 +104,22 @@ complementary rather than substitutive: the multi-word rules yield
 concentrated gains on U256-heavy contracts, while the mechanical cleanup
 at the x86 layer provides broader, ordinary gains.
 
-\paragraph{Discussion of the regressed surface.} Five of the 27
-benchmarks move beyond $\pm 2\%$ toward the slower side: the 4 variants
-of \texttt{memory\_grow\_mstore} are slower by
-\textbf{8.85\%}, \textbf{8.21\%}, \textbf{8.53\%}, and \textbf{7.74\%},
-and \texttt{weierstrudel/1} is slower by \textbf{2.71\%} (CV below 2\%
-on both sides). The 4 \texttt{mstore} variants cluster on the same
-same-family write path and are not a diffuse disturbance (preliminary
-analysis in \S\ref{sec:limitations}, item 7). As a control, the 4
-\texttt{memory\_grow\_mload} variants of the same family accelerate by
-\textbf{+6.03\%}--\textbf{+7.26\%} under the same measurement recipe. In
-production-workload terms, the macro speedups on sha1 and
-\texttt{blake2b} (\textbf{+10\%}--\textbf{+25\%}) scale linearly with
-call count and input length, while the \texttt{mstore} regressions appear
-only in a microbenchmark of about 0.7\,ns/op; the two magnitudes are not
-comparable.
+\paragraph{Discussion of the regressed surface.} Five benchmarks regress
+beyond $-2\%$: the 4 \texttt{memory\_grow\_mstore} variants by 7.74\%--%
+8.85\% and \texttt{weierstrudel/1} by 2.71\% (CV $<2\%$ on both sides).
+The 4 \texttt{mstore} variants cluster on the same write path
+(\S\ref{sec:limitations}, item 7), while the matched \texttt{mload}
+variants accelerate by +6.03\%--+7.26\%; the regressions appear only in
+a $\sim$0.7\,ns/op microbenchmark, not on the macro sha1/\texttt{blake2b}
+gains.
 
-\paragraph{Compilation overhead.} A per-module timing switch was added to
-the EVMC adapter. Across the \textbf{776} modules of the JIT unit test
-set, the median single-module compilation time is \textbf{0.45\,ms} and
-the 95th percentile is \textbf{0.87\,ms}, covering the full pipeline of
-loading, analysis, and JIT code generation; dMIR peephole rewriting is
-only one local-matching pass within it. The 99th-percentile tail lands
-on the 19 large contracts that exceed 16\,KB and correlates with
-contract size. The 0.87\,ms at the 95th percentile is an upper bound on
-the wall-clock time of the entire compilation pipeline (loading,
-analysis, and JIT code generation combined), not the incremental cost of
-the dMIR peephole rewrite pass alone; per-pass baseline comparison is
-listed as future work in \S\ref{sec:limitations}, item 6.
+\paragraph{Compilation overhead.} Across 776 JIT unit-test modules, the
+median single-module compile time is 0.45\,ms and the 95th percentile is
+0.87\,ms, covering the full loading--analysis--codegen pipeline; dMIR
+peephole rewriting is one local pass within it. The 0.87\,ms is an
+upper bound on the whole pipeline, not the incremental cost of the
+rewrite pass; per-pass attribution is future work
+(\S\ref{sec:limitations}, item 6).
 
 \subsection{Correctness and Rule Coverage}
 \label{sec:correctness}

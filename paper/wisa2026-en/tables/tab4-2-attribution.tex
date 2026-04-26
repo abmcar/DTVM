@@ -16,11 +16,9 @@ mg\_mstore             & 99.9\% & No-op elimination$^*$ \\
 weierstrudel           & 33.8\% & Add-zero + no-op \\
 snailtracer            & 25.3\% & Dead-carry + no-op \\
 sha1\_divs/\_shifts    &  7.5\% & x86 branch/compare merge \\
-jump\_around$^\dagger$ &  0.0\% & --- \\
 \bottomrule
 \end{tabular}
 \vspace{2pt}
 \par\noindent{\scriptsize $^*$\,Microbenchmark regression on the write
-path; see \S\ref{sec:limitations}, item 7.\quad
-$^\dagger$\,Control benchmark with no U256 instructions.}
+path; see \S\ref{sec:limitations}, item 7.}
 \end{table}

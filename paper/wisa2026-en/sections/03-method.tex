@@ -23,27 +23,13 @@ carry-propagating addition \texttt{ADC} is defined as
 $n$-bit result and a 1-bit carry output. The borrow-propagating
 subtraction \texttt{SBB} has a fully symmetric signature.
 
-In Z3~\cite{demoura2008z3}, the above carry propagation has a natural
-expression through bit-vector concatenation and zero extension. The
-following listing shows the Z3 encoding of \texttt{ADC}:
-
-\begin{center}
-\small
-\begin{tabular}{@{}l@{}}
-\texttt{x, y = BitVecs('x y', 256)} \\
-\texttt{cin = BitVec('cin', 1)} \\
-\texttt{wide = ZeroExt(1,x) + ZeroExt(1,y)} \\
-\texttt{\quad\quad\quad + ZeroExt(256, cin)} \\
-\texttt{s\enspace\enspace\, = Extract(255, 0, wide)} \\
-\texttt{cout = Extract(256, 256, wide)}
-\end{tabular}
-\end{center}
-
-\noindent Both 256-bit operands are zero-extended to 257 bits and added
-together with the zero-extension of the 1-bit carry; the low 256 bits
-give the result $s$, and the most significant bit is the carry output
-$c_{out}$. The encoding embeds carry propagation entirely into
-bit-vector arithmetic with no multi-return tuple or auxiliary predicate.
+In Z3~\cite{demoura2008z3}, the carry propagation is encoded by
+zero-extending both 256-bit operands and the 1-bit carry to 257 bits,
+adding them once, and slicing: \texttt{wide = ZeroExt(1,x) + ZeroExt(1,y)
++ ZeroExt(256,cin)}; the result is \texttt{Extract(255,0,wide)} and the
+carry output is \texttt{Extract(256,256,wide)}. The encoding embeds
+carry propagation entirely into bit-vector arithmetic with no
+multi-return tuple or auxiliary predicate.
 
 The same bit-vector semantics also covers the algebraic simplification of
 ordinary operators such as \texttt{add}, \texttt{sub}, \texttt{mul},
@@ -51,12 +37,10 @@ ordinary operators such as \texttt{add}, \texttt{sub}, \texttt{mul},
 operator is the piece that a general-purpose IR lacks and that this paper
 adds.
 
-\paragraph{Trusted base.} The SMT equivalence check rests on the dMIR
-bit-vector semantic model and assumes that the model agrees with the
-runtime semantics of the actual JIT engine. On the 5884 differential
-tests of \S\ref{sec:correctness} no divergence has been observed;
-systematic consistency outside that distribution---model-versus-implementation
-fuzzing driven by random bytecode---is left as future work
+\paragraph{Trusted base.} The SMT check assumes the dMIR bit-vector model
+agrees with the JIT runtime; the 5884 differential tests of
+\S\ref{sec:correctness} show no divergence, and random-bytecode
+model-versus-implementation fuzzing is left as future work
 (\S\ref{sec:limitations}).
 
 \subsection{Candidate Enumeration and SMT Admission}
@@ -139,21 +123,17 @@ of the capacity run that pass the Z3 check are kept as a
 capability-evaluation result and are not promoted to the production
 side for the same reason.
 
-\paragraph{Counterexample examples.} The following two carry templates
-rejected by Z3 illustrate why the SMT admission check is necessary on the
-carry chain. \emph{Example 1: borrow discarded.} The candidate
-$\texttt{SBB}(x, x, c_f) \to 0$ has the counterexample
-$x = 0, c_f = 1$: the left-hand side evaluates to
-$\texttt{SBB}(0, 0, 1) = \texttt{0xFF}\ldots\texttt{F}$ while the
-right-hand side is $0$; the root cause is the ignored borrow input. The
-correct form $\texttt{SBB}(x, x, c_f) \to \texttt{sub}(0, c_f)$ passes
-the Z3 check. \emph{Example 2: polarity error.} The candidate
-$\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(0, c_f)$ has the counterexample
-$x = 1, c_f = 0$ (the left-hand side evaluates to $1$ while the
-right-hand side is $0$); the root cause is the dropped minuend, and the
-correct form is $\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(x, c_f)$. Both
-examples reflect typical carry-chain reasoning traps under 256-bit
-unsigned modular arithmetic: a discarded carry input and confused
+\paragraph{Counterexample examples.} Two rejected carry templates
+illustrate why SMT admission is needed on the carry chain.
+\emph{Example 1 (borrow discarded):}
+$\texttt{SBB}(x, x, c_f) \to 0$ fails at $x{=}0, c_f{=}1$ where the LHS
+is $\texttt{0xFF}\ldots\texttt{F}$; the correct form is
+$\texttt{SBB}(x, x, c_f) \to \texttt{sub}(0, c_f)$.
+\emph{Example 2 (polarity error):}
+$\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(0, c_f)$ fails at
+$x{=}1, c_f{=}0$ (LHS $=1$, RHS $=0$); the correct form is
+$\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(x, c_f)$. Both reflect typical
+256-bit modular carry-chain traps: ignored carry input and confused
 operand polarity.
 
 \paragraph{Artifact statement.} The artifact contains the synthesis
