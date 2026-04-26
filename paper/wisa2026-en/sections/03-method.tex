@@ -31,9 +31,8 @@ lacks and that this paper adds.
 
 \paragraph{Trusted base.} The SMT check assumes the dMIR bit-vector model
 agrees with the JIT runtime; the 5884 differential tests of
-\S\ref{sec:correctness} show no divergence, and random-bytecode
-model-versus-implementation fuzzing is left as future work
-(\S\ref{sec:limitations}).
+\S\ref{sec:correctness} show no divergence (random-bytecode fuzzing is
+future work, \S\ref{sec:limitations}).
 
 \subsection{Candidate Enumeration and SMT Admission}
 \label{sec:synthesis}
@@ -69,12 +68,12 @@ complementary paths; coverage results appear in
     candidates are constructed by hand around the carry-chain operators.
 \end{enumerate}
 
-\paragraph{Throughput and admission rate.} Algebraic enumeration admits
-765/775 candidates (98.7\%, 10 timeouts); carry templates admit 17/78
-(21.8\%, 61 semantic rejections), illustrating that hand-written
-templates frequently reach the non-equivalence boundary where the SMT
-check is essential. Full data appear in
-Table~\ref{tab:synth-alive2} (\S\ref{sec:evaluation}).
+\paragraph{Throughput and admission rate.} The capacity run admits
+765/775 algebraic candidates (98.7\%, 10 timeouts) and 17/78 carry
+templates (21.8\%, 61 semantic rejections); the gap shows hand-written
+carry templates routinely reach the non-equivalence boundary where the
+SMT check is essential. Full data: Table~\ref{tab:synth-alive2}
+(\S\ref{sec:evaluation}).
 
 \paragraph{Production rule coverage (methodology).} The coverage run
 asks a different question: does the synthesis search space contain the
@@ -139,8 +138,8 @@ mul-one; identity-elimination (10) covers forms like $\texttt{sub}(x,x)
 redundant compare/test cleanup (8 rules), with 2 each for
 branch-fallthrough and no-op elimination. The two layers are
 complementary: dMIR rules dominate U256-heavy contracts (e.g.\
-\texttt{weierstrudel}), x86 cleanup dominates sha1; per-family
-attribution appears in Table~\ref{tab:family-attribution}.
+\texttt{weierstrudel}), x86 cleanup dominates sha1; per-family hit
+rates are reported in \S\ref{sec:evaluation}.
 
 \paragraph{Asymmetric verification workflow.} The 70 dMIR production
 rules are designed manually from runtime performance profiles and

@@ -13,15 +13,13 @@ of \S\ref{sec:synthesis} with Alive2's verification on the same rules.
 
 \input{tables/tab4-1-synth-alive2}
 
-A 256-bit bit-vector peephole equivalence query takes $\sim$60\,ms on
-average for Z3; all 70 dMIR queries finish in seconds with no timeout,
-so 256-bit width is not a solver bottleneck. From the capacity run we
-sampled 10 U256 rules: Alive2 discharges the 6 without multi-return
-carry directly; on the other 4 with \texttt{adc}/\texttt{sbb} structure
-it reports type mismatch or times out (an independent sample of the same
-mechanism as Table~\ref{tab:cannot-express} in
-\S\ref{sec:expressiveness}), while Z3 discharges all 10 under the dMIR
-bit-vector semantics.
+Z3 averages $\sim$60\,ms per 256-bit bit-vector query and discharges
+all 70 dMIR rules in seconds, so 256-bit width is not a solver
+bottleneck. On a 10-rule U256 sample from the capacity run, Alive2
+clears the 6 without multi-return carry but reports type mismatch or
+times out on the 4 with \texttt{adc}/\texttt{sbb} structure (independent
+of Table~\ref{tab:cannot-express} in \S\ref{sec:expressiveness}); Z3
+discharges all 10 under the dMIR semantics.
 
 \paragraph{Production rule coverage.} Using the canonical-LHS
 methodology of \S\ref{sec:synthesis}, the coverage run produces
@@ -67,23 +65,21 @@ $<\!0.5$; benchmarks with CV $\geq 3\%$ are rerun with 30 repetitions.
 
 \input{figures/fig4-speedup}
 
-\input{tables/tab4-2-attribution}
-
 Across the 27 benchmarks (Figure~\ref{fig:speedup}), the enabled rule
 set delivers a geometric-mean speedup of \textbf{+7.24\%} (95\% CI
 [+2.59\%, +12.11\%]), peaking at \textbf{+25.79\%} on
 \texttt{JUMPDEST\_n0/empty}. \texttt{sha1\_shifts/5311} and
 \texttt{sha1\_divs/5311} reach +24.81\% and +23.51\%; empty-input sha1
 holds at +19.59\%--+20.24\%; \texttt{blake2b\_huff} gains
-+10.41\%--+11.54\%. Per-family attribution appears in
-Table~\ref{tab:family-attribution} (hit rate = fraction of executed
-instructions matched). U256 rules reach $\sim$100\% on
-\texttt{mg\_mload}, 33.8\% on \texttt{weierstrudel}, 25.3\% on
-\texttt{snailtracer}; the sha1/\texttt{blake2b} speedups come from the
-x86 branch/compare-merge rules. Hit rate and speedup are not
++10.41\%--+11.54\%. Per-rule-family hit rates (fraction of executed
+instructions matched) split sharply by workload: U256 rules reach
+$\sim$99.9\% on \texttt{mg\_mload}/\texttt{mg\_mstore}, 33.8\% on
+\texttt{weierstrudel}, 25.3\% on \texttt{snailtracer}, and 7.5\% on
+sha1; the sha1/\texttt{blake2b} speedups come instead from the x86
+branch/compare-merge rules. Hit rate and speedup are not
 proportional---\texttt{mg\_mload} matches almost every instruction with
-no-op elimination but per-rewrite saving is small. The two layers are
-complementary: multi-word rules concentrate gains on U256-heavy
+no-op elimination yet per-rewrite saving is small---so the two layers
+are complementary: multi-word rules concentrate gains on U256-heavy
 contracts, while x86 cleanup gives broader ordinary gains.
 
 \paragraph{Discussion of the regressed surface.} Five benchmarks regress

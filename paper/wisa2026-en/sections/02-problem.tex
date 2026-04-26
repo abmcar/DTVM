@@ -26,26 +26,21 @@ both sides for a typical U256 addition:
 \end{center}
 
 Among all instructions emitted by the JIT, instructions directly tied to
-U256 multi-word arithmetic account for about \textbf{2.15\%} (a weighted
+U256 multi-word arithmetic account for about \textbf{2.15\%} (weighted
 mean across the U256-heavy subset of the 27 benchmarks in
-\S\ref{sec:evaluation}---specifically the leftmost cluster
-``U256-heavy (1--11)'' in Figure~\ref{fig:speedup}, with the
-per-benchmark distribution shown in
-Table~\ref{tab:family-attribution}). The share
+\S\ref{sec:evaluation}---the leftmost cluster ``U256-heavy (1--11)'' in
+Figure~\ref{fig:speedup}). The share
 is small, but the carry chain has a special property: every
 \texttt{adc}/\texttt{sbb} on the chain depends on the carry output of the
 previous instruction, forming a strict \emph{serial data dependency}
 that instruction-level parallelism cannot hide.
 U256 instructions are therefore few in number yet contribute
 disproportionately to execution time.
-The family-attribution experiment in \S\ref{sec:evaluation}
-(Table~\ref{tab:family-attribution}) shows that the hit rate of
-U256-related rules on U256-heavy benchmarks ranges from 25\% to
-99.9\% with a very uneven distribution, indicating that the carry-chain
-pattern dominates those contracts. On non-U256-heavy benchmarks such as
-the sha1 family and \texttt{jump\_around}, the U256 hit rate is well below
-that range, and the performance gain comes mainly from the
-mechanical-redundancy cleanup at the x86 layer.
+The family-attribution data in \S\ref{sec:evaluation} show that on
+U256-heavy benchmarks the U256 rule hit rate ranges from 25\% to 99.9\%
+with a very uneven distribution; on non-U256-heavy benchmarks (sha1
+family, \texttt{jump\_around}) it is well below that range and gains
+come from x86-layer mechanical cleanup.
 
 \subsection{Expressiveness Limit of General-Purpose IR on the Carry Chain}
 \label{sec:expressiveness}
