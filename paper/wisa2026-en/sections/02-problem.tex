@@ -27,10 +27,11 @@ both sides for a typical U256 addition:
 
 Among all instructions emitted by the JIT, instructions directly tied to
 U256 multi-word arithmetic account for about \textbf{2.15\%} (a weighted
-mean across 14 U256-heavy benchmarks; these 14 are the U256-heavy subset
-of the 27 benchmarks in \S\ref{sec:evaluation}, and the per-benchmark
-distribution is very uneven---see
-Table~\ref{tab:family-attribution} in \S\ref{sec:evaluation}). The share
+mean across the U256-heavy subset of the 27 benchmarks in
+\S\ref{sec:evaluation}---specifically the leftmost cluster
+``U256-heavy (1--11)'' in Figure~\ref{fig:speedup}, with the
+per-benchmark distribution shown in
+Table~\ref{tab:family-attribution}). The share
 is small, but the carry chain has a special property: every
 \texttt{adc}/\texttt{sbb} on the chain depends on the carry output of the
 previous instruction, forming a strict \emph{serial data dependency}
@@ -63,10 +64,12 @@ Following the peephole verification framework proposed by Lopes et al.\
 in Alive~\cite{alive} and inherited by Alive2~\cite{alive2},
 Table~\ref{tab:cannot-express} lists four typical carry-chain rules that
 Alive2 cannot directly verify for equivalence---Alive2 returns a
-type mismatch or reports an undecidable outcome. Under Alive2 these
-four rules fall in the \textbf{not automatically verifiable} category; the limitation stems from how the general-purpose
-IR models the carry bit and is independent of the rule implementation
-and the solver capacity.
+type mismatch on the multi-return tuple or times out on the lifted
+encoding. Under Alive2 these
+four rules fall in the \textbf{not automatically verifiable} category
+(within the supported encoding); the limitation stems from how the
+general-purpose IR models the carry bit and is independent of the rule
+implementation and the solver capacity.
 
 \input{tables/tab2-1-cannot-express}
 
