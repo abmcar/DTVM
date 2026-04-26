@@ -1,11 +1,11 @@
 % 03-method.tex — §3 Method
 \section{SMT-Verifiable Peephole Rewrite Rule Synthesis Based on dMIR}
 
-Figure~\ref{fig:pipeline} shows the offline rule synthesis and two-tier
-integration pipeline. We cover the dMIR bit-vector model (\S3.1),
-enumeration with SMT admission (\S3.2), and the two-tier rule set (\S3.3).
-
-\input{figures/fig1-pipeline}
+The pipeline runs offline rule synthesis (template enumeration plus Z3
+admission) once, emits an SMT-admitted JSON rule pack, and the two-tier
+runtime (dMIR algebraic + x86 CgIR carry-chain) loads it at JIT init.
+We cover the dMIR bit-vector model (\S3.1), enumeration with SMT
+admission (\S3.2), and the two-tier rule set (\S3.3).
 
 \subsection{dMIR Bit-Vector Semantics and Carry-Chain Operators}
 
