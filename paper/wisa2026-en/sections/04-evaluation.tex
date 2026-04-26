@@ -64,45 +64,34 @@ rule, while 1966 of its members pass Z3 verification.
 
 \subsection{End-to-End Performance}
 
-\paragraph{Experimental setup and noise control.} The baseline is the
-upstream main branch (which already contains 2 hard-coded x86 peephole
-rules that are not new in this paper); the enabled side adds the 83 new
-rules (70 dMIR + 13 x86). Both sides run through evmone-bench. Every
-benchmark is repeated 20 times, and the 95\% confidence interval of the
-geometric mean is estimated by bootstrap ($B = 10\,000$). To suppress
-noise, the process is pinned to dedicated physical cores with
-\texttt{taskset -c 2-3} and raised to \texttt{nice -5};
-measurement starts only when the 1-minute load average is below 0.5, with
-CPU turbo disabled; every benchmark is then re-measured to confirm that
-the coefficient of variation (CV) on both sides is below 3\%, and if any
-benchmark exceeds the threshold, it is rerun with 30 repetitions.
+\paragraph{Experimental setup and noise control.} The baseline is
+upstream main (already containing 2 hard-coded x86 peephole rules); the
+enabled side adds the 83 new rules (70 dMIR + 13 x86). Both run under
+evmone-bench, 20 repetitions each, with bootstrap-estimated geometric-mean
+95\% CIs ($B{=}10\,000$). The process is pinned with \texttt{taskset -c
+2-3} at \texttt{nice -5}, with CPU turbo disabled and load average
+$<\!0.5$; benchmarks with CV $\geq 3\%$ are rerun with 30 repetitions.
 
 \input{figures/fig4-speedup}
 
 \input{tables/tab4-2-attribution}
 
-Across the 27 benchmarks (Figure~\ref{fig:speedup}), the geometric-mean
-speedup of the enabled rule set over the baseline is \textbf{+7.24\%}
-(95\% confidence interval [+2.59\%, +12.11\%]), with a peak of
-\textbf{+25.79\%} on \texttt{JUMPDEST\_n0/empty}. The sha1 family gains
-the most on long inputs: \texttt{sha1\_shifts/5311} and
-\texttt{sha1\_divs/5311} accelerate by \textbf{+24.81\%} and
-\textbf{+23.51\%} respectively, with the empty-input workloads still at
-\textbf{+19.59\%}--\textbf{+20.24\%}; \texttt{blake2b\_huff} accelerates
-by \textbf{+10.41\%}--\textbf{+11.54\%}. Attribution by rule family
-appears in Table~\ref{tab:family-attribution} (the hit rate is defined as
-the fraction of executed instructions matched by a given rule family):
-the U256-related rules reach almost 100\% hit rate on the four
-\texttt{mg\_mload} variants, 33.8\% on \texttt{weierstrudel}, and 25.3\%
-on \texttt{snailtracer}; the speedup on sha1 and \texttt{blake2b} comes
-mainly from the branch- and compare-merging rules at the x86 layer. Hit
-rate and speedup are not proportional: on \texttt{mg\_mload} almost 100\%
-of the instructions are matched by no-op elimination, yet the saving per
-rewrite is small, and the final speedup depends on both the trigger
-count and the cost of each rewrite. The two rule layers are
-complementary rather than substitutive: the multi-word rules yield
-concentrated gains on U256-heavy contracts, while the mechanical cleanup
-at the x86 layer provides broader, ordinary gains.
+Across the 27 benchmarks (Figure~\ref{fig:speedup}), the enabled rule
+set delivers a geometric-mean speedup of \textbf{+7.24\%} (95\% CI
+[+2.59\%, +12.11\%]), peaking at \textbf{+25.79\%} on
+\texttt{JUMPDEST\_n0/empty}. \texttt{sha1\_shifts/5311} and
+\texttt{sha1\_divs/5311} reach +24.81\% and +23.51\%; empty-input sha1
+holds at +19.59\%--+20.24\%; \texttt{blake2b\_huff} gains
++10.41\%--+11.54\%. Per-family attribution appears in
+Table~\ref{tab:family-attribution} (hit rate = fraction of executed
+instructions matched). U256 rules reach $\sim$100\% on
+\texttt{mg\_mload}, 33.8\% on \texttt{weierstrudel}, 25.3\% on
+\texttt{snailtracer}; the sha1/\texttt{blake2b} speedups come from the
+x86 branch/compare-merge rules. Hit rate and speedup are not
+proportional---\texttt{mg\_mload} matches almost every instruction with
+no-op elimination but per-rewrite saving is small. The two layers are
+complementary: multi-word rules concentrate gains on U256-heavy
+contracts, while x86 cleanup gives broader ordinary gains.
 
 \paragraph{Discussion of the regressed surface.} Five benchmarks regress
 beyond $-2\%$: the 4 \texttt{memory\_grow\_mstore} variants by 7.74\%--%
@@ -162,9 +151,7 @@ is precisely the point that the two rule sets target different
 abstraction layers.
 \par\endgroup
 
-Continuous-integration auditability: the equivalence proposition and the
-Z3 query script of each dMIR rule are stored with the rule file and are
-re-verified automatically on every code change. Re-verifying all 70 dMIR
-rules takes about \textbf{0.5} seconds in total and is not a bottleneck;
-the 0.5\,s figure is the total CI offline re-verification time and is
-not on the same scale as the runtime compilation latency in \S4.2.
+CI auditability: each dMIR rule's Z3 query is stored alongside its rule
+file and re-verified on every change; re-verifying all 70 rules takes
+$\sim$0.5\,s total (offline, distinct from the runtime compilation
+latency of \S4.2).

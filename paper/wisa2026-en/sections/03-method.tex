@@ -12,16 +12,11 @@ set (\S3.3).
 \subsection{dMIR Bit-Vector Semantics and Carry-Chain Operators}
 
 The core data type of dMIR is a parametric-width bit-vector
-$\mathrm{BV}_n$. The specialization $\mathrm{BV}_1$ carries the carry
-input ($c_{in}$) and the carry output ($c_{out}$). The semantics of the
-carry-propagating addition \texttt{ADC} is defined as
-\[
-  \texttt{ADC}: \mathrm{BV}_n \times \mathrm{BV}_n \times \mathrm{BV}_1
-  \;\to\; \mathrm{BV}_n \times \mathrm{BV}_1,
-\]
-\noindent that is, two $n$-bit operands and a 1-bit carry input map to an
-$n$-bit result and a 1-bit carry output. The borrow-propagating
-subtraction \texttt{SBB} has a fully symmetric signature.
+$\mathrm{BV}_n$, with $\mathrm{BV}_1$ carrying the carry input
+($c_{in}$) and output ($c_{out}$). The carry-propagating addition has
+signature $\texttt{ADC}: \mathrm{BV}_n \times \mathrm{BV}_n \times
+\mathrm{BV}_1 \to \mathrm{BV}_n \times \mathrm{BV}_1$, and the
+borrow-propagating subtraction \texttt{SBB} is symmetric.
 
 In Z3~\cite{demoura2008z3}, the carry propagation is encoded by
 zero-extending both 256-bit operands and the 1-bit carry to 257 bits,
@@ -82,16 +77,12 @@ complementary paths; coverage results appear in
     candidates are constructed by hand around the carry-chain operators.
 \end{enumerate}
 
-\paragraph{Throughput and admission rate.} The algebraic enumeration
-produces 775 candidates, of which 765 pass (admission rate
-\textbf{98.7\%}; 10 rejected due to solver timeout with no semantic
-counterexample); the carry templates produce 78 candidates, of which 17
-pass (admission rate \textbf{21.8\%}; the remaining 61 are semantic
-rejections). Full data with the Alive2 comparison appear in
-Table~\ref{tab:synth-alive2} in \S\ref{sec:evaluation}. The 61 semantic
-rejections among the carry templates illustrate that hand-written
-templates more easily reach the non-equivalence boundary---precisely
-where the SMT admission check is needed.
+\paragraph{Throughput and admission rate.} Algebraic enumeration admits
+765/775 candidates (98.7\%, 10 timeouts); carry templates admit 17/78
+(21.8\%, 61 semantic rejections), illustrating that hand-written
+templates frequently reach the non-equivalence boundary where the SMT
+check is essential. Full data appear in
+Table~\ref{tab:synth-alive2} (\S\ref{sec:evaluation}).
 
 \paragraph{Production rule coverage (methodology).} The coverage run
 asks a different question: does the synthesis search space contain the
