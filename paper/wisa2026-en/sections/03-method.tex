@@ -1,11 +1,9 @@
 % 03-method.tex — §3 Method
 \section{SMT-Verifiable Peephole Rewrite Rule Synthesis Based on dMIR}
 
-Figure~\ref{fig:pipeline} shows the full offline rule synthesis and
-two-tier integration pipeline. This section is organized in three parts:
-the dMIR bit-vector semantic model (\S3.1), candidate enumeration and the
-SMT admission check (\S3.2), and the layered design of the two-tier rule
-set (\S3.3).
+Figure~\ref{fig:pipeline} shows the offline rule synthesis and two-tier
+integration pipeline. We cover the dMIR bit-vector model (\S3.1),
+enumeration with SMT admission (\S3.2), and the two-tier rule set (\S3.3).
 
 \input{figures/fig1-pipeline}
 
@@ -26,11 +24,10 @@ carry output is \texttt{Extract(256,256,wide)}. The encoding embeds
 carry propagation entirely into bit-vector arithmetic with no
 multi-return tuple or auxiliary predicate.
 
-The same bit-vector semantics also covers the algebraic simplification of
-ordinary operators such as \texttt{add}, \texttt{sub}, \texttt{mul},
-\texttt{and}, \texttt{or}, \texttt{xor}, and shifts; the carry-chain
-operator is the piece that a general-purpose IR lacks and that this paper
-adds.
+The same bit-vector semantics covers ordinary operators (\texttt{add},
+\texttt{sub}, \texttt{mul}, \texttt{and}, \texttt{or}, \texttt{xor},
+shifts); the carry-chain operator is the piece a general-purpose IR
+lacks and that this paper adds.
 
 \paragraph{Trusted base.} The SMT check assumes the dMIR bit-vector model
 agrees with the JIT runtime; the 5884 differential tests of
@@ -41,19 +38,14 @@ model-versus-implementation fuzzing is left as future work
 \subsection{Candidate Enumeration and SMT Admission}
 \label{sec:synthesis}
 
-\paragraph{Admission check.} For a candidate rule
-$\textit{LHS} \to \textit{RHS}$, we submit to Z3 the proposition
-$\exists\,\vec{v}.\;\textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$.
-If Z3 returns \emph{unsat}, the rule is equivalent on all inputs under
-the dMIR fixed-width modular bit-vector semantics and admission is
-granted; if Z3 returns \emph{sat}, the solver also returns a
-counterexample and the rule is rejected; a timeout is treated as a
-rejection as well. The notion of equivalence here does not depend on
-two's complement, signed overflow, or any assumption beyond fixed-width
-modular arithmetic. All 70 production dMIR rules pass this check, the Z3
-query scripts are committed alongside the rule files in the repository,
-and the continuous integration pipeline re-runs the checks on every rule
-change.
+\paragraph{Admission check.} For a candidate $\textit{LHS} \to
+\textit{RHS}$, we submit to Z3 the proposition $\exists\,\vec{v}.\;
+\textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$. \emph{Unsat} grants
+admission under fixed-width modular bit-vector semantics; \emph{sat} or
+timeout rejects (sat returns a counterexample). Equivalence assumes
+nothing beyond modular arithmetic---no two's complement, no signed
+overflow. All 70 production dMIR rules pass; queries are committed with
+each rule and re-run by CI on every change.
 
 \paragraph{Two enumeration runs.} We report two separate enumeration
 experiments with disjoint goals. The \emph{capacity run} fixes a single
@@ -102,17 +94,12 @@ rule's right-hand side. Numerical results appear in
 \S\ref{sec:evaluation}.
 
 \paragraph{Relation between production rules and the synthesis pipeline.}
-The 70 dMIR production rules of this paper are designed by hand from
-runtime performance profiles and code review, and each is submitted to
-Z3 for bit-vector equivalence verification. The synthesis pipeline is
-evaluated against this set under the methodology above. The two
-channels remain operationally separate: the synthesis pipeline serves
-as a Z3-verified rule-discovery and capability reference, while the
-production rule set is selected by runtime performance profiles whose
-criterion differs from the input of enumeration. The 17 carry templates
-of the capacity run that pass the Z3 check are kept as a
-capability-evaluation result and are not promoted to the production
-side for the same reason.
+The 70 production rules are hand-designed from runtime profiles and Z3-%
+verified one-by-one; the synthesis pipeline serves as an independent
+Z3-verified discovery channel evaluated against this set. The two are
+selected by different criteria (runtime profiles vs.\ enumeration order),
+so the 17 carry templates passing Z3 in the capacity run are kept as a
+capability result rather than promoted into production.
 
 \paragraph{Counterexample examples.} Two rejected carry templates
 illustrate why SMT admission is needed on the carry chain.
@@ -127,45 +114,33 @@ $\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(x, c_f)$. Both reflect typical
 256-bit modular carry-chain traps: ignored carry input and confused
 operand polarity.
 
-\paragraph{Artifact statement.} The artifact contains the synthesis
-tooling (about 2400 lines of Python: the enumerator, the seed-miner, the
-canonical-form-aware coverage comparator, and Z3 query scripts), the
-rule-set JSON, the production-rule coverage measurement output, and the
-unit tests for the canonicalization and dedup paths.
+\paragraph{Artifact statement.} The artifact ships $\sim$2400 lines of
+Python (enumerator, seed-miner, canonical-form coverage comparator, Z3
+queries), the rule-set JSON, coverage output, and unit tests for the
+canonicalization and dedup paths.
 
 \subsection{Two-Tier Rule Set}
 
 \paragraph{Motivation for the split.} The dMIR layer handles
-machine-independent algebraic simplification, and all 70 rules at this
-layer pass the Z3 equivalence check on the dMIR bit-vector model. The
-x86 CgIR layer handles hardware-specific redundancy cleanup on registers,
-flags, and branches; all 13 rules at this layer are mechanical syntactic
-rewrites and \textbf{currently have no separate SMT-check script}. Their
-correctness is covered by the matched test suites on the baseline and
-enabled sides of \S\ref{sec:correctness} (multipass JIT and interpreter
-unit tests plus Cancun state-transition tests in both execution modes,
-5884 tests in total). A formal semantic model and SMT check for the x86
-layer are listed as future work (\S\ref{sec:limitations}).
+machine-independent algebraic simplification (all 70 rules Z3-verified);
+the x86 CgIR layer handles hardware-specific cleanup on registers, flags,
+and branches (13 mechanical syntactic rewrites with \textbf{no separate
+SMT script}, covered by the matched 5884-test suites of
+\S\ref{sec:correctness}). A formal x86 model with SMT check is future
+work (\S\ref{sec:limitations}).
 
 \input{tables/tab3-1-rule-classes}
 
-Table~\ref{tab:rule-classes} gives the classification of the two-tier
-rules. On the dMIR layer, Boolean-normalization rules form the largest
-family (42 rules, 60\%), which is the family most widely covered by the
-algebraic enumeration. The algebraic-identity family (15 rules) contains
-classical identities such as add-zero elimination and multiply-one
-elimination. The identity-elimination family (10 rules) covers forms
-such as $\texttt{sub}(x,x) \to 0$ and $\texttt{and}(x,x) \to x$. The x86
-layer is dominated by redundant compare and redundant test cleanup (8
-rules in total), with 2 rules each for branch-fallthrough cleanup and
-no-operation elimination.
-
-\paragraph{Complementarity.} The two rule layers are complementary on
-real contracts. On U256-heavy contracts such as \texttt{weierstrudel},
-the dMIR-layer rules dominate, whereas on the sha1 benchmarks the branch
-and compare cleanup at the x86 layer dominates.
-Table~\ref{tab:family-attribution} in \S\ref{sec:evaluation} gives the
-attribution data per rule family.
+Table~\ref{tab:rule-classes} classifies the rules. On the dMIR layer,
+Boolean normalization dominates (42 rules, 60\%, broadly covered by
+algebraic enumeration); algebraic identities (15) include add-zero and
+mul-one; identity-elimination (10) covers forms like $\texttt{sub}(x,x)
+\to 0$ and $\texttt{and}(x,x) \to x$. The x86 layer is dominated by
+redundant compare/test cleanup (8 rules), with 2 each for
+branch-fallthrough and no-op elimination. The two layers are
+complementary: dMIR rules dominate U256-heavy contracts (e.g.\
+\texttt{weierstrudel}), x86 cleanup dominates sha1; per-family
+attribution appears in Table~\ref{tab:family-attribution}.
 
 \paragraph{Asymmetric verification workflow.} The 70 dMIR production
 rules are designed manually from runtime performance profiles and

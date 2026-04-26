@@ -2,33 +2,26 @@
 \section{Evaluation}
 \label{sec:evaluation}
 
-This section evaluates the two-tier peephole rewrite system along three
-axes: the output of the rule synthesis pipeline against the
-general-purpose IR checker (\S4.1), end-to-end execution performance
-(\S4.2), and correctness with rule coverage (\S4.3).
+We evaluate along three axes: synthesis output vs.\ a general-purpose
+IR checker (\S4.1), end-to-end performance (\S4.2), and correctness
+with rule coverage (\S4.3).
 
 \subsection{Rule Synthesis Output Against the General-Purpose IR}
 
-Table~\ref{tab:synth-alive2} combines the admission results from the
-synthesis pipeline of \S\ref{sec:synthesis} with the verification
-ability of Alive2 on the same rule groups.
+Table~\ref{tab:synth-alive2} combines the synthesis admission results
+of \S\ref{sec:synthesis} with Alive2's verification on the same rules.
 
 \input{tables/tab4-1-synth-alive2}
 
-Z3 solves a typical 256-bit bit-vector peephole equivalence proposition
-in about 60\,ms on average; all 70 dMIR rule queries finish within
-seconds, with no timeout or undecidable outcome, showing that the 256-bit
-width is not a bottleneck for the solver's capacity. From the capacity
-run, 10 typical U256 rules were sampled at random and compared against
-Alive2: 6 of them do not involve a multi-return carry structure
-and Alive2 discharges them directly; the other 4 involve
-\texttt{adc}/\texttt{sbb} multi-return structures, for which Alive2
-either reports a type mismatch or times out (the mechanism is of the same
-type as Table~\ref{tab:cannot-express} in \S\ref{sec:expressiveness},
-while these 4 are an independent sample from the production rule set),
-whereas Z3 discharges all of them directly under the dMIR bit-vector
-semantics, confirming the analysis of the IR expressiveness bottleneck in
-\S\ref{sec:expressiveness}.
+A 256-bit bit-vector peephole equivalence query takes $\sim$60\,ms on
+average for Z3; all 70 dMIR queries finish in seconds with no timeout,
+so 256-bit width is not a solver bottleneck. From the capacity run we
+sampled 10 U256 rules: Alive2 discharges the 6 without multi-return
+carry directly; on the other 4 with \texttt{adc}/\texttt{sbb} structure
+it reports type mismatch or times out (an independent sample of the same
+mechanism as Table~\ref{tab:cannot-express} in
+\S\ref{sec:expressiveness}), while Z3 discharges all 10 under the dMIR
+bit-vector semantics.
 
 \paragraph{Production rule coverage.} Using the canonical-LHS
 methodology of \S\ref{sec:synthesis}, the coverage run produces
@@ -115,41 +108,22 @@ rewrite pass; per-pass attribution is future work
 
 \input{tables/tab4-3-correctness}
 
-The enabled side and the baseline side each run four differential test
-categories (Table~\ref{tab:correctness}); the two sides agree
-item-by-item on state and gas, for a cumulative
-\textbf{5884}/\textbf{5884}. A pass on the baseline side shows that the
-test suite itself is correct; a pass on the enabled side shows that the
-83 new rules introduce no correctness regression. The multipass JIT unit
-tests contain 223 independent Cancun cases; the interpreter run list
-contains 226 lines, reducing to 215 after the gtest deduplication;
-\texttt{evmone-statetest} on Cancun covers 101 suites (with
-\texttt{-k fork\_Cancun} filtering out the Prague fork that DTVM does
-not yet support) and runs independently in both the multipass JIT mode
-and the interpreter mode. The cross-check between the two modes on the
-same test matrix produces identical outcomes, which is direct evidence
-of EVM consensus consistency.
+Both sides run four differential categories (Table~\ref{tab:correctness})
+and agree item-by-item on state and gas, for \textbf{5884/5884} total.
+The baseline pass validates the suite; the enabled pass shows the 83 new
+rules introduce no regression. \texttt{evmone-statetest} runs
+independently under multipass JIT and interpreter on Cancun (\texttt{-k
+fork\_Cancun} filters Prague), and the two modes agree on the same
+matrix---direct evidence of EVM consensus consistency.
 
-\begingroup\sloppy\emergencystretch=3em
 Compared with the CAV 2023 rule set of
-Albert et al.~\cite{verified_evm_cav23}, 7 of the 83 rules in this paper
-overlap: \texttt{dmir\_add\_zero}, \texttt{dmir\_mul\_one\_rhs},
-\texttt{dmir\_mul\_zero\_rhs}, \texttt{dmir\_or\_zero},
-\texttt{dmir\_double\_not}, \texttt{dmir\_sub\_self}, and
-\texttt{dmir\_and\_factor\_lhs}, which correspond respectively to the
-CAV'23 rules \texttt{optimize\_add\_zero}, \texttt{optimize\_mul\_one},
-\texttt{optimize\_mul\_zero}, \texttt{optimize\_or\_zero},
-\texttt{optimize\_not\_not}, \texttt{optimize\_sub\_x\_x}, and
-\texttt{optimize\_and\_and\_l}. All 7 are general bit-vector algebraic
-identities ($\texttt{add}(x,0) \to x$, $\texttt{mul}(x,0) \to 0$,
-$\texttt{not}(\texttt{not}(x)) \to x$, and so on) that appear in almost
-every SMT-verifiable peephole effort. The remaining 76 rules cover dMIR
-algebraic simplification and multi-word cleanup (63 rules) and x86
-register/branch/flag cleanup (13 rules). These transformations live at
-abstraction layers that the bytecode layer cannot reach directly---which
-is precisely the point that the two rule sets target different
-abstraction layers.
-\par\endgroup
+Albert et al.~\cite{verified_evm_cav23}, 7 of the 83 rules overlap as
+generic algebraic identities (add-zero, mul-zero, double-not, sub-self,
+and-fact, mul-one, or-zero) that appear in nearly every SMT-verifiable
+peephole effort. The remaining 76 rules---63 dMIR algebraic and
+multi-word cleanups plus 13 x86 register/branch/flag cleanups---live at
+abstraction layers the bytecode layer cannot reach, reflecting that the
+two rule sets target different layers.
 
 CI auditability: each dMIR rule's Z3 query is stored alongside its rule
 file and re-verified on every change; re-verifying all 70 rules takes
