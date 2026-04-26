@@ -200,11 +200,11 @@ attribution data per rule family.
 rules are designed manually from runtime performance profiles and
 submitted one by one to the Z3 equivalence check
 (\S\ref{sec:synthesis}). The synthesis pipeline is an independent
-capability-evaluation channel that does not participate in production
-rule maintenance; coverage measurements show its search space contains
-the production set (\S\ref{sec:evaluation}), but production rule
-selection remains driven by runtime profiles rather than enumeration
-order, so the two channels are kept separate by selection criterion
-rather than by expressive scope. The x86-layer rules are covered by
+measurement channel: it does not drive production rule maintenance,
+although coverage results in \S\ref{sec:evaluation} show its search
+space contains the production set; production rule selection remains
+driven by runtime profiles rather than enumeration order, so the two
+channels are kept separate by selection criterion rather than by
+expressive scope. The x86-layer rules are covered by
 code review and the matched test suites. The limitations from this
 asymmetry are listed explicitly in \S\ref{sec:limitations}.

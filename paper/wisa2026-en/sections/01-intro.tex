@@ -60,19 +60,19 @@ check.
     automatic equivalence-verification framework into the decidable
     fragment of the Z3 bit-vector equivalence
     check~\cite{demoura2008z3}. A two-tier rewrite system is built on
-    \textbf{70} dMIR production rules (5 of which rely on the
+    \textbf{70} dMIR production rules (4 of which rely on the
     first-class modeling and cannot be expressed as a single peephole
     rule on general IR) together with \textbf{13} rules at the x86
     code-generation layer (covered by differential tests; no separate
     SMT check).
-  \item \textbf{Capacity and admission-rate characterization of the
-    synthesis pipeline.} \textbf{853} candidates are evaluated under the
-    same Z3 admission check, producing a single capacity-and-admission-rate
-    measurement. The admission rates on the two enumeration paths are
-    \textbf{98.7\%} for algebraic enumeration and \textbf{21.8\%} for
-    hand-constructed carry templates. The synthesis pipeline is
-    independent of the production rule set and its results serve as a
-    Z3 admission-rate reference for future rule expansion.
+  \item \textbf{Capacity, admission rate, and production-rule coverage
+    of the synthesis pipeline.} A capacity run evaluates \textbf{853}
+    candidates under the Z3 admission check (\textbf{98.7\%} on
+    algebraic enumeration, \textbf{21.8\%} on carry templates); a
+    separate coverage run rediscovers \textbf{70/70} production rule
+    names under canonical-LHS comparison (\S\ref{sec:evaluation}). The
+    two channels are operationally separate from production rule
+    maintenance, but the search space contains the production set.
   \item \textbf{End-to-end performance and correctness.} Across the
     \textbf{27} EVM benchmarks of evmone-bench, the geometric-mean
     speedup is \textbf{+7.24\%} (95\% confidence interval
