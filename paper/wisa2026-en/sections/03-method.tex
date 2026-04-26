@@ -10,24 +10,20 @@ admission (\S3.2), and the two-tier rule set (\S3.3).
 \subsection{dMIR Bit-Vector Semantics and Carry-Chain Operators}
 
 The core data type of dMIR is a parametric-width bit-vector
-$\mathrm{BV}_n$, with $\mathrm{BV}_1$ carrying the carry input
-($c_{in}$) and output ($c_{out}$). The carry-propagating addition has
-signature $\texttt{ADC}: \mathrm{BV}_n \times \mathrm{BV}_n \times
-\mathrm{BV}_1 \to \mathrm{BV}_n \times \mathrm{BV}_1$, and the
-borrow-propagating subtraction \texttt{SBB} is symmetric.
-
-In Z3~\cite{demoura2008z3}, the carry propagation is encoded by
-zero-extending both 256-bit operands and the 1-bit carry to 257 bits,
-adding them once, and slicing: \texttt{wide = ZeroExt(1,x) + ZeroExt(1,y)
-+ ZeroExt(256,cin)}; the result is \texttt{Extract(255,0,wide)} and the
-carry output is \texttt{Extract(256,256,wide)}. The encoding embeds
-carry propagation entirely into bit-vector arithmetic with no
-multi-return tuple or auxiliary predicate.
-
-The same bit-vector semantics covers ordinary operators (\texttt{add},
-\texttt{sub}, \texttt{mul}, \texttt{and}, \texttt{or}, \texttt{xor},
-shifts); the carry-chain operator is the piece a general-purpose IR
-lacks and that this paper adds.
+$\mathrm{BV}_n$ with $\mathrm{BV}_1$ carrying the carry in/out
+($c_{in}, c_{out}$). The carry-propagating addition has signature
+$\texttt{ADC}: \mathrm{BV}_n \times \mathrm{BV}_n \times \mathrm{BV}_1
+\to \mathrm{BV}_n \times \mathrm{BV}_1$; \texttt{SBB} is symmetric. In
+Z3~\cite{demoura2008z3}, carry propagation zero-extends both 256-bit
+operands and the 1-bit carry to 257 bits, sums once, and slices:
+\texttt{wide = ZeroExt(1,x) + ZeroExt(1,y) + ZeroExt(256,cin)}; result
+is \texttt{Extract(255,0,wide)}, carry out is
+\texttt{Extract(256,256,wide)}. This embeds carry propagation entirely
+in bit-vector arithmetic with no multi-return tuple or auxiliary
+predicate. The same semantics covers ordinary operators
+(\texttt{add}, \texttt{sub}, \texttt{mul}, \texttt{and}, \texttt{or},
+\texttt{xor}, shifts); the carry-chain operator is the piece a
+general-purpose IR lacks.
 
 \paragraph{Trusted base.} The SMT check assumes the dMIR bit-vector model
 agrees with the JIT runtime; the 5884 differential tests of
@@ -59,14 +55,12 @@ production rules. The capacity run, described next, uses two
 complementary paths; coverage results appear in
 \S\ref{sec:evaluation}.
 
-\begin{enumerate}
-  \item \textbf{Depth-2 algebraic enumeration}---with the dMIR
-    arithmetic and Boolean operators as enumeration primitives, all
-    left/right combinations of depth at most 2 are enumerated, covering
-    the common algebraic identities.
-  \item \textbf{Carry-template enumeration}---multi-word carry-chain
-    candidates are constructed by hand around the carry-chain operators.
-\end{enumerate}
+The capacity run uses two complementary paths: \emph{(i) depth-2
+algebraic enumeration}---all left/right combinations of depth $\le\!2$
+over the dMIR arithmetic and Boolean operators, covering common
+algebraic identities; \emph{(ii) carry-template enumeration}---%
+multi-word carry-chain candidates constructed by hand around the
+carry-chain operators.
 
 \paragraph{Throughput and admission rate.} The capacity run admits
 765/775 algebraic candidates (98.7\%, 10 timeouts) and 17/78 carry
@@ -92,31 +86,16 @@ is not required to be syntactically identical to the production
 rule's right-hand side. Numerical results appear in
 \S\ref{sec:evaluation}.
 
-\paragraph{Relation between production rules and the synthesis pipeline.}
-The 70 production rules are hand-designed from runtime profiles and Z3-%
-verified one-by-one; the synthesis pipeline serves as an independent
-Z3-verified discovery channel evaluated against this set. The two are
-selected by different criteria (runtime profiles vs.\ enumeration order),
-so the 17 carry templates passing Z3 in the capacity run are kept as a
-capability result rather than promoted into production.
-
-\paragraph{Counterexample examples.} Two rejected carry templates
-illustrate why SMT admission is needed on the carry chain.
-\emph{Example 1 (borrow discarded):}
-$\texttt{SBB}(x, x, c_f) \to 0$ fails at $x{=}0, c_f{=}1$ where the LHS
-is $\texttt{0xFF}\ldots\texttt{F}$; the correct form is
-$\texttt{SBB}(x, x, c_f) \to \texttt{sub}(0, c_f)$.
-\emph{Example 2 (polarity error):}
-$\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(0, c_f)$ fails at
-$x{=}1, c_f{=}0$ (LHS $=1$, RHS $=0$); the correct form is
-$\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(x, c_f)$. Both reflect typical
-256-bit modular carry-chain traps: ignored carry input and confused
-operand polarity.
-
-\paragraph{Artifact statement.} The artifact ships $\sim$2400 lines of
-Python (enumerator, seed-miner, canonical-form coverage comparator, Z3
-queries), the rule-set JSON, coverage output, and unit tests for the
-canonicalization and dedup paths.
+\paragraph{Counterexamples.} Two rejected carry templates illustrate
+why SMT admission is essential on the carry chain.
+$\texttt{SBB}(x, x, c_f) \to 0$ fails at $x{=}0, c_f{=}1$ (LHS is
+$\texttt{0xFF}\ldots\texttt{F}$; correct form
+$\texttt{sub}(0, c_f)$); $\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(0, c_f)$
+fails at $x{=}1, c_f{=}0$ (correct form $\texttt{sub}(x, c_f)$). Both
+reflect modular-carry traps: ignored carry input and confused operand
+polarity. The artifact ships $\sim$2400 lines of Python (enumerator,
+seed-miner, canonical comparator, Z3 queries), the rule-set JSON,
+coverage output, and unit tests for canonicalization/dedup.
 
 \paragraph{Two-tier rule set.} The dMIR layer handles
 machine-independent algebraic simplification (all 70 rules Z3-verified);

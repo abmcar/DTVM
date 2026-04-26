@@ -1,53 +1,42 @@
 % 01-intro.tex — §1 Introduction
 \section{Introduction}
 
-The execution layer of a blockchain information system is, in essence, a
-replicated consensus state machine: every node on the consensus path must
-produce bit-identical results for the same transaction. The EVM is the most
-widely deployed smart-contract execution environment, and its just-in-time
-(JIT) compiler is progressively replacing the interpreter in mainstream
-clients, becoming a core component on the consensus-critical path. Peephole
-rewrite rules in the JIT act directly on the machine-code generation stage,
+The execution layer of a blockchain information system is a replicated
+consensus state machine: every node on the consensus path must produce
+bit-identical results for the same transaction. The EVM is the most
+widely deployed smart-contract execution environment, and its JIT
+compiler is progressively replacing the interpreter in mainstream
+clients, becoming a core component on the consensus-critical path.
+Peephole rewrites in the JIT act directly at machine-code generation,
 so their correctness bears directly on the determinism of on-chain
-execution.
+execution; a wrong equivalence judgement, deployed on only some
+clients, may trigger a chain fork.
 
-If the equivalence judgment of a peephole rewrite rule is wrong and the
-rule is deployed on only some clients, the nodes may produce inconsistent
-execution results and trigger a chain fork---one of the most expensive
-failure modes in a blockchain information system. Existing formal
-verification work on EVM peephole rewrites focuses mostly on the bytecode
-block-level abstraction. The machine-level patterns emitted by a JIT
-compiler during code generation---especially the multi-word carry chains
-that arise when the 256-bit word length is lowered onto 64-bit
-hardware---sit at an adjacent but different abstraction layer, and an
+Existing formal verification of EVM peephole rewrites mostly targets
+the bytecode block-level abstraction. The machine-level patterns
+emitted by a JIT during code generation---especially the multi-word
+carry chains that arise when the 256-bit word length is lowered onto
+64-bit hardware---sit at a different abstraction layer, and an
 end-to-end automatically verifiable rule set with a concrete deployment
-path is still missing.
+path is still missing. The root cause is how IRs model bit-level
+side-products. In LLVM IR, basic arithmetic is defined only on $N$-bit
+integers; the carry bit must be retrieved through an intrinsic that
+returns a multi-return tuple of \{result, carry\}. Rules depending on
+this side-product can be expressed only through indirect structures in
+Alive~\cite{alive} and similar tools; the bottleneck is the IR's
+expressiveness, not the SMT solver~\cite{demoura2008z3}. For a
+consensus-critical JIT, an unverifiable rule class leaves the engineer
+with three choices---drop it, ship it without verification, or rely on
+a hand-written paper proof---each sacrificing performance, consensus
+safety, or scalability.
 
-The root cause of this gap is how intermediate representations model the
-bit-level side-products of arithmetic (such as the carry bit). In a
-general-purpose intermediate representation such as LLVM IR, the basic
-arithmetic operations are defined only on $N$-bit integers; the carry bit
-must be retrieved indirectly through an intrinsic that returns a
-multi-return tuple of \{result, carry\}. The bit-level side-product is not
-a native type. Rules that depend on such side-products can therefore only
-be expressed through indirect structures in Alive~\cite{alive} and similar
-automatic equivalence-checking tools; the bottleneck is not the capacity
-of the SMT solver~\cite{demoura2008z3} but the expressiveness of the IR
-and its pattern matching. For a consensus-critical JIT, if a rule class
-cannot be verified automatically, the engineer is left with three
-choices: drop the rule, ship it without formal verification, or rely on a
-hand-written paper proof. Each choice sacrifices performance, endangers
-consensus, or fails to scale. The result is that such rules are
-systematically excluded from the optimization surface.
-
-The direction taken in this paper is the following: \emph{without
-modifying the solver and without loosening the differential-test
-threshold, expand the coverage of SMT-verifiable peephole rules by
-extending the IR with first-class bit-vector operators.} In dMIR, the
-bit-level patterns that previously required an indirect multi-return
-encoding become first-class operators, so the corresponding rules fall
-naturally within the decidable fragment of the Z3 bit-vector equivalence
-check.
+The direction taken here is: \emph{without modifying the solver or
+loosening the differential-test threshold, expand the coverage of
+SMT-verifiable peephole rules by extending the IR with first-class
+bit-vector operators.} In dMIR, the bit-level patterns that previously
+required indirect multi-return encoding become first-class operators,
+so the corresponding rules fall within the decidable fragment of Z3
+bit-vector equivalence.
 
 \paragraph{Contributions.} The contributions of this paper are as follows:
 \begin{enumerate}

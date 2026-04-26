@@ -45,49 +45,30 @@ come from x86-layer mechanical cleanup.
 \subsection{Expressiveness Limit of General-Purpose IR on the Carry Chain}
 \label{sec:expressiveness}
 
-In a general-purpose compiler IR such as LLVM, the basic arithmetic
-operations (\texttt{add}, \texttt{sub}, \texttt{mul}) are defined only on
-$N$-bit integers \texttt{iN}. To obtain the carry bit explicitly, the
-programmer must call the intrinsic
-\texttt{@llvm.uadd.with.overflow.iN}, which returns a \texttt{\{iN, i1\}}
-multi-return tuple---the result and the carry bit are packed into the
-same structure. The carry bit is therefore \emph{not a native type} in
-LLVM IR but is hidden in the second field of a struct.
-
-This design limits the expressiveness of automatic equivalence checkers.
-Following the peephole verification framework proposed by Lopes et al.\
-in Alive~\cite{alive} and inherited by Alive2~\cite{alive2},
-Table~\ref{tab:cannot-express} lists four typical carry-chain rules that
-Alive2 cannot directly verify for equivalence---Alive2 returns a
-type mismatch on the multi-return tuple or times out on the lifted
-encoding. Under Alive2 these
-four rules fall in the \textbf{not automatically verifiable} category
-(within the supported encoding); the limitation stems from how the
-general-purpose IR models the carry bit and is independent of the rule
-implementation and the solver capacity.
+In LLVM IR, basic arithmetic (\texttt{add}, \texttt{sub}, \texttt{mul})
+is defined only on $N$-bit integers \texttt{iN}; to obtain the carry
+bit, the programmer must call \texttt{@llvm.uadd.with.overflow.iN},
+which returns a \texttt{\{iN, i1\}} multi-return tuple. The carry is
+\emph{not a native type} but hidden in the second field of a struct.
+Following the Alive~\cite{alive}/Alive2~\cite{alive2} peephole
+verification framework, Table~\ref{tab:cannot-express} lists four
+carry-chain rules that Alive2 cannot directly verify (type mismatch on
+the multi-return tuple, or timeout on the lifted encoding); the
+limitation stems from IR carry modeling, independent of solver
+capacity.
 
 \input{tables/tab2-1-cannot-express}
 
-The Alive2 command lines, failure messages, and version numbers
-(Alive2 mainline v21.0, Z3 4.8.12) for all four rules are archived
-in the artifact
-(\S\ref{sec:availability}); the relation to Hydra~\cite{hydra}
-(OOPSLA 2024, a different system from the Hydra Framework at USENIX
-Security 2018 cited in \S\ref{sec:related}) is discussed in
-\S\ref{sec:related}.
-
-The bottleneck is not the capacity of the SMT
-solver~\cite{demoura2008z3}. The remaining six U256 rules of the same
-class, which do not involve multi-return carry propagation, all pass
-Alive2 equivalence checking with an average runtime of about
-60\,ms. The 256-bit bit-vector size is not an obstacle for the solver;
-the bottleneck lies in how the IR expresses the carry bit.
-
-Concretely, expressing carry-propagating addition in LLVM IR requires
-five lines around \texttt{uadd.with.overflow} to extract the result and
-carry bit from a multi-return tuple, whereas a single \texttt{ADC}
-suffices in dMIR. Native carry-bit support brings the four rules above
-into the scope of automatic equivalence checking; dMIR trades LLVM
-interoperability for automatic SMT verification of carry-chain rules,
-and Z3 discharges all four rules of Table~\ref{tab:cannot-express}
-directly under the dMIR bit-vector model.
+The Alive2 command lines, failure messages, and versions (Alive2
+mainline v21.0, Z3 4.8.12) for all four rules are archived in the
+artifact (\S\ref{sec:availability}); the relation to
+Hydra~\cite{hydra} (OOPSLA 2024, distinct from the Hydra Framework at
+USENIX Security 2018) is discussed in \S\ref{sec:related}. The
+bottleneck is not the SMT solver~\cite{demoura2008z3}: the remaining
+six U256 rules without multi-return carry pass Alive2 in $\sim$60\,ms
+average. Expressing carry-propagating addition in LLVM IR requires
+five lines around \texttt{uadd.with.overflow} to extract result and
+carry from a tuple, whereas a single \texttt{ADC} suffices in dMIR;
+native carry-bit support brings all four rules of
+Table~\ref{tab:cannot-express} into the scope of automatic equivalence
+checking under the dMIR bit-vector model.
