@@ -53,32 +53,26 @@ JIT IR/code-generation focus.
 \subsection{Limitations and Future Work}
 \label{sec:limitations}
 
-\begingroup\sloppy\emergencystretch=3em
-\begin{enumerate}[leftmargin=1.8em]
-  \item \textbf{Trusted base and x86 coverage.} The SMT check rests on
-    the dMIR bit-vector model, assumed to agree with runtime JIT
-    semantics. The 13 x86 rules are mechanical rewrites; correctness
-    relies on paired differential runs (\S\ref{sec:correctness}). A
-    formal x86 model and systematic dMIR-vs-runtime testing are future
-    work.
-  \item \textbf{Workload and modeling scope.} Speedups come from 27
-    evmone-bench benchmarks; only arithmetic and flag semantics are
-    SMT-checked, leaving gas, memory aliasing, and storage side
-    effects unmodeled.
-  \item \textbf{Dead-carry inertness at U256 heads.} The head of a U256
-    add/sub chain has a runtime third operand rather than a matchable
-    zero, so the rule is inert there by construction; it is retained
-    because it remains effective inside U256 multiplication lowering.
-  \item \textbf{Compilation-overhead measurement.} Median 0.45\,ms and
-    p95 0.87\,ms per module are single-side; EVMC has no per-stage
-    timing hook, so we report only an upper bound.
-  \item \textbf{\texttt{memory\_grow\_mstore} regression.} The 4
-    \texttt{mstore} variants slow down by 7.74--8.85\% (CV $<$2\%);
-    preliminary analysis localizes this to \texttt{optimizeCmp} failing
-    to match the
-    \texttt{SETCC}$\to$\texttt{SUBREG\_TO\_REG}$\to$\texttt{TEST}$\to$\texttt{JCC}
-    chain on the memory-expand path. The 4 \texttt{mload} siblings
-    accelerate by +6.03--+7.26\%; root cause is future work.
-\end{enumerate}
-\endgroup
+\textbf{(1) Trusted base and x86 coverage.} The SMT check rests on the
+dMIR bit-vector model, assumed to agree with runtime JIT semantics; the
+13 x86 rules are mechanical rewrites whose correctness relies on paired
+differential runs (\S\ref{sec:correctness}). A formal x86 model and
+systematic dMIR-vs-runtime testing are future work.
+\textbf{(2) Workload and modeling scope.} Speedups come from 27
+evmone-bench benchmarks; only arithmetic and flag semantics are
+SMT-checked, leaving gas, memory aliasing, and storage side effects
+unmodeled. \textbf{(3) Dead-carry inertness at U256 heads.} The head of
+a U256 add/sub chain has a runtime third operand rather than a
+matchable zero, so the rule is inert there by construction; it is
+retained because it remains effective inside U256 multiplication
+lowering. \textbf{(4) Compilation-overhead measurement.} Median
+0.45\,ms and p95 0.87\,ms per module are single-side; EVMC has no
+per-stage timing hook, so we report only an upper bound.
+\textbf{(5) \texttt{memory\_grow\_mstore} regression.} The 4
+\texttt{mstore} variants slow down by 7.74--8.85\% (CV $<$2\%);
+preliminary analysis localizes this to \texttt{optimizeCmp} failing to
+match the
+\texttt{SETCC}$\to$\texttt{SUBREG\_TO\_REG}$\to$\texttt{TEST}$\to$\texttt{JCC}
+chain on the memory-expand path; the 4 \texttt{mload} siblings
+accelerate by +6.03--+7.26\%; root cause is future work.
 

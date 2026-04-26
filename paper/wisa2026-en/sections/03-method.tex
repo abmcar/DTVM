@@ -118,9 +118,7 @@ Python (enumerator, seed-miner, canonical-form coverage comparator, Z3
 queries), the rule-set JSON, coverage output, and unit tests for the
 canonicalization and dedup paths.
 
-\subsection{Two-Tier Rule Set}
-
-\paragraph{Motivation for the split.} The dMIR layer handles
+\paragraph{Two-tier rule set.} The dMIR layer handles
 machine-independent algebraic simplification (all 70 rules Z3-verified);
 the x86 CgIR layer handles hardware-specific cleanup on registers, flags,
 and branches (13 mechanical syntactic rewrites with \textbf{no separate

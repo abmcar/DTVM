@@ -55,13 +55,12 @@ rule, while 1966 of its members pass Z3 verification.
 
 \subsection{End-to-End Performance}
 
-\paragraph{Experimental setup and noise control.} The baseline is
-upstream main (already containing 2 hard-coded x86 peephole rules); the
-enabled side adds the 83 new rules (70 dMIR + 13 x86). Both run under
-evmone-bench, 20 repetitions each, with bootstrap-estimated geometric-mean
-95\% CIs ($B{=}10\,000$). The process is pinned with \texttt{taskset -c
-2-3} at \texttt{nice -5}, with CPU turbo disabled and load average
-$<\!0.5$; benchmarks with CV $\geq 3\%$ are rerun with 30 repetitions.
+\paragraph{Setup.} Baseline is upstream main (2 hard-coded x86 rules);
+the enabled side adds the 83 new rules (70 dMIR + 13 x86). Both run
+under evmone-bench, 20 repetitions, bootstrap geomean 95\% CIs
+($B{=}10\,000$); the process is pinned with \texttt{taskset -c 2-3} at
+\texttt{nice -5}, turbo disabled, load $<\!0.5$; CV $\geq\!3\%$ runs
+are rerun at 30 reps.
 
 \input{figures/fig4-speedup}
 
@@ -86,18 +85,16 @@ contracts, while x86 cleanup gives broader ordinary gains.
 beyond $-2\%$: the 4 \texttt{memory\_grow\_mstore} variants by 7.74\%--%
 8.85\% and \texttt{weierstrudel/1} by 2.71\% (CV $<2\%$ on both sides).
 The 4 \texttt{mstore} variants cluster on the same write path
-(\S\ref{sec:limitations}, item 7), while the matched \texttt{mload}
+(\S\ref{sec:limitations}, item 5), while the matched \texttt{mload}
 variants accelerate by +6.03\%--+7.26\%; the regressions appear only in
 a $\sim$0.7\,ns/op microbenchmark, not on the macro sha1/\texttt{blake2b}
 gains.
 
-\paragraph{Compilation overhead.} Across 776 JIT unit-test modules, the
-median single-module compile time is 0.45\,ms and the 95th percentile is
-0.87\,ms, covering the full loading--analysis--codegen pipeline; dMIR
-peephole rewriting is one local pass within it. The 0.87\,ms is an
-upper bound on the whole pipeline, not the incremental cost of the
-rewrite pass; per-pass attribution is future work
-(\S\ref{sec:limitations}, item 6).
+\paragraph{Compilation overhead.} Across 776 JIT unit-test modules,
+median per-module compile time is 0.45\,ms (p95 0.87\,ms) covering the
+full loading--analysis--codegen pipeline; this is an upper bound on
+the whole pipeline rather than the incremental rewrite-pass cost
+(per-pass attribution is future work, \S\ref{sec:limitations}, item 4).
 
 \subsection{Correctness and Rule Coverage}
 \label{sec:correctness}
@@ -112,16 +109,8 @@ independently under multipass JIT and interpreter on Cancun (\texttt{-k
 fork\_Cancun} filters Prague), and the two modes agree on the same
 matrix---direct evidence of EVM consensus consistency.
 
-Compared with the CAV 2023 rule set of
-Albert et al.~\cite{verified_evm_cav23}, 7 of the 83 rules overlap as
-generic algebraic identities (add-zero, mul-zero, double-not, sub-self,
-and-fact, mul-one, or-zero) that appear in nearly every SMT-verifiable
-peephole effort. The remaining 76 rules---63 dMIR algebraic and
-multi-word cleanups plus 13 x86 register/branch/flag cleanups---live at
-abstraction layers the bytecode layer cannot reach, reflecting that the
-two rule sets target different layers.
-
 CI auditability: each dMIR rule's Z3 query is stored alongside its rule
 file and re-verified on every change; re-verifying all 70 rules takes
 $\sim$0.5\,s total (offline, distinct from the runtime compilation
-latency of \S4.2).
+latency of \S4.2). Comparison with the CAV 2023 rule set of Albert et
+al.~\cite{verified_evm_cav23} is detailed in \S\ref{sec:related}.
