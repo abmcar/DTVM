@@ -34,28 +34,29 @@ is small, but the carry chain has a special property: every
 \texttt{adc}/\texttt{sbb} on the chain depends on the carry output of the
 previous instruction, forming a strict \emph{serial data dependency}
 that instruction-level parallelism cannot hide.
-U256 instructions are therefore few in number yet contribute
-disproportionately to execution time.
-The family-attribution data in \S\ref{sec:evaluation} show that on
-U256-heavy benchmarks the U256 rule hit rate ranges from 25\% to 99.9\%
-with a very uneven distribution; on non-U256-heavy benchmarks (sha1
-family, \texttt{jump\_around}) it is well below that range and gains
-come from x86-layer mechanical cleanup.
+U256 instructions are therefore few but contribute disproportionately
+to execution time.
+Section~\ref{sec:perf} reports per-family hit rates: on U256-heavy
+benchmarks the U256 rule hit rate ranges from 25\% to 99.9\% with a
+very uneven distribution; on non-U256-heavy benchmarks (sha1 family,
+\texttt{jump\_around}) it is well below that range, and gains come
+from x86-layer mechanical cleanup.
 
 \subsection{Expressiveness Limit of General-Purpose IR on the Carry Chain}
 \label{sec:expressiveness}
 
+{\sloppy
 In LLVM IR, basic arithmetic (\texttt{add}, \texttt{sub}, \texttt{mul})
 is defined only on $N$-bit integers \texttt{iN}; to obtain the carry
-bit, the programmer must call \texttt{@llvm.uadd.with.overflow.iN},
-which returns a \texttt{\{iN, i1\}} multi-return tuple. The carry is
-\emph{not a native type} but hidden in the second field of a struct.
-Following the Alive~\cite{alive}/Alive2~\cite{alive2} peephole
-verification framework, Table~\ref{tab:cannot-express} lists four
-carry-chain rules that Alive2 cannot directly verify (type mismatch on
-the multi-return tuple, or timeout on the lifted encoding); the
-limitation stems from IR carry modeling, independent of solver
-capacity.
+bit, the programmer must call
+\texttt{@llvm.uadd.with.overflow.iN}, which returns a
+\texttt{\{iN, i1\}} multi-return tuple. The carry is \emph{not a native
+type} but hidden in the second field of a struct. Following the
+Alive/Alive2~\cite{alive,alive2} peephole verification framework,
+Table~\ref{tab:cannot-express} lists four carry-chain rules that
+Alive2 cannot directly verify (type mismatch on the multi-return
+tuple, or timeout on the lifted encoding); the limitation stems from
+IR carry modeling, independent of solver capacity.\par}
 
 \input{tables/tab2-1-cannot-express}
 

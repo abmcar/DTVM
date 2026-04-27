@@ -4,8 +4,9 @@
 
 \subsection{Rule Synthesis Output Against the General-Purpose IR}
 
-Table~\ref{tab:synth-alive2} combines the synthesis admission results
-of \S\ref{sec:synthesis} with Alive2's verification on the same rules.
+Table~\ref{tab:synth-alive2} reports the synthesis pipeline output
+of \S\ref{sec:synthesis}; Alive2's verification on the same rule
+sample is summarized in the prose below.
 
 \input{tables/tab4-1-synth-alive2}
 
@@ -31,8 +32,9 @@ that both production names match---equivalently \textbf{70/70}
 production rule names; the false-miss rate against the production set
 is therefore \textbf{0/70}.
 
-\paragraph{Scope of the coverage claim.} Two boundaries should be
-stated clearly. First, the result measures coverage of the
+\paragraph{Scope of the coverage claim.}
+\label{sec:coverage-scope}
+Two boundaries should be stated clearly. First, the result measures coverage of the
 \emph{existing} production rule set; the extended enumerator's
 left-hand-side operator tops and constant pool were broadened in light
 of an earlier 0/70 baseline that exposed mechanical gaps (missing tops
@@ -50,6 +52,7 @@ shows the search space is broad enough to contain every hand-designed
 rule, while 1966 of its members pass Z3 verification.
 
 \subsection{End-to-End Performance}
+\label{sec:perf}
 
 \paragraph{Setup.} Baseline is upstream main (2 hard-coded x86 rules);
 the enabled side adds the 83 new rules (70 dMIR + 13 x86). Both run
@@ -75,13 +78,15 @@ yet per-rewrite saving is small---confirming the two layers are
 complementary: multi-word rules concentrate gains on U256-heavy
 contracts, x86 cleanup gives broader ordinary gains.
 
-\paragraph{Regressed surface.} Five benchmarks regress beyond $-2\%$:
+\paragraph{Regressed surface.}
+{\sloppy
+Five benchmarks regress beyond $-2\%$:
 the 4 \texttt{memory\_grow\_mstore} variants by 7.74\%--8.85\% and
 \texttt{weierstrudel/1} by 2.71\% (CV $<2\%$). The 4 \texttt{mstore}
 variants cluster on the same write path (\S\ref{sec:limitations}, item
 5); the matched \texttt{mload} siblings accelerate by
-+6.03\%--+7.26\%. Regressions appear only in a $\sim$0.7\,ns/op
-microbenchmark, not on the macro sha1/\texttt{blake2b} gains.
++6.03\%--+7.25\%. Regressions appear only in a $\sim$0.7\,ns/op
+microbenchmark, not on the macro sha1/\texttt{blake2b} gains.\par}
 
 \paragraph{Compilation overhead.} Across 776 JIT unit-test modules,
 median per-module compile time is 0.45\,ms (p95 0.87\,ms) covering the
@@ -94,16 +99,17 @@ the whole pipeline rather than the incremental rewrite-pass cost
 
 \input{tables/tab4-3-correctness}
 
+{\sloppy
 Both sides run four differential categories (Table~\ref{tab:correctness})
 and agree item-by-item on state and gas, for \textbf{5884/5884} total.
 The baseline pass validates the suite; the enabled pass shows the 83 new
 rules introduce no regression. \texttt{evmone-statetest} runs
 independently under multipass JIT and interpreter on Cancun (\texttt{-k
 fork\_Cancun} filters Prague), and the two modes agree on the same
-matrix---direct evidence of EVM consensus consistency.
+matrix---direct evidence of EVM consensus consistency.\par}
 
 CI re-verifies each dMIR rule's stored Z3 query on every change; all
 70 rules re-verify in $\sim$0.5\,s offline (distinct from the runtime
-compilation latency of \S4.2). Comparison with the CAV 2023 rule set
+compilation latency of \S\ref{sec:perf}). Comparison with the CAV 2023 rule set
 of Albert et al.~\cite{verified_evm_cav23} appears in
 \S\ref{sec:related}.

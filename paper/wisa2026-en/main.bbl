@@ -116,4 +116,9 @@ Willsey, M., Nandi, C., Wang, Y.R., Flatt, O., Tatlock, Z., Panchekha, P.: egg:
   Fast and extensible equality saturation. Proc. ACM Program. Lang.
   \textbf{5}(POPL) (2021). \doi{10.1145/3434304}
 
+\bibitem{lampo2025}
+Xu, Y., Xu, H., Tian, S., Zhou, Y., Sun, M.: {LPO}: Discovering missed peephole
+  optimizations with large language models. In: Proc. ASPLOS (2026), arXiv
+  preprint arXiv:2508.16125
+
 \end{thebibliography}

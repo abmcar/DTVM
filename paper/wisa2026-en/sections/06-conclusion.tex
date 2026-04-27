@@ -10,7 +10,8 @@ complementary; the methodology---first-class carry/overflow operators
 in a domain-specific IR so that automatic equivalence checking covers
 a larger surface---generalizes to other deterministic execution
 environments with multi-word arithmetic (Wasm big-integer, zk-VM
-back-ends). Future work: a formal x86 model, dataflow-based pruning to
+back-ends). Future work includes a formal x86 model, dataflow-based pruning to
 scale beyond the 853-candidate capacity run and the 1966-rule coverage
-run reported here, and an orthogonal-composition study with
-bytecode-layer rule sets to quantify residual speedup.
+run reported here, and an orthogonal-composition study that quantifies
+the additional speedup from layering bytecode-level rules on top of
+ours.

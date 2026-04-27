@@ -19,7 +19,7 @@ multi-return carry/overflow encoding as an expressiveness limit, which
 is our starting point.
 
 LeanMLIR~\cite{leanmlir} formalizes IR-parametric peephole verification
-in Lean~4---complementary to us in targeting framework generality
+in Lean~4---complementary to ours: it targets framework generality
 rather than an instantiated, end-to-end JIT rule set.
 Hydra~\cite{hydra} discovers bit-width-independent rules but, like
 Alive2, builds on LLVM IR and inherits the multi-word-carry limit
@@ -27,8 +27,10 @@ Alive2, builds on LLVM IR and inherits the multi-word-carry limit
 apply offline enumeration plus SMT to EVM \emph{bytecode}, generating
 $\sim$993 rules with comparable equivalence guarantees; we instead
 operate on the JIT code-generation path with structured dMIR matching
-and x86 cleanup. Composing the two as orthogonal stages is future
-work.
+and x86 cleanup. Combining the two as independent passes is future work.
+Recent LLM-driven peephole synthesis on LLVM IR~\cite{lampo2025} is
+a generative complement to our deductive enumeration on a domain IR
+with first-class carry operators.
 
 \subsection{Verification Work on the Consensus-Critical Path}
 
@@ -42,13 +44,14 @@ SMT-verified peephole system contains; the remaining 76 (13 x86-layer,
 \texttt{ADC}/\texttt{SBB} simplifications, and code-generation-tied
 constant propagation and strength reduction.
 
+{\sloppy
 Runtime divergence detection---the Hydra
 Framework~\cite{hydra_framework} (distinct from~\cite{hydra}),
 multi-client detectors, EVM fuzzing, consensus test networks---catches
 faults after deployment; we harden statically. Bytecode-side EVM
 optimization~\cite{maxsmt_evm,vmil24_superinst,ist25_neural_superopt,jar25_proof_producing,scico24_translation_cert}
 operates on contract or bytecode-block boundaries, orthogonal to our
-JIT IR/code-generation focus.
+JIT IR/code-generation focus.\par}
 
 \subsection{Limitations and Future Work}
 \label{sec:limitations}

@@ -30,12 +30,12 @@ with three choices---drop it, ship it without verification, or rely on
 a hand-written paper proof---each sacrificing performance, consensus
 safety, or scalability.
 
-The direction taken here is: \emph{without modifying the solver or
-loosening the differential-test threshold, expand the coverage of
-SMT-verifiable peephole rules by extending the IR with first-class
-bit-vector operators.} In dMIR, the bit-level patterns that previously
-required indirect multi-return encoding become first-class operators,
-so the corresponding rules fall within the decidable fragment of Z3
+Our approach: extend the IR with first-class bit-vector operators so
+that SMT-verifiable peephole rules cover a larger surface, without
+modifying the solver or relaxing the differential-test threshold. In
+dMIR, the bit-level patterns that previously required indirect
+multi-return encoding become first-class operators, so the
+corresponding rules fall within the decidable fragment of Z3
 bit-vector equivalence.
 
 \paragraph{Contributions.} The contributions of this paper are as follows:
@@ -56,12 +56,12 @@ bit-vector equivalence.
     SMT check).
   \item \textbf{Capacity, admission rate, and production-rule coverage
     of the synthesis pipeline.} A capacity run evaluates \textbf{853}
-    candidates under the Z3 admission check (\textbf{98.7\%} on
-    algebraic enumeration, \textbf{21.8\%} on carry templates); a
-    separate coverage run rediscovers \textbf{70/70} production rule
-    names under canonical-LHS comparison (\S\ref{sec:evaluation}). The
-    two channels are operationally separate from production rule
-    maintenance, but the search space contains the production set.
+    candidates under Z3 admission (\textbf{98.7\%} algebraic,
+    \textbf{21.8\%} carry); a separate coverage run admits
+    \textbf{1966} rules whose canonical LHSs cover all
+    \textbf{70/70} hand-designed production rules (enumerator
+    extended from an initial 0/70 baseline; see
+    \S\ref{sec:coverage-scope}).
   \item \textbf{End-to-end performance and correctness.} Across the
     \textbf{27} EVM benchmarks of evmone-bench, the geometric-mean
     speedup is \textbf{+7.24\%} (95\% confidence interval
