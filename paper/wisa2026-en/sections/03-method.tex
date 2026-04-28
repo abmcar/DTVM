@@ -18,14 +18,14 @@ $\texttt{ADC}: \mathrm{BV}_n \times \mathrm{BV}_n \times \mathrm{BV}_1
 \to \mathrm{BV}_n \times \mathrm{BV}_1$; \texttt{SBB} is symmetric. In
 Z3~\cite{demoura2008z3}, carry propagation zero-extends both 256-bit
 operands and the 1-bit carry to 257 bits, sums once, and slices:
-\texttt{wide = ZeroExt(1,x) + ZeroExt(1,y) + ZeroExt(256,cin)}; result
-is \texttt{Extract(255,0,wide)}, carry out is
+\texttt{wide = ZeroExt(1,x) +\allowbreak ZeroExt(1,y) +\allowbreak
+ZeroExt(256,cin)}; result is \texttt{Extract(255,0,wide)}, carry out is
 \texttt{Extract(256,256,wide)}. This embeds carry propagation entirely
 in bit-vector arithmetic with no multi-return tuple or auxiliary
 predicate. The same semantics covers ordinary operators
 (\texttt{add}, \texttt{sub}, \texttt{mul}, \texttt{and}, \texttt{or},
-\texttt{xor}, shifts); the carry-chain operator is the piece a
-general-purpose IR lacks.
+\texttt{xor}, shifts); the carry-chain operator is the operator that
+general-purpose IRs lack.
 
 \paragraph{Trusted base.} The SMT check assumes the dMIR bit-vector model
 agrees with the JIT runtime; the 5884 differential tests of
@@ -51,7 +51,7 @@ hand-written carry templates---and measures the Z3 admission rate; this
 characterizes solver throughput and the typical false-positive boundary.
 The \emph{coverage run} extends the same algebraic enumerator with
 additional left-hand-side operator tops and a constant-pool widening,
-plus a pattern-template instantiation channel reusing the seed-miner
+plus a pattern-template instantiation channel reusing the template miner
 configuration; this measures rediscovery of the 70 hand-designed dMIR
 production rules; coverage results appear in \S\ref{sec:evaluation}.
 
@@ -64,9 +64,11 @@ carry-chain operators.
 
 \paragraph{Throughput and admission rate.} The capacity run admits
 765/775 algebraic candidates (98.7\%, 10 timeouts) and 17/78 carry
-templates (21.8\%, 61 semantic rejections); the gap shows hand-written
-carry templates routinely reach the non-equivalence boundary where the
-SMT check is essential. Full data: Table~\ref{tab:synth-alive2}
+templates (21.8\%, 61 semantic rejections): carry-template admission is
+limited by 61 semantic rejections, mostly width-mismatch edge cases
+(full breakdown in the artifact), while the algebraic side has only 10
+timeouts and zero semantic rejections. Full data:
+Table~\ref{tab:synth-alive2}
 (\S\ref{sec:evaluation}).
 
 \paragraph{Production rule coverage (methodology).} The coverage run
@@ -94,7 +96,7 @@ $\texttt{sub}(0, c_f)$); $\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(0, c_f)$
 fails at $x{=}1, c_f{=}0$ (correct form $\texttt{sub}(x, c_f)$). Both
 reflect modular-carry traps: ignored carry input and confused operand
 polarity. The artifact ships $\sim$2400 lines of Python (enumerator,
-seed-miner, canonical comparator, Z3 queries), the rule-set JSON,
+template miner, canonical comparator, Z3 queries), the rule-set JSON,
 coverage output, and unit tests for canonicalization/dedup.
 
 \paragraph{Two-tier rule set.} The dMIR layer handles
@@ -102,31 +104,29 @@ machine-independent algebraic simplification (all 70 rules Z3-verified);
 the x86 CgIR layer handles hardware-specific cleanup on registers, flags,
 and branches (13 mechanical syntactic rewrites with \textbf{no separate
 SMT script}, covered by the matched 5884-test suites of
-\S\ref{sec:correctness}). A formal x86 model with SMT check is future
+\S\ref{sec:correctness} (Table~\ref{tab:correctness}, all four
+categories item-by-item identical)). A formal x86 SMT model is future
 work (\S\ref{sec:limitations}).
 
 \input{tables/tab3-1-rule-classes}
 
-Table~\ref{tab:rule-classes} classifies the rules. On the dMIR layer,
-Boolean normalization dominates (42 rules, 60\%, broadly covered by
-algebraic enumeration); algebraic identities (15) include add-zero and
-mul-one; identity-elimination (10) covers forms like $\texttt{sub}(x,x)
-\to 0$ and $\texttt{and}(x,x) \to x$. The x86 layer is dominated by
-redundant compare/test cleanup (8 rules), with 2 each for
-branch-fallthrough and no-op elimination. The two layers are
-complementary: dMIR rules dominate U256-heavy contracts (e.g.\
-\texttt{weierstrudel}), x86 cleanup dominates sha1; per-family hit
-rates are reported in \S\ref{sec:evaluation}.
+Table~\ref{tab:rule-classes} groups the rules by logical class.
+Boolean normalization and algebraic identities together cover most dMIR
+rules---these are precisely the patterns the canonical-form enumerator
+(\S\ref{sec:synthesis}) is designed to rediscover. Identity-elimination
+and shift-zero patterns admit Z3-discharged proofs in milliseconds,
+while the carry-chain class is the one that motivates the operator
+extension of \S\ref{sec:bvmodel}.
 
 \paragraph{Asymmetric verification workflow.} The 70 dMIR production
 rules are designed manually from runtime performance profiles and
 submitted one by one to the Z3 equivalence check
-(\S\ref{sec:synthesis}). The synthesis pipeline is an independent
-measurement channel: it does not drive production rule maintenance,
+(\S\ref{sec:synthesis}). The synthesis pipeline is a measurement
+channel: it does not drive production rule maintenance,
 although coverage results in \S\ref{sec:evaluation} show its search
 space contains the production set; production rule selection remains
 driven by runtime profiles rather than enumeration order, so the two
 channels are kept separate by selection criterion rather than by
 expressive scope. The x86-layer rules are covered by
 code review and the matched test suites. The limitations from this
-asymmetry are listed explicitly in \S\ref{sec:limitations}.
+asymmetry are listed in \S\ref{sec:limitations}.

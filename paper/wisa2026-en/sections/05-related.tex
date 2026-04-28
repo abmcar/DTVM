@@ -39,7 +39,7 @@ rule set on EVM bytecode blocks via offline stack-layer bit-vector
 identities. Our scope differs: JIT IR and machine-code layers, SMT
 admission at synthesis time, multi-word carry chains. Their 14
 \texttt{forves} rules overlap our 83 in 7 standard identities any
-SMT-verified peephole system contains; the remaining 76 (13 x86-layer,
+SMT-verified peephole system contains; the remaining 76 (13 x86-layer rules outside their bytecode scope,
 63 dMIR-layer) cover decomposed carry chains,
 \texttt{ADC}/\texttt{SBB} simplifications, and code-generation-tied
 constant propagation and strength reduction.
@@ -56,26 +56,24 @@ JIT IR/code-generation focus.\par}
 \subsection{Limitations and Future Work}
 \label{sec:limitations}
 
-\textbf{(1) Trusted base and x86 coverage.} The SMT check rests on the
-dMIR bit-vector model, assumed to agree with runtime JIT semantics; the
-13 x86 rules are mechanical rewrites whose correctness relies on paired
-differential runs (\S\ref{sec:correctness}). A formal x86 model and
-systematic dMIR-vs-runtime testing are future work.
-\textbf{(2) Workload and modeling scope.} Speedups come from 27
+\begin{itemize}[leftmargin=0.8em,labelsep=0.35em,itemsep=0pt,topsep=0pt]
+\item \textbf{(1) Trusted base and x86 coverage.} The SMT check assumes
+the dMIR bit-vector model agrees with JIT semantics; the 13 x86 rules
+rely on paired differential runs (\S\ref{sec:correctness}). A formal
+x86 model and systematic dMIR-vs-runtime testing are future work.
+\item \textbf{(2) Workload and modeling scope.} Speedups come from 27
 evmone-bench benchmarks; only arithmetic and flag semantics are
-SMT-checked, leaving gas, memory aliasing, and storage side effects
-unmodeled. \textbf{(3) Dead-carry inertness at U256 heads.} The head of
-a U256 add/sub chain has a runtime third operand rather than a
-matchable zero, so the rule is inert there by construction; it is
-retained because it remains effective inside U256 multiplication
-lowering. \textbf{(4) Compilation-overhead measurement.} Median
-0.45\,ms and p95 0.87\,ms per module are single-side; EVMC has no
+SMT-checked, leaving gas, memory aliasing, and storage unmodeled.
+\item \textbf{(3) Dead-carry inertness at U256 heads.} A U256 add/sub
+head has a runtime third operand rather than matchable zero, so the
+rule is inert there but still effective inside U256 multiplication
+lowering.
+\item \textbf{(4) Compilation-overhead measurement.} Median 0.45\,ms
+and p95 0.87\,ms per module are single-side because EVMC has no
 per-stage timing hook, so we report only an upper bound.
-\textbf{(5) \texttt{memory\_grow\_mstore} regression.} The 4
+\item \textbf{(5) \texttt{memory\_grow\_mstore} regression.} The 4
 \texttt{mstore} variants slow down by 7.74--8.85\% (CV $<$2\%);
-preliminary analysis localizes this to \texttt{optimizeCmp} failing to
-match the
-\texttt{SETCC}$\to$\texttt{SUBREG\_TO\_REG}$\to$\texttt{TEST}$\to$\texttt{JCC}
-chain on the memory-expand path; the 4 \texttt{mload} siblings
-accelerate by +6.03--+7.26\%; root cause is future work.
-
+analysis points to \texttt{optimizeCmp} missing the cmp-merge chain on
+the memory-expand path; the 4 \texttt{mload} siblings gain
++6.03--+7.26\%; root cause is future work.
+\end{itemize}

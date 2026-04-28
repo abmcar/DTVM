@@ -16,9 +16,9 @@ Existing formal verification of EVM peephole rewrites mostly targets
 the bytecode block-level abstraction. The machine-level patterns
 emitted by a JIT during code generation---especially the multi-word
 carry chains that arise when the 256-bit word length is lowered onto
-64-bit hardware---sit at a different abstraction layer, and an
-end-to-end automatically verifiable rule set with a concrete deployment
-path is still missing. The root cause is how IRs model bit-level
+64-bit hardware---sit at a different abstraction layer, and
+no end-to-end verified rule set has yet been shown in a deployable
+JIT. The root cause is how IRs model bit-level
 side-products. In LLVM IR, basic arithmetic is defined only on $N$-bit
 integers; the carry bit must be retrieved through an intrinsic that
 returns a multi-return tuple of \{result, carry\}. Rules depending on
@@ -26,9 +26,8 @@ this side-product can be expressed only through indirect structures in
 Alive~\cite{alive} and similar tools; the bottleneck is the IR's
 expressiveness, not the SMT solver~\cite{demoura2008z3}. For a
 consensus-critical JIT, an unverifiable rule class leaves the engineer
-with three choices---drop it, ship it without verification, or rely on
-a hand-written paper proof---each sacrificing performance, consensus
-safety, or scalability.
+with three choices---drop it (performance), ship it without verification
+(safety), or hand-prove it (scalability).
 
 Our approach: extend the IR with first-class bit-vector operators so
 that SMT-verifiable peephole rules cover a larger surface, without
@@ -40,8 +39,8 @@ bit-vector equivalence.
 
 \paragraph{Contributions.} The contributions of this paper are as follows:
 \begin{enumerate}
-  \item \textbf{An automatically verifiable peephole system through
-    IR-side extension.} Bit-level side-products that a general-purpose IR
+  \item \textbf{A dMIR extension that makes carry-chain peepholes
+    automatically verifiable.} Bit-level side-products that a general-purpose IR
     can only carry through a multi-return tuple become first-class
     bit-vector operators of dMIR. Without modifying the solver and
     without loosening the differential-test threshold, the IR extension
@@ -59,9 +58,8 @@ bit-vector equivalence.
     candidates under Z3 admission (\textbf{98.7\%} algebraic,
     \textbf{21.8\%} carry); a separate coverage run admits
     \textbf{1966} rules whose canonical LHSs cover all
-    \textbf{70/70} hand-designed production rules (enumerator
-    extended from an initial 0/70 baseline; see
-    \S\ref{sec:coverage-scope}).
+    \textbf{70/70} hand-designed production rules (post-hoc coverage;
+    see \S\ref{sec:coverage-scope}).
   \item \textbf{End-to-end performance and correctness.} Across the
     \textbf{27} EVM benchmarks of evmone-bench, the geometric-mean
     speedup is \textbf{+7.24\%} (95\% confidence interval

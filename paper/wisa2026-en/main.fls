@@ -438,9 +438,11 @@ INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sfbx1000.pfb
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sfbx1200.pfb
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sfbx1440.pfb
+INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sfrm0600.pfb
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sfrm0700.pfb
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sfrm0900.pfb
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb
+INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sfti0700.pfb
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sfti1000.pfb
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sftt0800.pfb
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/cm-super/sftt0900.pfb

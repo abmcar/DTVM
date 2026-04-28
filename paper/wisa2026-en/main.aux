@@ -12,13 +12,12 @@
 \citation{verified_evm_cav23}
 \@writefile{toc}{\contentsline {paragraph}{Contributions.}{2}{section*.2}\protected@file@percent }
 \citation{alive,alive2}
-\citation{hydra}
 \citation{demoura2008z3}
 \@writefile{toc}{\contentsline {section}{\numberline {2}Background and Motivation}{3}{section.2}\protected@file@percent }
 \newlabel{sec:problem}{{2}{3}{Background and Motivation}{section.2}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Hardware Cost and Carry-Chain Shape of U256 Arithmetic}{3}{subsection.2.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Expressiveness Limit of General-Purpose IR on the Carry Chain}{3}{subsection.2.2}\protected@file@percent }
-\newlabel{sec:expressiveness}{{2.2}{3}{Expressiveness Limit of General-Purpose IR on the Carry Chain}{subsection.2.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Carry-Chain Expressiveness Limits in General-Purpose IRs}{3}{subsection.2.2}\protected@file@percent }
+\newlabel{sec:expressiveness}{{2.2}{3}{Carry-Chain Expressiveness Limits in General-Purpose IRs}{subsection.2.2}{}}
 \citation{demoura2008z3}
 \@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Four typical carry-chain rules that Alive2 (based on LLVM IR) cannot directly verify for equivalence because of the multi-return tuple encoding. The first three are single \texttt  {ADC}/\texttt  {SBB} rules where the right-hand side drops the carry output; the fourth is a 4-limb carry-chain merge rule.}}{4}{table.1}\protected@file@percent }
 \newlabel{tab:cannot-express}{{1}{4}{Four typical carry-chain rules that Alive2 (based on LLVM IR) cannot directly verify for equivalence because of the multi-return tuple encoding. The first three are single \texttt {ADC}/\texttt {SBB} rules where the right-hand side drops the carry output; the fourth is a 4-limb carry-chain merge rule}{table.1}{}}
@@ -26,9 +25,9 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}dMIR Bit-Vector Semantics and Carry-Chain Operators}{4}{subsection.3.1}\protected@file@percent }
 \newlabel{sec:bvmodel}{{3.1}{4}{dMIR Bit-Vector Semantics and Carry-Chain Operators}{subsection.3.1}{}}
 \@writefile{toc}{\contentsline {paragraph}{Trusted base.}{4}{section*.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Candidate Enumeration and SMT Admission}{5}{subsection.3.2}\protected@file@percent }
-\newlabel{sec:synthesis}{{3.2}{5}{Candidate Enumeration and SMT Admission}{subsection.3.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{Admission check.}{5}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Candidate Enumeration and SMT Admission}{4}{subsection.3.2}\protected@file@percent }
+\newlabel{sec:synthesis}{{3.2}{4}{Candidate Enumeration and SMT Admission}{subsection.3.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{Admission check.}{4}{section*.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Two enumeration runs.}{5}{section*.5}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Throughput and admission rate.}{5}{section*.6}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Production rule coverage (methodology).}{5}{section*.7}\protected@file@percent }
@@ -45,8 +44,8 @@
 \@writefile{toc}{\contentsline {paragraph}{Production rule coverage.}{7}{section*.11}\protected@file@percent }
 \newlabel{sec:coverage-scope}{{4.1}{7}{Scope of the coverage claim}{section*.12}{}}
 \@writefile{toc}{\contentsline {paragraph}{Scope of the coverage claim.}{7}{section*.12}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Speedup on 27 benchmarks from enabling the peephole rewrite rule set over the disabled baseline (error bars are 95\% confidence intervals). The horizontal line at zero marks the no-change baseline; the dashed line at \textbf  {+7.24\%} marks the geometric-mean speedup across all 27 benchmarks. From left to right, the benchmarks are grouped into four clusters by workload type: U256-heavy (1--11), hash (12--18), arithmetic/logic (19--24), and control flow (25--27).}}{8}{figure.1}\protected@file@percent }
-\newlabel{fig:speedup}{{1}{8}{Speedup on 27 benchmarks from enabling the peephole rewrite rule set over the disabled baseline (error bars are 95\% confidence intervals). The horizontal line at zero marks the no-change baseline; the dashed line at \textbf {+7.24\%} marks the geometric-mean speedup across all 27 benchmarks. From left to right, the benchmarks are grouped into four clusters by workload type: U256-heavy (1--11), hash (12--18), arithmetic/logic (19--24), and control flow (25--27)}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Speedup on 27 benchmarks from enabling the peephole rewrite rule set over the disabled baseline (error bars are 95\% confidence intervals). The horizontal line at zero marks the no-change baseline; the dashed line at \textbf  {+7.24\%} marks the geometric-mean speedup across all 27 benchmarks. From left to right, the benchmarks are grouped into four clusters by workload type: U256-heavy (0--10), Hash (11--17), Arithmetic-Logic (18--23), and Control-flow (24--26).}}{8}{figure.1}\protected@file@percent }
+\newlabel{fig:speedup}{{1}{8}{Speedup on 27 benchmarks from enabling the peephole rewrite rule set over the disabled baseline (error bars are 95\% confidence intervals). The horizontal line at zero marks the no-change baseline; the dashed line at \textbf {+7.24\%} marks the geometric-mean speedup across all 27 benchmarks. From left to right, the benchmarks are grouped into four clusters by workload type: U256-heavy (0--10), Hash (11--17), Arithmetic-Logic (18--23), and Control-flow (24--26)}{figure.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2}End-to-End Performance}{8}{subsection.4.2}\protected@file@percent }
 \newlabel{sec:perf}{{4.2}{8}{End-to-End Performance}{subsection.4.2}{}}
 \@writefile{toc}{\contentsline {paragraph}{Setup.}{8}{section*.13}\protected@file@percent }
@@ -82,6 +81,7 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Verification Work on the Consensus-Critical Path}{10}{subsection.5.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Limitations and Future Work}{10}{subsection.5.3}\protected@file@percent }
 \newlabel{sec:limitations}{{5.3}{10}{Limitations and Future Work}{subsection.5.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{10}{section.6}\protected@file@percent }
 \bibstyle{splncs04}
 \bibdata{references}
 \bibcite{ist25_neural_superopt}{1}
@@ -92,10 +92,9 @@
 \bibcite{leanmlir}{6}
 \bibcite{hydra_framework}{7}
 \bibcite{stratified}{8}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{11}{section.6}\protected@file@percent }
-\newlabel{sec:availability}{{6}{11}{Conclusion}{section*.16}{}}
 \bibcite{vmil24_superinst}{9}
 \bibcite{denali_pldi02}{10}
+\newlabel{sec:availability}{{6}{11}{Conclusion}{section*.16}{}}
 \bibcite{scico24_translation_cert}{11}
 \bibcite{alive2}{12}
 \bibcite{alive}{13}

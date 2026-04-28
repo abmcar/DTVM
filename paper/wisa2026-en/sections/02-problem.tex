@@ -28,21 +28,22 @@ both sides for a typical U256 addition:
 Among all instructions emitted by the JIT, instructions directly tied to
 U256 multi-word arithmetic account for about \textbf{2.15\%} (weighted
 mean across the U256-heavy subset of the 27 benchmarks in
-\S\ref{sec:evaluation}---the leftmost cluster ``U256-heavy (1--11)'' in
+\S\ref{sec:evaluation}---the leftmost cluster ``U256-heavy (0--10)'' in
 Figure~\ref{fig:speedup}). The share
 is small, but the carry chain has a special property: every
 \texttt{adc}/\texttt{sbb} on the chain depends on the carry output of the
 previous instruction, forming a strict \emph{serial data dependency}
 that instruction-level parallelism cannot hide.
-U256 instructions are therefore few but contribute disproportionately
-to execution time.
+Their serial dependencies still make them plausible optimization
+targets; \S\ref{sec:perf} confirms the chain accounts for the bulk of
+the +7.24\% geo-mean despite being 2.15\% of dynamic instructions.
 Section~\ref{sec:perf} reports per-family hit rates: on U256-heavy
 benchmarks the U256 rule hit rate ranges from 25\% to 99.9\% with a
 very uneven distribution; on non-U256-heavy benchmarks (sha1 family,
 \texttt{jump\_around}) it is well below that range, and gains come
 from x86-layer mechanical cleanup.
 
-\subsection{Expressiveness Limit of General-Purpose IR on the Carry Chain}
+\subsection{Carry-Chain Expressiveness Limits in General-Purpose IRs}
 \label{sec:expressiveness}
 
 {\sloppy
@@ -60,16 +61,15 @@ IR carry modeling, independent of solver capacity.\par}
 
 \input{tables/tab2-1-cannot-express}
 
-The Alive2 command lines, failure messages, and versions (Alive2
-mainline v21.0, Z3 4.8.12) for all four rules are archived in the
-artifact (\S\ref{sec:availability}); the relation to
-Hydra~\cite{hydra} (OOPSLA 2024, distinct from the Hydra Framework at
-USENIX Security 2018) is discussed in \S\ref{sec:related}. The
-bottleneck is not the SMT solver~\cite{demoura2008z3}: the remaining
-six U256 rules without multi-return carry pass Alive2 in $\sim$60\,ms
-average. Expressing carry-propagating addition in LLVM IR requires
-five lines around \texttt{uadd.with.overflow} to extract result and
-carry from a tuple, whereas a single \texttt{ADC} suffices in dMIR;
-native carry-bit support brings all four rules of
-Table~\ref{tab:cannot-express} into the scope of automatic equivalence
-checking under the dMIR bit-vector model.
+The four rules' Alive2 command lines, failure messages, and tool
+versions (Alive2 v21.0, Z3 4.8.12) are archived in the artifact
+(\S\ref{sec:availability}).
+
+The bottleneck is not the SMT solver~\cite{demoura2008z3}: the six
+U256 rules without multi-return carry pass Alive2 in $\sim$60\,ms each.
+
+{\sloppy
+In LLVM IR, expressing one carry-propagating addition takes five lines
+around \texttt{uadd.with.overflow}; in dMIR, a single \texttt{ADC}
+suffices. Native carry-bit support brings all four rules into the scope
+of automatic equivalence checking.\par}
