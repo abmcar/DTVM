@@ -55,6 +55,9 @@
     font=\scriptsize,
     draw=none,
   },
+  legend image code/.code={%
+    \draw[#1] (0cm,-0.08cm) rectangle (0.45cm,0.08cm);%
+  },
   clip=false,
 ]
 
@@ -63,11 +66,11 @@
 
 % geometric-mean reference line (+7.24%)
 \draw[blue!70!black, dashed, thick] (axis cs:-0.8,7.24) -- (axis cs:26.8,7.24);
-\node[blue!70!black, font=\scriptsize, anchor=west, fill=white, inner sep=1pt]
-  at (axis cs:-0.5,7.24) {geomean +7.24\%};
+\node[blue!70!black, font=\scriptsize, anchor=south west, fill=white, inner sep=1pt]
+  at (axis cs:0,7.24) {geomean\,+7.24\%};
 
 % group: U256-heavy
-\addplot[fill=black!20, draw=black, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
+\addplot[fill=black!20, draw=black, bar shift=0pt, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
   table[x=x, y=y, y error minus=ym, y error plus=yp] {
     x y ym yp
     0 7.2549 0.8283 0.8210
@@ -85,7 +88,7 @@
 \addlegendentry{U256-heavy}
 
 % group: Hash
-\addplot[pattern=north east lines, draw=black, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
+\addplot[pattern=north east lines, draw=black, bar shift=0pt, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
   table[x=x, y=y, y error minus=ym, y error plus=yp] {
     x y ym yp
     11 24.8066 0.6719 0.6660
@@ -99,7 +102,7 @@
 \addlegendentry{Hash}
 
 % group: Algorithmic
-\addplot[pattern=crosshatch, draw=black, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
+\addplot[pattern=crosshatch, draw=black, bar shift=0pt, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
   table[x=x, y=y, y error minus=ym, y error plus=yp] {
     x y ym yp
     18 17.0420 0.7116 0.7056
@@ -109,26 +112,29 @@
     22 0.6157 1.3616 1.3432
     23 -1.1836 1.2136 1.1992
   };
-\addlegendentry{Arithmetic/Logic}
+\addlegendentry{Arithmetic-Logic}
 
 % group: Control-flow
-\addplot[pattern=dots, draw=black, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
+\addplot[pattern=dots, draw=black, bar shift=0pt, error bars/.cd, y dir=both, y explicit, error bar style={thin}, error mark options={rotate=90, mark size=1.5pt}]
   table[x=x, y=y, y error minus=ym, y error plus=yp] {
     x y ym yp
     24 25.7880 0.6690 0.6630
     25 4.8763 0.6924 0.6873
     26 1.5885 1.2836 1.2671
   };
-\addlegendentry{Control flow}
+\addlegendentry{Control-flow}
 
 \end{axis}
 \end{tikzpicture}
+\par\vspace{-4pt}
+{\scriptsize \emph{Labels:} mg=\texttt{memory\_grow}, b2=\texttt{blake2b}, sha1\_s=\texttt{sha1\_shifts}, sha1\_d=\texttt{sha1\_divs}, struct\_a=\texttt{struct\_array}, swap\_m=\texttt{swap\_method}, signext=\texttt{signextend}, JDEST=\texttt{JUMPDEST\_n0}, loop\_jd=\texttt{loop\_jumpdest}, jump\_ar=\texttt{jump\_around}, weier=\texttt{weierstrudel}, snail=\texttt{snailtracer}.}
+\vspace{-4pt}
 \caption{Speedup on 27 benchmarks from enabling the peephole rewrite
 rule set over the disabled baseline (error bars are 95\% confidence
 intervals). The horizontal line at zero marks the no-change baseline;
 the dashed line at \textbf{+7.24\%} marks the geometric-mean speedup
 across all 27 benchmarks. From left to right, the benchmarks are
-grouped into four clusters by workload type: U256-heavy (1--11),
-hash (12--18), arithmetic/logic (19--24), and control flow (25--27).}
+grouped into four clusters by workload type: U256-heavy (0--10),
+Hash (11--17), Arithmetic-Logic (18--23), and Control-flow (24--26).}
 \label{fig:speedup}
 \end{figure*}

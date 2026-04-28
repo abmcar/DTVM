@@ -2,16 +2,14 @@
 \section{Conclusion}
 
 This paper builds a two-tier peephole rewrite system for the
-deterministic EVM JIT: the 70 dMIR rules pass the Z3 bit-vector
-equivalence check, and the 13 x86 rules are covered by paired
-differential runs. A small intersection with Albert et
-al.~\cite{verified_evm_cav23} on bytecode-level identities is
-complementary; the methodology---first-class carry/overflow operators
-in a domain-specific IR so that automatic equivalence checking covers
-a larger surface---generalizes to other deterministic execution
+deterministic EVM JIT: 70 dMIR rules pass Z3 bit-vector equivalence
+checks, and 13 x86 rules are covered by paired differential runs. A
+small intersection with Albert et al.~\cite{verified_evm_cav23} on
+bytecode-level identities is complementary; first-class carry/overflow
+operators in a domain-specific IR let automatic equivalence checking
+cover a larger surface and generalize to other deterministic execution
 environments with multi-word arithmetic (Wasm big-integer, zk-VM
-back-ends). Future work includes a formal x86 model, dataflow-based pruning to
-scale beyond the 853-candidate capacity run and the 1966-rule coverage
-run reported here, and an orthogonal-composition study that quantifies
-the additional speedup from layering bytecode-level rules on top of
-ours.
+back-ends). Future work includes a formal x86 model, dataflow-based
+pruning beyond the 853-candidate capacity run and the 1966-rule coverage
+run, and an orthogonal-composition study quantifying the additional
+speedup from layering bytecode-level rules on top of ours.
