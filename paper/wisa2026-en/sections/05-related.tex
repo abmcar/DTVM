@@ -2,78 +2,70 @@
 \section{Related Work and Discussion}
 \label{sec:related}
 
-\subsection{Verifiable Peephole Optimization Frameworks}
+\subsection{Peephole Optimization Frameworks}
 
-We position our work along three axes: abstraction layer, verification
-method, and carry-chain coverage. The synthesize-then-verify paradigm
-originates with Denali~\cite{denali_pldi02} and
-Bansal--Aiken~\cite{bansal_aiken_asplos06}; STOKE~\cite{stoke} and
-Stratified Synthesis~\cite{stratified} pursue stochastic and learning
-variants, while egg~\cite{egg} offers a non-SMT route via equality
-saturation. SMT-based verifiable peephole optimization is exemplified
-by Alive~\cite{alive}, Alive2~\cite{alive2}, Souper~\cite{souper}, and
-PEEK~\cite{peek}, with dataflow filtering~\cite{dataflow_pruning}
-accelerating the pipeline. We follow this paradigm but shift the IR
-under verification from LLVM IR to dMIR; Alive itself flagged LLVM's
-multi-return carry/overflow encoding as an expressiveness limit, which
-is our starting point.
+{\sloppy
+We position our work by abstraction layer, verification method, and
+carry-chain coverage. Classical synthesize-then-verify systems include
+Denali~\cite{denali_pldi02}, Bansal--Aiken~\cite{bansal_aiken_asplos06},
+STOKE~\cite{stoke}, Stratified Synthesis~\cite{stratified}, and
+egg~\cite{egg}; SMT-based peephole checking is exemplified by
+Alive~\cite{alive}, Alive2~\cite{alive2}, Souper~\cite{souper}, and
+PEEK~\cite{peek}; dataflow filtering~\cite{dataflow_pruning} accelerates
+search; recent LLM-driven peephole synthesis on LLVM
+IR~\cite{lampo2025} is a generative complement to deductive enumeration.
+We follow the verify-after-enumeration paradigm but move the checked IR
+from LLVM IR to dMIR, addressing the multi-return carry and overflow
+encoding limit that motivates this paper.\par}
 
+{\sloppy
 LeanMLIR~\cite{leanmlir} formalizes IR-parametric peephole verification
-in Lean~4---complementary to ours: it targets framework generality
-rather than an instantiated, end-to-end JIT rule set.
-Hydra~\cite{hydra} discovers bit-width-independent rules but, like
-Alive2, builds on LLVM IR and inherits the multi-word-carry limit
-(\S\ref{sec:problem}). Schett and Nagele~\cite{fmbc20_evm_peephole}
-apply offline enumeration plus SMT to EVM \emph{bytecode}, generating
-$\sim$993 rules with comparable equivalence guarantees; we instead
-operate on the JIT code-generation path with structured dMIR matching
-and x86 cleanup. Combining the two as independent passes is future work.
-Recent LLM-driven peephole synthesis on LLVM IR~\cite{lampo2025} is
-a generative complement to our deductive enumeration on a domain IR
-with first-class carry operators.
+in Lean~4, whereas this paper reports an instantiated EVM JIT rule set.
+Hydra~\cite{hydra} generalizes bit-width-independent rules but, like
+Alive2, builds on LLVM IR and inherits the multi-return tuple limit on
+the four carry-chain examples in Table~\ref{tab:cannot-express}; closing
+that gap via an auxiliary lifted encoding is orthogonal to our IR-extension
+contribution. Schett and Nagele~\cite{fmbc20_evm_peephole} enumerate
+SMT-checked EVM \emph{bytecode} rules; we instead target the JIT
+code-generation path with dMIR matching and x86 cleanup.\par}
 
 \subsection{Verification Work on the Consensus-Critical Path}
 
-Albert et al.~\cite{verified_evm_cav23} give a Coq proof of an AOT
-rule set on EVM bytecode blocks via offline stack-layer bit-vector
-identities. Our scope differs: JIT IR and machine-code layers, SMT
-admission at synthesis time, multi-word carry chains. Their 14
-\texttt{forves} rules overlap our 83 in 7 standard identities any
-SMT-verified peephole system contains; the remaining 76 (13 x86-layer rules outside their bytecode scope,
-63 dMIR-layer) cover decomposed carry chains,
-\texttt{ADC}/\texttt{SBB} simplifications, and code-generation-tied
-constant propagation and strength reduction.
+Albert et al.~\cite{verified_evm_cav23} give a Coq proof of AOT EVM
+bytecode-block rules. Our scope sits at lower abstraction layers: JIT IR
+and machine-code, SMT admission at synthesis time, and multi-word carry
+chains. Seven rules overlap: 7/83 in our set and 7/14 in their
+\texttt{forves} set. This supports a complementary-scope reading rather
+than a superset claim: the remaining 76 cover dMIR algebraic and Boolean
+simplifications (including ADC/SBB carry-chain rewrites that motivate
+\S\ref{sec:bvmodel}) plus 13 x86 cleanup rewrites, none of which are
+reachable from the bytecode-block abstraction.
 
 {\sloppy
-Runtime divergence detection---the Hydra
-Framework~\cite{hydra_framework} (distinct from~\cite{hydra}),
+Runtime divergence detection---Hydra Framework~\cite{hydra_framework},
 multi-client detectors, EVM fuzzing, consensus test networks---catches
-faults after deployment; we harden statically. Bytecode-side EVM
+faults after deployment; our workflow validates rules before deployment.
+Bytecode-side EVM
 optimization~\cite{maxsmt_evm,vmil24_superinst,ist25_neural_superopt,jar25_proof_producing,scico24_translation_cert}
-operates on contract or bytecode-block boundaries, orthogonal to our
-JIT IR/code-generation focus.\par}
+is orthogonal to our JIT IR/code-generation focus.\par}
 
 \subsection{Limitations and Future Work}
 \label{sec:limitations}
 
-\begin{itemize}[leftmargin=0.8em,labelsep=0.35em,itemsep=0pt,topsep=0pt]
+\begin{itemize}[leftmargin=0.8em,labelsep=0.35em,itemsep=-1pt,topsep=0pt]
 \item \textbf{(1) Trusted base and x86 coverage.} The SMT check assumes
-the dMIR bit-vector model agrees with JIT semantics; the 13 x86 rules
-rely on paired differential runs (\S\ref{sec:correctness}). A formal
-x86 model and systematic dMIR-vs-runtime testing are future work.
-\item \textbf{(2) Workload and modeling scope.} Speedups come from 27
-evmone-bench benchmarks; only arithmetic and flag semantics are
-SMT-checked, leaving gas, memory aliasing, and storage unmodeled.
+the dMIR model agrees with JIT semantics; the 13 x86 rules rely on paired
+differential runs. Formal x86 modeling is future work.
+\item \textbf{(2) Workload, baseline, and modeling scope.} Speedups come
+from a same-engine upstream-\texttt{main} comparison on 27 evmone-bench
+benchmarks, not evmone/revm; only arithmetic and flags are SMT-checked,
+leaving gas, memory aliasing, and storage unmodeled.
 \item \textbf{(3) Dead-carry inertness at U256 heads.} A U256 add/sub
-head has a runtime third operand rather than matchable zero, so the
-rule is inert there but still effective inside U256 multiplication
-lowering.
-\item \textbf{(4) Compilation-overhead measurement.} Median 0.45\,ms
-and p95 0.87\,ms per module are single-side because EVMC has no
-per-stage timing hook, so we report only an upper bound.
-\item \textbf{(5) \texttt{memory\_grow\_mstore} regression.} The 4
-\texttt{mstore} variants slow down by 7.74--8.85\% (CV $<$2\%);
-analysis points to \texttt{optimizeCmp} missing the cmp-merge chain on
-the memory-expand path; the 4 \texttt{mload} siblings gain
-+6.03--+7.26\%; root cause is future work.
+head has a runtime third operand rather than matchable zero, so the rule
+is inert there but still effective inside U256 multiplication lowering.
+\item \textbf{(4) Compilation overhead.} Median 0.45\,ms and p95
+0.87\,ms per module are rules-enabled-side full-pipeline numbers; EVMC
+exposes no per-stage timing hook, so we cannot attribute the cost to
+individual passes, and baseline-side timing requires a separate
+instrumented build.
 \end{itemize}

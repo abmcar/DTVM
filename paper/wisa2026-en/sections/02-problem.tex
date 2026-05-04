@@ -1,6 +1,5 @@
 % 02-problem.tex — §2 Background and motivation
 \section{Background and Motivation}
-\label{sec:problem}
 
 \subsection{Hardware Cost and Carry-Chain Shape of U256 Arithmetic}
 
@@ -10,8 +9,8 @@ U256 addition expands, after JIT code generation, into four machine-level
 additions: one ordinary 64-bit \texttt{add} followed by three
 carry-propagating \texttt{adc} instructions that form a \emph{serial
 carry chain}. Subtraction is analogous, using one \texttt{sub} and three
-\texttt{sbb} instructions. The listing below shows the 4-limb code on
-both sides for a typical U256 addition:
+\texttt{sbb} instructions. The listing below shows the 4-limb code at
+the dMIR and x86-64 levels for a typical U256 addition:
 
 \begin{center}
 \small
@@ -28,15 +27,15 @@ both sides for a typical U256 addition:
 Among all instructions emitted by the JIT, instructions directly tied to
 U256 multi-word arithmetic account for about \textbf{2.15\%} (weighted
 mean across the U256-heavy subset of the 27 benchmarks in
-\S\ref{sec:evaluation}---the leftmost cluster ``U256-heavy (0--10)'' in
+\S\ref{sec:evaluation}---the U256-heavy cluster in
 Figure~\ref{fig:speedup}). The share
 is small, but the carry chain has a special property: every
 \texttt{adc}/\texttt{sbb} on the chain depends on the carry output of the
 previous instruction, forming a strict \emph{serial data dependency}
 that instruction-level parallelism cannot hide.
-Their serial dependencies still make them plausible optimization
-targets; \S\ref{sec:perf} confirms the chain accounts for the bulk of
-the +7.24\% geo-mean despite being 2.15\% of dynamic instructions.
+Despite its small share, the chain is still worth optimizing: on
+U256-heavy workloads, rule hit rates reach 25--99.9\%
+(\S\ref{sec:perf}).
 Section~\ref{sec:perf} reports per-family hit rates: on U256-heavy
 benchmarks the U256 rule hit rate ranges from 25\% to 99.9\% with a
 very uneven distribution; on non-U256-heavy benchmarks (sha1 family,
@@ -44,7 +43,6 @@ very uneven distribution; on non-U256-heavy benchmarks (sha1 family,
 from x86-layer mechanical cleanup.
 
 \subsection{Carry-Chain Expressiveness Limits in General-Purpose IRs}
-\label{sec:expressiveness}
 
 {\sloppy
 In LLVM IR, basic arithmetic (\texttt{add}, \texttt{sub}, \texttt{mul})

@@ -1,20 +1,20 @@
-% tables/tab4-1-synth-alive2.tex — Synthesis pipeline output with Alive2 comparison
+% tables/tab4-1-synth-alive2.tex — Enumeration/admission output with Alive2 comparison
 \begin{table}[t]
 \centering
-\caption{Output of the synthesis pipeline: candidate counts, Z3 passes,
-rejections, and admission rate. The two enumeration paths are described
-in detail in \S\ref{sec:synthesis}.}
+\caption{Output of the enumeration/admission pipeline: candidate counts, Z3 passes,
+SAT counterexamples, timeouts, and admission rate. The two enumeration
+paths are described in detail in \S\ref{sec:synthesis}.}
 \label{tab:synth-alive2}
 \footnotesize
-\begin{tabular}{@{}lrrrr@{}}
+\begin{tabular}{@{}lrrrrr@{}}
 \toprule
-Candidate source & Input & Pass & Reject & Admission rate \\
+Candidate source & Input & Pass & SAT cex & Timeout & Admission rate \\
 \midrule
-Algebraic enumeration & 775 & 765 & 10$^*$             & 98.7\% \\
-Carry templates       &  78 &  17 & 61\phantom{$^*$}   & 21.8\% \\
+Algebraic enumeration & 775 & 765 &  0 & 10 & 98.7\% \\
+Carry templates       &  78 &  17 & 61 &  0 & 21.8\% \\
 \bottomrule
 \end{tabular}
 \vspace{2pt}
-\par\noindent{\scriptsize $^*$\,10 candidates returned neither sat nor
-unsat within the time limit and are conservatively rejected.}
+\par\noindent{\scriptsize SAT counterexamples are semantic rejections;
+timeouts are conservatively rejected without counterexamples.}
 \end{table}

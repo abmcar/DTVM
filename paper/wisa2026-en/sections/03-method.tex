@@ -1,12 +1,11 @@
 % 03-method.tex — §3 Method
-\section{SMT-Verifiable Peephole Rewrite Synthesis on dMIR}
+\section{SMT-Checked dMIR Peephole Rewrites}
 
-The pipeline runs offline rule synthesis once and emits an
-SMT-admitted JSON rule pack; at JIT init the two-tier
-runtime---dMIR for algebraic rewrites, x86 CgIR (the
-code-generation IR) for carry-chain cleanup---loads it. The dMIR
-bit-vector model is in \S\ref{sec:bvmodel}; the synthesis pipeline
-in \S\ref{sec:synthesis}.
+Offline scripts run Z3 admission and coverage checks over dMIR rule
+metadata; the JIT runs a compiled two-tier implementation---dMIR for
+algebraic rewrites and x86 CgIR (code-generation IR) for carry-chain
+cleanup. The dMIR bit-vector model is in \S\ref{sec:bvmodel}; enumeration
+and admission are in \S\ref{sec:synthesis}.
 
 \subsection{dMIR Bit-Vector Semantics and Carry-Chain Operators}
 \label{sec:bvmodel}
@@ -15,14 +14,15 @@ The core data type of dMIR is a parametric-width bit-vector
 $\mathrm{BV}_n$ with $\mathrm{BV}_1$ carrying the carry in/out
 ($c_{in}, c_{out}$). The carry-propagating addition has signature
 $\texttt{ADC}: \mathrm{BV}_n \times \mathrm{BV}_n \times \mathrm{BV}_1
-\to \mathrm{BV}_n \times \mathrm{BV}_1$; \texttt{SBB} is symmetric. In
+\to \mathrm{BV}_n \times \mathrm{BV}_1$; \texttt{SBB} has analogous
+borrow-propagation semantics. In
 Z3~\cite{demoura2008z3}, carry propagation zero-extends both 256-bit
-operands and the 1-bit carry to 257 bits, sums once, and slices:
-\texttt{wide = ZeroExt(1,x) +\allowbreak ZeroExt(1,y) +\allowbreak
-ZeroExt(256,cin)}; result is \texttt{Extract(255,0,wide)}, carry out is
-\texttt{Extract(256,256,wide)}. This embeds carry propagation entirely
-in bit-vector arithmetic with no multi-return tuple or auxiliary
-predicate. The same semantics covers ordinary operators
+operands and the 1-bit carry to 257 bits, sums once, and slices: the
+low 256 bits are the result and bit 256 is carry out. This embeds carry
+propagation entirely in bit-vector arithmetic with no multi-return tuple
+or auxiliary predicate. The model covers dMIR arithmetic and flags; gas,
+memory aliasing, storage, and x86 equivalence remain outside it. The same
+semantics covers ordinary operators
 (\texttt{add}, \texttt{sub}, \texttt{mul}, \texttt{and}, \texttt{or},
 \texttt{xor}, shifts); the carry-chain operator is the operator that
 general-purpose IRs lack.
@@ -40,9 +40,10 @@ future work, \S\ref{sec:limitations}).
 \textit{LHS}(\vec{v}) \neq \textit{RHS}(\vec{v})$. \emph{Unsat} grants
 admission under fixed-width modular bit-vector semantics; \emph{sat} or
 timeout rejects (sat returns a counterexample). Equivalence assumes
-nothing beyond modular arithmetic---no two's complement, no signed
-overflow. All 70 production dMIR rules pass; queries are committed with
-each rule and re-run by CI on every change.
+nothing beyond modular arithmetic---no signed interpretation and no
+undefined-overflow assumptions. All 70 production dMIR rules pass the
+offline Z3 admission check, and CI re-runs this check on every change
+to the rule file.
 
 \paragraph{Two enumeration runs.} We report two separate enumeration
 experiments with disjoint goals. The \emph{capacity run} fixes a single
@@ -52,8 +53,9 @@ characterizes solver throughput and the typical false-positive boundary.
 The \emph{coverage run} extends the same algebraic enumerator with
 additional left-hand-side operator tops and a constant-pool widening,
 plus a pattern-template instantiation channel reusing the template miner
-configuration; this measures rediscovery of the 70 hand-designed dMIR
-production rules; coverage results appear in \S\ref{sec:evaluation}.
+configuration; this measures whether the tuned offline search space can
+reach the 70 hand-designed dMIR production rules, not blind recall on an
+unseen rule set. Coverage results appear in \S\ref{sec:evaluation}.
 
 The capacity run uses two complementary paths: \emph{(i) depth-2
 algebraic enumeration}---all left/right combinations of depth $\le\!2$
@@ -68,21 +70,22 @@ templates (21.8\%, 61 semantic rejections): carry-template admission is
 limited by 61 semantic rejections, mostly width-mismatch edge cases
 (full breakdown in the artifact), while the algebraic side has only 10
 timeouts and zero semantic rejections. Full data:
-Table~\ref{tab:synth-alive2}
-(\S\ref{sec:evaluation}).
+Table~\ref{tab:synth-alive2} (\S\ref{sec:evaluation}). These candidates
+measure enumeration capacity; only the curated production rules are
+loaded into the JIT at runtime.
 
 \paragraph{Production rule coverage (methodology).} The coverage run
-asks a different question: does the synthesis search space contain the
+asks a different question: does the enumeration search space contain the
 70 hand-designed production dMIR rules? We compare canonicalized
 left-hand sides. The \emph{alpha-normalized} canonical form renames
 variables to a fixed sequence $x_1, x_2, \ldots$ in traversal order, so
 that two rules differing only in operand naming map to the same
 representative; commutative pairs (e.g.\ $\texttt{or}(x,y)$ and
 $\texttt{or}(y,x)$) likewise collapse to one representative. A
-production rule counts as \emph{rediscovered} when at least one
-synthesized rule has the same canonical left-hand side; the
+production rule counts as \emph{covered} when at least one
+enumerated rule has the same canonical left-hand side; the
 \emph{false-miss rate} is the fraction of production rules with no such
-match. The match is on canonical left-hand sides only---the synthesized
+match. The match is on canonical left-hand sides only---the enumerated
 right-hand side is verified equivalent to the left-hand side by Z3 but
 is not required to be syntactically identical to the production
 rule's right-hand side. Numerical results appear in
@@ -95,38 +98,34 @@ $\texttt{0xFF}\ldots\texttt{F}$; correct form
 $\texttt{sub}(0, c_f)$); $\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(0, c_f)$
 fails at $x{=}1, c_f{=}0$ (correct form $\texttt{sub}(x, c_f)$). Both
 reflect modular-carry traps: ignored carry input and confused operand
-polarity. The artifact ships $\sim$2400 lines of Python (enumerator,
-template miner, canonical comparator, Z3 queries), the rule-set JSON,
+polarity. The artifact contains $\sim$2400 lines of Python (enumerator,
+template miner, canonical comparator, Z3 admission checks), the rule-set JSON,
 coverage output, and unit tests for canonicalization/dedup.
 
 \paragraph{Two-tier rule set.} The dMIR layer handles
-machine-independent algebraic simplification (all 70 rules Z3-verified);
+machine-independent algebraic simplification (all 70 dMIR rules pass Z3);
 the x86 CgIR layer handles hardware-specific cleanup on registers, flags,
-and branches (13 mechanical syntactic rewrites with \textbf{no separate
-SMT script}, covered by the matched 5884-test suites of
-\S\ref{sec:correctness} (Table~\ref{tab:correctness}, all four
-categories item-by-item identical)). A formal x86 SMT model is future
-work (\S\ref{sec:limitations}).
+and branches (13 syntactic rewrites with \textbf{no separate SMT script},
+covered by the matched 5884-test suites of \S\ref{sec:correctness} and
+Table~\ref{tab:correctness}). A formal x86 SMT model is future work
+(\S\ref{sec:limitations}).
 
 \input{tables/tab3-1-rule-classes}
 
 Table~\ref{tab:rule-classes} groups the rules by logical class.
 Boolean normalization and algebraic identities together cover most dMIR
 rules---these are precisely the patterns the canonical-form enumerator
-(\S\ref{sec:synthesis}) is designed to rediscover. Identity-elimination
+(\S\ref{sec:synthesis}) is designed to cover. Identity-elimination
 and shift-zero patterns admit Z3-discharged proofs in milliseconds,
 while the carry-chain class is the one that motivates the operator
 extension of \S\ref{sec:bvmodel}.
 
-\paragraph{Asymmetric verification workflow.} The 70 dMIR production
-rules are designed manually from runtime performance profiles and
-submitted one by one to the Z3 equivalence check
-(\S\ref{sec:synthesis}). The synthesis pipeline is a measurement
-channel: it does not drive production rule maintenance,
-although coverage results in \S\ref{sec:evaluation} show its search
-space contains the production set; production rule selection remains
-driven by runtime profiles rather than enumeration order, so the two
-channels are kept separate by selection criterion rather than by
-expressive scope. The x86-layer rules are covered by
-code review and the matched test suites. The limitations from this
-asymmetry are listed in \S\ref{sec:limitations}.
+\paragraph{Selection asymmetry.} The 70 dMIR production rules are
+selected manually from recurring profile hotspots and lowering
+patterns, then submitted one by one to Z3; this is hotspot-guided
+curation, not a claim of systematic optimality. The enumeration pipeline
+is a measurement channel: it does not drive production rule maintenance,
+and the 1966 admitted candidates are not automatically promoted to
+production. The x86-layer rules are covered by code review and matched
+test suites. The limitations from this asymmetry are listed in
+\S\ref{sec:limitations}.

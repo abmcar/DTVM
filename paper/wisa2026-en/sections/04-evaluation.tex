@@ -2,25 +2,25 @@
 \section{Evaluation}
 \label{sec:evaluation}
 
-\subsection{Rule Synthesis Output Against the General-Purpose IR}
+\subsection{Enumeration and Admission Output vs.\ the General-Purpose IR}
 
-Table~\ref{tab:synth-alive2} reports the synthesis pipeline output
+Table~\ref{tab:synth-alive2} reports the enumeration/admission output
 of \S\ref{sec:synthesis}; Alive2's verification on the same rule
-sample is summarized in the prose below.
+sample is summarized below.
 
 \input{tables/tab4-1-synth-alive2}
 
-Z3 averages $\sim$60\,ms per 256-bit bit-vector query and discharges
-all 70 dMIR rules in seconds, so 256-bit width is not a solver
-bottleneck. On a 10-rule U256 sample from the capacity run, Alive2
-clears the 6 without multi-return carry but reports type mismatch or
-times out on the 4 with \texttt{adc}/\texttt{sbb} structure (independent
-of Table~\ref{tab:cannot-express} in \S\ref{sec:expressiveness}); Z3
-discharges all 10 under the dMIR semantics.
+Z3 discharges the hardest 256-bit queries in $\sim$60\,ms and rechecks
+all 70 dMIR rules in $\sim$0.5\,s, so width is not the bottleneck. On a
+10-rule U256 capacity-run sample, Alive2 clears the 6 without
+multi-return carry but reports type mismatch or timeout on the 4
+\texttt{adc}/\texttt{sbb} cases. This sample is separate from the four
+production-style cases in Table~\ref{tab:cannot-express}; both expose
+the same tuple cause.
 
 \paragraph{Production rule coverage.} Using the canonical-LHS
 methodology of \S\ref{sec:synthesis}, the coverage run produces
-\textbf{1966} Z3-verified rewrite rules: \textbf{1856} from the
+\textbf{1966} Z3-admitted rewrite rules: \textbf{1856} from the
 extended algebraic enumerator and \textbf{110} from pattern-template
 instantiation. The pattern-template path starts from 2964 pattern-template candidates,
 which Z3 verification and deduplication against the enumerator output
@@ -34,7 +34,7 @@ is therefore \textbf{0/70}.
 
 \paragraph{Scope of the coverage claim.}
 \label{sec:coverage-scope}
-Two boundaries should be stated clearly. First, the result measures coverage of the
+The claim has two boundaries. First, the result measures coverage of the
 \emph{existing} production rule set; the extended enumerator's
 left-hand-side operator tops and constant pool were broadened in light
 of an earlier 0/70 baseline that exposed mechanical gaps (missing tops
@@ -43,48 +43,41 @@ such as \texttt{not}/\texttt{select}/\texttt{shl}/\texttt{ushr}/%
 structural-equality dedup of forms such as $\texttt{and}(x,x)$).
 Reaching 70/70 therefore demonstrates that the production rules lie
 inside an enumerable and Z3-discharged search space; it does not
-demonstrate blind recall of an unseen target. Second, rediscovery is
-defined on canonical left-hand sides; the synthesized right-hand side
+demonstrate blind recall of an unseen target. Second, coverage is
+defined on canonical left-hand sides; the enumerated right-hand side
 is verified equivalent to its own left-hand side by Z3 but is not
 required to be syntactically identical to the production rule's
 right-hand side. Together with the admission rate above, this result
-shows the search space is broad enough to contain every hand-designed
-rule, while 1966 of its members pass Z3 verification.
+shows the tuned search space is broad enough to contain every
+hand-designed rule, while 1966 of its members pass Z3 verification; it
+does not claim that the non-production members are useful runtime
+rewrites.
 
 \subsection{End-to-End Performance}
 \label{sec:perf}
 
-\paragraph{Setup.} Hardware: Intel Core Ultra 7 265K, 32\,GB RAM,
-Ubuntu 22.04. Baseline is upstream \texttt{main} (two hard-coded x86
-rules); enabled adds 83 rules (70 dMIR + 13 x86). Both use
-evmone-bench: 20 repetitions, auto-promoted to 30 when CV $\geq 3\%$;
-bootstrap geo-mean CIs ($B{=}10\,000$). Runs are pinned
-(\texttt{taskset -c 2-3}, \texttt{nice -5}, turbo disabled, load
-$<0.5$).
+\paragraph{Setup.} Intel Core Ultra 7 265K/Ubuntu 22.04; evmone-bench,
+baseline (upstream \texttt{main}) vs.\ rules-enabled side, 20 runs
+(30 if CV $\geq3\%$), bootstrap CIs ($B{=}10\,000$), pinned CPU,
+turbo off.
 
 \input{figures/fig4-speedup}
 
-Across Figure~\ref{fig:speedup}'s 27 benchmarks, the enabled rules
-reach a geometric-mean speedup of \textbf{+7.24\%} (95\% CI
-[+2.59\%, +12.11\%]); peak speedup is \textbf{+25.79\%} on
+{\sloppy
+Across all 27 benchmarks, the full 83-rule set improves the geometric
+mean by \textbf{+7.24\%} (95\% CI [+2.59\%, +12.11\%]); the
+positive-speedup cases are shown in Figure~\ref{fig:speedup}. Peak
+speedup is \textbf{+25.79\%} on
 \texttt{JUMPDEST\_n0/}\allowbreak\texttt{empty}. The \texttt{sha1}
 family gains +19.59\%--+24.81\%, and
-\texttt{blake2b\_}\allowbreak\texttt{huff} gains +10.41\%--+11.54\%.\par\noindent
+\texttt{blake2b\_}\allowbreak\texttt{huff} gains +10.41\%--+11.54\%.\par}
+\noindent
 Hit rate and speedup are decoupled: \texttt{mg\_mload} matches nearly
 every U256 instruction yet gains under 8\%, while sha1 hits only 7.5\%
 of opcodes yet gains over 20\% from x86 branch and compare-merge
-cleanup. The two layers are complementary---multi-word rules concentrate
-gains on U256-heavy contracts, x86 cleanup gives broader ordinary gains.
-
-\paragraph{Regressed surface.}
-{\sloppy
-Five benchmarks regress beyond $-2\%$:
-the 4 \texttt{memory\_grow\_mstore} variants by 7.74\%--8.85\% and
-\texttt{weierstrudel/1} by 2.71\% (CV $<2\%$). The 4 \texttt{mstore}
-variants cluster on the same write path (\S\ref{sec:limitations}, item
-5); the matched \texttt{mload} siblings accelerate by
-+6.03\%--+7.25\%. Regressions appear only in a $\sim$0.7\,ns/op
-microbenchmark, not on the macro sha1/\texttt{blake2b} gains.\par}
+cleanup. The two layers complement each other: multi-word rules
+concentrate gains on U256-heavy contracts, x86 cleanup yields broader
+gains on ordinary code.
 
 \paragraph{Compilation overhead.} Across 776 JIT unit-test modules,
 median per-module compile time is 0.45\,ms (p95 0.87\,ms) covering the
@@ -103,10 +96,12 @@ Table~\ref{tab:correctness} (5884/5884 total). Independently,
 \texttt{evmone-statetest} on the Cancun fork reaches the same matrix
 under multipass JIT and interpreter modes.\footnote{Cancun is selected
 via \texttt{evmone-statetest -k fork\_Cancun}; Prague tests are excluded
-because DTVM does not yet support that fork.}\par}
+because DTVM does not yet support that fork.} The suite covers Cancun
+state tests and EVM unit tests, but we do not claim opcode- or gas-branch
+coverage completeness.\par}
 
-CI re-verifies each dMIR rule's stored Z3 query on every change; all
-70 rules re-verify in $\sim$0.5\,s offline (distinct from the per-module JIT
-compile time of \S\ref{sec:perf}). Comparison with the CAV 2023 rule set
-of Albert et al.~\cite{verified_evm_cav23} appears in
+CI re-runs the same admission check on every change to the rule file
+(timing in \S\ref{sec:evaluation}, distinct from the per-module JIT
+compile time of \S\ref{sec:perf}). Comparison with the CAV 2023 rule
+set of Albert et al.~\cite{verified_evm_cav23} appears in
 \S\ref{sec:related}.
