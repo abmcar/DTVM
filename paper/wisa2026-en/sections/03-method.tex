@@ -8,20 +8,12 @@ U256 addition expands, after JIT code generation, into four machine-level
 additions: one ordinary 64-bit \texttt{add} followed by three
 carry-propagating \texttt{adc} instructions that form a \emph{serial
 carry chain}. Subtraction is analogous, using one \texttt{sub} and three
-\texttt{sbb} instructions. The listing below shows the 4-limb code at
-the dMIR and x86-64 levels for a typical U256 addition:
+\texttt{sbb} instructions. Figure~\ref{fig:carry-chain} shows the 4-limb
+code at the dMIR and x86-64 levels for a typical U256 addition,
+together with the serial carry chain that connects the four
+instructions.
 
-\begin{center}
-\small
-\begin{tabular}{@{}l|l@{}}
-\textbf{dMIR (4-limb addition)} & \textbf{x86-64 output} \\
-\hline
-\texttt{r0 = add(a0, b0)}   & \texttt{add rax, rcx}  \\
-\texttt{r1 = ADC(a1, b1, cout0)} & \texttt{adc rbx, rdx}  \\
-\texttt{r2 = ADC(a2, b2, cout1)} & \texttt{adc rsi, rdi}  \\
-\texttt{r3 = ADC(a3, b3, cout2)} & \texttt{adc r8,\enspace r9} \\
-\end{tabular}
-\end{center}
+\input{figures/fig2-carry-chain}
 
 Among all instructions emitted by the JIT, instructions directly tied to
 U256 multi-word arithmetic account for about \textbf{2.15\%} (weighted
@@ -72,6 +64,11 @@ We first define dMIR's bit-vector semantics, then describe enumeration
 and SMT admission, and finally summarize the two-tier rule organization.
 The JIT runs a compiled two-tier implementation: dMIR for algebraic
 rewrites and x86 CgIR (code-generation IR) for carry-chain cleanup.
+Figure~\ref{fig:architecture} sketches how offline rule production and
+admission feed into the JIT runtime, and how the matched differential
+suite gates correctness.
+
+\input{figures/fig1-architecture}
 
 \subsection{dMIR Bit-Vector Semantics and Carry-Chain Operators}
 \label{sec:bvmodel}
