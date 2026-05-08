@@ -1,13 +1,13 @@
-% 06-conclusion.tex — §6 Conclusion
+% 05-conclusion.tex — §5 Conclusion
 \section{Conclusion}
 
-This paper builds a two-tier EVM JIT peephole system: 70 dMIR rules pass
-Z3 checks over arithmetic and flags, while 13 x86 cleanup rules are
-covered by differential runs. First-class carry and overflow operators
-let a domain IR cover cases that bytecode-level identities alone cannot.
-Future work covers two fronts. On verification, a formal x86 model would
-replace the differential-test fallback for the x86 layer, and a complete
-Alive2 classification would tighten the comparison with the LLVM IR
-baseline. On systems, cross-engine baselines (e.g.\ evmone, revm),
-dataflow pruning of the enumeration search, and composition with
-bytecode-level rule sets are natural extensions.
+This paper extends a domain-specific JIT IR (dMIR) with first-class
+carry and overflow operators and builds an SMT-checked peephole layer
+on top of it: 70 dMIR rules pass Z3 admission over arithmetic and
+flags, and 13 x86 cleanup rules are covered by matched differential
+testing. The combination delivers a +7.24\% geometric-mean speedup on
+evmone-bench while preserving byte-identical final state across
+5{,}884 Cancun differential tests, with correctness bounded by suite
+coverage. Future work includes a formal x86 model to replace the
+differential-test fallback at the cleanup layer and cross-engine
+validation against evmone and revm.
