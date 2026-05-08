@@ -37,31 +37,24 @@ corresponding rules fall within Z3 bit-vector equivalence. The SMT scope
 is dMIR arithmetic/flag semantics; gas, memory, storage, and x86
 equivalence remain outside it.
 
-\paragraph{Contributions.}
-\begin{enumerate}
-  \item \textbf{A dMIR extension for SMT-checkable carry-chain
-    peepholes.} First-class carry operators make the four cases in
-    Table~\ref{tab:cannot-express} single Z3 bit-vector queries rather
-    than indirect LLVM/Alive2 tuple encodings. The two-tier rule set has
-    \textbf{70} dMIR rules (SMT-checked for arithmetic/flags) and
-    \textbf{13} x86 rules (differentially tested; no separate SMT check).
-  \item \textbf{An enumerable, Z3-admitted search space covering the
-    production dMIR set.} A capacity run evaluates \textbf{853} candidates
-    (\textbf{98.7\%} algebraic, \textbf{21.8\%} carry admitted by Z3); a
-    separate coverage run admits \textbf{1966} rules whose canonical LHSs
-    cover all \textbf{70/70} hand-designed production rules. This is
-    post-hoc reachability, not blind recall (\S\ref{sec:coverage-scope}).
-  \item \textbf{End-to-end performance and correctness.} Across the
-    \textbf{27} EVM benchmarks of evmone-bench, the geometric-mean
-    speedup is \textbf{+7.24\%} (95\% confidence interval
-    [+2.59\%, +12.11\%], which excludes zero),
-    with a peak of \textbf{+25.79\%}; \textbf{5884} differential tests
-    report byte-identical final state and identical gas accounting in a
-    same-engine DTVM self-A/B comparison.
-\end{enumerate}
+Our main contributions are as follows. First, we extend dMIR with
+first-class carry and overflow operators; the four carry-chain
+rewrites of Table~\ref{tab:cannot-express} reduce to single Z3
+bit-vector queries, replacing the indirect LLVM/Alive2 multi-return
+tuple encoding. The two-tier rule set contains \textbf{70} SMT-checked
+dMIR rules and \textbf{13} differentially tested x86 cleanup rules.
+Second, an enumerable, Z3-admitted search space covers the production
+set: a capacity run admits \textbf{853} candidates---\textbf{98.7\%} of
+algebraic and \textbf{21.8\%} of carry templates---and a coverage run
+produces \textbf{1{,}966} admitted rewrites whose canonical left-hand
+sides match all \textbf{70} hand-designed production rules. Third, the
+full 83-rule set delivers a \textbf{+7.24\%} geometric-mean speedup on
+the 27 evmone-bench workloads (95\% CI [+2.59\%, +12.11\%], peak
+\textbf{+25.79\%}) and passes \textbf{5{,}884} differential Cancun
+tests with byte-identical final state and matching gas accounting,
+with correctness bounded by suite coverage.
 
-Relative to the EVM bytecode block-level formal rule set of
-Albert et al.~\cite{verified_evm_cav23} at CAV 2023, the rule set in this
-paper operates at the JIT intermediate representation and machine-code
-layers that the bytecode abstraction cannot reach (quantitative comparison
-in \S\ref{sec:related}).
+The remainder of the paper surveys related work, presents the dMIR
+bit-vector model and admission pipeline together with the U256
+carry-chain motivation, reports end-to-end performance and correctness,
+and concludes.
