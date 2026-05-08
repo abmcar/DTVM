@@ -1,5 +1,5 @@
-% 05-related.tex — §5 Related work and discussion
-\section{Related Work and Discussion}
+% 02-related.tex — §2 Related Work (drop "and Discussion"; §5.3 limitations removed)
+\section{Related Work}
 \label{sec:related}
 
 \subsection{Peephole Optimization Frameworks}
@@ -49,41 +49,3 @@ Bytecode-side EVM
 optimization~\cite{maxsmt_evm,vmil24_superinst,ist25_neural_superopt,jar25_proof_producing,scico24_translation_cert}
 is orthogonal to our JIT IR/code-generation focus.\par}
 
-\subsection{Limitations and Future Work}
-\label{sec:limitations}
-
-\begin{itemize}[leftmargin=0.8em,labelsep=0.35em,itemsep=-1pt,topsep=0pt]
-\item \textbf{(1) Trusted base and x86 coverage.} The SMT check assumes
-the dMIR model agrees with JIT semantics; the 13 x86 rules rely on paired
-differential runs. Formal x86 modeling is future work.
-\item \textbf{(2) Workload, baseline, and modeling scope.} Speedups come
-from a same-engine upstream-\texttt{main} comparison on 27 evmone-bench
-benchmarks, not evmone/revm; only arithmetic and flags are SMT-checked,
-leaving gas, memory aliasing, and storage unmodeled.
-\item \textbf{(3) Dead-carry inertness at U256 heads.} A U256 add/sub
-head has a runtime third operand rather than matchable zero, so the rule
-is inert there but still effective inside U256 multiplication lowering.
-\item \textbf{(4) Compilation overhead.} Median 0.45\,ms and p95
-0.87\,ms per module are rules-enabled-side full-pipeline numbers; EVMC
-exposes no per-stage timing hook, so we cannot attribute the cost to
-individual passes, and baseline-side timing requires a separate
-instrumented build.
-\item \textbf{(5) Corpus mining provenance.} An initial dump
-(\textsc{v1}) emitted shared-subtree compression placeholders that the
-rule-parser did not consume; \textsc{v1} produced 237 distinct shapes
-at Jensen--Shannon divergence 0.28 against held-out test corpora.
-We re-implemented the dump pass to fully inline subtrees
-(\textsc{v2}); \textsc{v2} produces 1{,}415 distinct shapes at
-JS\,$=\,$\,0.15 with 0.4\% test out-of-vocabulary mass. The shift was
-larger than our pre-registered band predicted; investigation
-attributes it to per-MFunction local back-references in \textsc{v1}
-fragmenting shape identity across functions and concentrating mass in
-a single OOV bucket. The \textsc{v1} dataset is archived for
-reproducibility; a \textsc{v1}$\leftrightarrow$\textsc{v2} top-20
-shape ablation appears in the supplementary material. One test
-benchmark (\texttt{blake2b\_huff}) drops 8.5\% of records under our
-64\,KiB per-record subtree budget due to deep U256 sub-expression
-chains; analysis confirms exponential DAG fan-out (raising the budget
-to 1\,MiB only reduces the drop to 8.6\%) and the retained 91.5\%
-covers \texttt{blake2b\_huff}'s shape distribution.
-\end{itemize}
