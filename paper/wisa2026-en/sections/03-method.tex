@@ -64,11 +64,6 @@ We first define dMIR's bit-vector semantics, then describe enumeration
 and SMT admission, and finally summarize the two-tier rule organization.
 The JIT runs a compiled two-tier implementation: dMIR for algebraic
 rewrites and x86 CgIR (code-generation IR) for carry-chain cleanup.
-Figure~\ref{fig:architecture} sketches how offline rule production and
-admission feed into the JIT runtime, and how the matched differential
-suite gates correctness.
-
-\input{figures/fig1-architecture}
 
 \subsection{dMIR Bit-Vector Semantics and Carry-Chain Operators}
 \label{sec:bvmodel}
