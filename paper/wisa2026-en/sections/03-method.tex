@@ -16,15 +16,14 @@ instructions.
 \input{figures/fig2-carry-chain}
 
 Among all instructions emitted by the JIT, instructions directly tied to
-U256 multi-word arithmetic account for about \textbf{2.15\%} (weighted
+U256 multi-word arithmetic account for only \textbf{2.15\%} (weighted
 mean across the U256-heavy subset of our 27 benchmarks---the U256-heavy
-cluster in Figure~\ref{fig:speedup}). The share
-is small, but the carry chain has a special property: every
-\texttt{adc}/\texttt{sbb} on the chain depends on the carry output of the
-previous instruction, forming a strict \emph{serial data dependency}
-that instruction-level parallelism cannot hide.
-Despite its small share, the chain is still worth optimizing: on
-U256-heavy workloads, rule hit rates reach 25--99.9\%, with a very
+cluster in Figure~\ref{fig:speedup}). The chain is nonetheless worth
+optimizing: every \texttt{adc}/\texttt{sbb} on the chain depends on
+the carry output of the previous instruction, forming a strict
+\emph{serial data dependency} that defeats instruction-level parallelism.
+
+On U256-heavy workloads, rule hit rates reach 25--99.9\% with a very
 uneven distribution; on non-U256-heavy benchmarks (sha1 family,
 \texttt{jump\_around}) the U256 rule hit rate is well below that range,
 and gains come from x86-layer mechanical cleanup.

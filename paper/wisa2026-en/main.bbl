@@ -122,15 +122,4 @@ Matheus~Ara{\'u}jo Aguiar, Elvira Albert, Samir Genaim, Pablo Gordillo,
 \newblock Neural-guided superoptimization in {Ethereum}.
 \newblock {\em Information and Software Technology}, 2025.
 
-\bibitem{jar25_proof_producing}
-Jeremy Avigad, Lior Goldberg, David Levit, Yoav Seginer, and Alon Titelman.
-\newblock A proof-producing compiler for blockchain applications.
-\newblock {\em Journal of Automated Reasoning}, 2025.
-
-\bibitem{scico24_translation_cert}
-Jacco~O.G. Krijnen, Manuel~M.T. Chakravarty, Gabriele Keller, and Wouter
-  Swierstra.
-\newblock Translation certification for smart contracts.
-\newblock {\em Science of Computer Programming}, 2024.
-
 \end{thebibliography}

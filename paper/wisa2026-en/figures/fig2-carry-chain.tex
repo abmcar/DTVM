@@ -40,10 +40,8 @@
 \draw[carry] (4.0, -1.25) -- node[carrylab, right=1pt]{c$_2$} (4.0, -1.65);
 
 \end{tikzpicture}
-\caption{U256 4-limb addition lowered to dMIR (left) and x86-64
-(right). Each \texttt{ADC} maps 1:1 to one \texttt{adc} instruction;
-red arrows in the middle trace the serial carry chain
-$c_0, c_1, c_2$, which the lowering preserves and which
-instruction-level parallelism cannot hide.}
+\caption{U256 4-limb addition in dMIR (left) and x86-64 (right). Each
+\texttt{ADC} lowers 1:1 to \texttt{adc}; red arrows trace the serial
+carry chain $c_0, c_1, c_2$ that the lowering preserves.}
 \label{fig:carry-chain}
 \end{figure}
