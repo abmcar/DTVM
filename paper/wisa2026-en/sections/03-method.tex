@@ -37,6 +37,10 @@ uneven distribution; on non-U256-heavy benchmarks (sha1 family,
 \texttt{jump\_around}) the U256 rule hit rate is well below that range,
 and gains come from x86-layer mechanical cleanup.
 
+Hardware cost is only one side of the picture. The other side is
+whether existing peephole-verification frameworks can reason about
+this carry chain at all, which the next paragraph examines.
+
 {\sloppy
 In LLVM IR, basic arithmetic (\texttt{add}, \texttt{sub}, \texttt{mul})
 is defined only on $N$-bit integers \texttt{iN}; to obtain the carry
