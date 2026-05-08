@@ -1,55 +1,63 @@
 % figures/fig1-architecture.tex — two-tier system overview
+% Two parallel inputs (hand-curated rules, enumeration) feed Z3 admission;
+% only the production-rule branch is deployed to the JIT, while the
+% enumeration branch is a measurement/audit channel that does NOT drive
+% production rule maintenance (per §3.2 of the paper).
 \begin{figure}[t]
 \centering
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[
   every node/.style={font=\footnotesize},
-  box/.style={draw, rounded corners=2pt, inner sep=4pt, minimum height=9mm, minimum width=18mm, align=center, fill=gray!5},
-  smallbox/.style={draw, rounded corners=2pt, inner sep=3pt, minimum height=8mm, minimum width=18mm, align=center, fill=gray!5},
+  box/.style={draw, rounded corners=2pt, inner sep=4pt, minimum height=9mm, minimum width=20mm, align=center, fill=gray!5},
+  z3box/.style={draw, rounded corners=2pt, inner sep=4pt, minimum height=9mm, minimum width=18mm, align=center, fill=blue!8},
   arrow/.style={-{Latex[length=2mm]}, semithick},
   region/.style={font=\small\bfseries},
-  divider/.style={dashed, gray!60},
 ]
 
-% --- Offline cluster (left) ---
-\node[box]      (rules)    at (0,0.0)   {Production\\rule set\\\scriptsize{(70 dMIR + 13 x86)}};
-\node[smallbox] (z3)       at (3.0,0.8) {Z3\\admission};
-\node[smallbox] (enum)     at (3.0,-0.8){Canonical-LHS\\enumeration};
-\node[box]      (compiled) at (6.0,0.0) {Compiled\\rule set};
+% --- Production-deployment path (top row) ---
+\node[box]   (rules)    at (0,    1.1)  {Hand-curated\\rule set\\\scriptsize{(70 dMIR + 13 x86)}};
+\node[z3box] (z3)       at (3.7,  0.0)  {Z3 admission\\\scriptsize{(gate)}};
+\node[box]   (compiled) at (7.4,  1.1)  {Compiled\\rule set};
+\node[box]   (jit)      at (10.7, 1.1)  {JIT runtime\\\scriptsize{(dMIR + x86 CgIR)}};
+\node[box]   (diff)     at (14.0, 1.1)  {5{,}884 differential\\Cancun tests};
 
-% --- Runtime cluster (middle-right) ---
-\node[smallbox] (dmir)     at (9.0,0.8) {dMIR\\matcher};
-\node[smallbox] (x86)      at (9.0,-0.8){x86 CgIR\\cleanup};
-
-% --- Correctness gate (right) ---
-\node[box]      (diff)     at (12.2,0.0){5{,}884 differential\\Cancun tests};
+% --- Audit / measurement path (bottom row) ---
+\node[box, dashed] (enum)  at (0,    -1.1) {Canonical-LHS\\enumeration\\\scriptsize{(853 / 1{,}966 cands.)}};
+\node[box, dashed] (audit) at (7.4,  -1.1) {1{,}966 admitted\\\scriptsize{(audit; not deployed)}};
 
 % Region labels
-\node[region] at (1.5, 2.0)  {Offline};
-\node[region] at (9.0, 2.0)  {JIT runtime};
-\node[region] at (12.2, 2.0) {Correctness gate};
+\node[region] at (1.85,  2.3) {Offline};
+\node[region] at (10.7,  2.3) {JIT runtime};
+\node[region] at (14.0,  2.3) {Correctness gate};
 
 % Vertical dashed dividers
-\draw[divider] (4.5,-2.0) -- (4.5,1.7);
-\draw[divider] (10.6,-2.0) -- (10.6,1.7);
+\draw[dashed, gray!60] (5.5,-2.0) -- (5.5,2.0);
+\draw[dashed, gray!60] (12.4,-2.0) -- (12.4,2.0);
 
-% Edges
-\draw[arrow] (rules.east) -- (z3.west);
-\draw[arrow] (rules.east) -- (enum.west);
-\draw[arrow] (z3.east) -- (compiled.west);
-\draw[arrow] (enum.east) -- (compiled.west);
-\draw[arrow] (compiled.east) -- (dmir.west);
-\draw[arrow] (compiled.east) -- (x86.west);
-\draw[arrow] (dmir.east) -- (diff.west);
-\draw[arrow] (x86.east) -- (diff.west);
+% Edges -- production deployment
+\draw[arrow] (rules.south east) -- (z3.north west);
+\draw[arrow] (z3.north east)    -- (compiled.south west);
+\draw[arrow] (compiled.east)    -- (jit.west);
+\draw[arrow] (jit.east)         -- (diff.west);
+
+% Edges -- audit channel
+\draw[arrow] (enum.north east)  -- (z3.south west);
+\draw[arrow] (z3.south east)    -- (audit.north west);
+
+% Z3 admission-rate annotation
+\node[font=\scriptsize\itshape, anchor=west] at (3.0, -0.95)
+  {admit rate: 98.7\% algebraic, 21.8\% carry};
 
 \end{tikzpicture}%
 }
-\caption{Two-tier system overview. The offline pipeline submits the
-production rule set to Z3 for admission and audits its coverage via
-canonical-LHS enumeration; the resulting compiled rule set drives the
-JIT, where the dMIR matcher applies algebraic rewrites and the x86
-CgIR layer applies hardware-specific cleanup. Correctness is gated by
-the matched 5{,}884-test differential suite.}
+\caption{Two-tier system overview. Hand-curated production rules
+(\textbf{70} dMIR + \textbf{13} x86) pass an offline Z3 admission gate
+and become the compiled rule set deployed by the JIT (dMIR matcher
+followed by x86 CgIR cleanup); correctness is gated by 5{,}884
+differential Cancun tests. In parallel, canonical-LHS enumeration
+submits 853 capacity-run candidates and produces \textbf{1{,}966}
+audit-channel admitted rewrites whose canonical left-hand sides cover
+all 70 production rules; the audit channel is a measurement output and
+is \emph{not} deployed to the JIT.}
 \label{fig:architecture}
 \end{figure}
