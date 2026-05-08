@@ -5,7 +5,7 @@
 \subsection{Enumeration and Admission Output vs.\ the General-Purpose IR}
 
 Table~\ref{tab:synth-alive2} reports the enumeration/admission output
-of \S\ref{sec:synthesis}; Alive2's verification on the same rule
+of the capacity run; Alive2's verification on the same rule
 sample is summarized below.
 
 \input{tables/tab4-1-synth-alive2}
@@ -19,7 +19,7 @@ production-style cases in Table~\ref{tab:cannot-express}; both expose
 the same tuple cause.
 
 \paragraph{Production rule coverage.} Using the canonical-LHS
-methodology of \S\ref{sec:synthesis}, the coverage run produces
+methodology, the coverage run produces
 \textbf{1966} Z3-admitted rewrite rules: \textbf{1856} from the
 extended algebraic enumerator and \textbf{110} from pattern-template
 instantiation. The pattern-template path starts from 2964 pattern-template candidates,
@@ -83,7 +83,7 @@ gains on ordinary code.
 median per-module compile time is 0.45\,ms (p95 0.87\,ms) covering the
 full loading--analysis--codegen pipeline; this is an upper bound on
 the whole pipeline rather than the incremental rewrite-pass cost
-(per-pass attribution is future work, \S\ref{sec:limitations}, item 4).
+(per-pass attribution remains future work).
 
 \subsection{Correctness and Rule Coverage}
 \label{sec:correctness}
@@ -100,8 +100,6 @@ because DTVM does not yet support that fork.} The suite covers Cancun
 state tests and EVM unit tests, but we do not claim opcode- or gas-branch
 coverage completeness.\par}
 
-CI re-runs the same admission check on every change to the rule file
-(timing in \S\ref{sec:evaluation}, distinct from the per-module JIT
-compile time of \S\ref{sec:perf}). Comparison with the CAV 2023 rule
-set of Albert et al.~\cite{verified_evm_cav23} appears in
-\S\ref{sec:related}.
+CI re-runs the same admission check on every change to the rule file;
+the timing is distinct from the per-module JIT compile time reported
+above.

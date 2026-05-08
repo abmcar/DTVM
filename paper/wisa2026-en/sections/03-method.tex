@@ -25,21 +25,17 @@ the dMIR and x86-64 levels for a typical U256 addition:
 
 Among all instructions emitted by the JIT, instructions directly tied to
 U256 multi-word arithmetic account for about \textbf{2.15\%} (weighted
-mean across the U256-heavy subset of the 27 benchmarks in
-\S\ref{sec:evaluation}---the U256-heavy cluster in
-Figure~\ref{fig:speedup}). The share
+mean across the U256-heavy subset of our 27 benchmarks---the U256-heavy
+cluster in Figure~\ref{fig:speedup}). The share
 is small, but the carry chain has a special property: every
 \texttt{adc}/\texttt{sbb} on the chain depends on the carry output of the
 previous instruction, forming a strict \emph{serial data dependency}
 that instruction-level parallelism cannot hide.
 Despite its small share, the chain is still worth optimizing: on
-U256-heavy workloads, rule hit rates reach 25--99.9\%
-(\S\ref{sec:perf}).
-Section~\ref{sec:perf} reports per-family hit rates: on U256-heavy
-benchmarks the U256 rule hit rate ranges from 25\% to 99.9\% with a
-very uneven distribution; on non-U256-heavy benchmarks (sha1 family,
-\texttt{jump\_around}) it is well below that range, and gains come
-from x86-layer mechanical cleanup.
+U256-heavy workloads, rule hit rates reach 25--99.9\%, with a very
+uneven distribution; on non-U256-heavy benchmarks (sha1 family,
+\texttt{jump\_around}) the U256 rule hit rate is well below that range,
+and gains come from x86-layer mechanical cleanup.
 
 {\sloppy
 In LLVM IR, basic arithmetic (\texttt{add}, \texttt{sub}, \texttt{mul})
@@ -57,8 +53,7 @@ IR carry modeling, independent of solver capacity.\par}
 \input{tables/tab2-1-cannot-express}
 
 The four rules' Alive2 command lines, failure messages, and tool
-versions (Alive2 v21.0, Z3 4.8.12) are archived in the artifact
-(\S\ref{sec:availability}).
+versions (Alive2 v21.0, Z3 4.8.12) are archived in the artifact.
 
 The bottleneck is not the SMT solver~\cite{demoura2008z3}: the six
 U256 rules without multi-return carry pass Alive2 in $\sim$60\,ms each.
@@ -95,9 +90,8 @@ semantics covers ordinary operators
 general-purpose IRs lack.
 
 \paragraph{Trusted base.} The SMT check assumes the dMIR bit-vector model
-agrees with the JIT runtime; the 5884 differential tests of
-\S\ref{sec:correctness} show no divergence (random-bytecode fuzzing is
-future work, \S\ref{sec:limitations}).
+agrees with the JIT runtime; the 5{,}884 differential tests show no
+divergence; random-bytecode fuzzing remains future work.
 
 \subsection{Candidate Enumeration and SMT Admission}
 \label{sec:synthesis}
@@ -122,7 +116,7 @@ additional left-hand-side operator tops and a constant-pool widening,
 plus a pattern-template instantiation channel reusing the template miner
 configuration; this measures whether the tuned offline search space can
 reach the 70 hand-designed dMIR production rules, not blind recall on an
-unseen rule set. Coverage results appear in \S\ref{sec:evaluation}.
+unseen rule set.
 
 The capacity run uses two complementary paths: \emph{(i) depth-2
 algebraic enumeration}---all left/right combinations of depth $\le\!2$
@@ -137,7 +131,7 @@ templates (21.8\%, 61 semantic rejections): carry-template admission is
 limited by 61 semantic rejections, mostly width-mismatch edge cases
 (full breakdown in the artifact), while the algebraic side has only 10
 timeouts and zero semantic rejections. Full data:
-Table~\ref{tab:synth-alive2} (\S\ref{sec:evaluation}). These candidates
+Table~\ref{tab:synth-alive2}. These candidates
 measure enumeration capacity; only the curated production rules are
 loaded into the JIT at runtime.
 
@@ -155,8 +149,7 @@ enumerated rule has the same canonical left-hand side; the
 match. The match is on canonical left-hand sides only---the enumerated
 right-hand side is verified equivalent to the left-hand side by Z3 but
 is not required to be syntactically identical to the production
-rule's right-hand side. Numerical results appear in
-\S\ref{sec:evaluation}.
+rule's right-hand side.
 
 \paragraph{Counterexamples.} Two rejected carry templates illustrate
 why SMT admission is essential on the carry chain.
@@ -173,19 +166,18 @@ coverage output, and unit tests for canonicalization/dedup.
 machine-independent algebraic simplification (all 70 dMIR rules pass Z3);
 the x86 CgIR layer handles hardware-specific cleanup on registers, flags,
 and branches (13 syntactic rewrites with \textbf{no separate SMT script},
-covered by the matched 5884-test suites of \S\ref{sec:correctness} and
-Table~\ref{tab:correctness}). A formal x86 SMT model is future work
-(\S\ref{sec:limitations}).
+covered by the matched 5{,}884-test suites and
+Table~\ref{tab:correctness}); a formal x86 SMT model remains future work.
 
 \input{tables/tab3-1-rule-classes}
 
 Table~\ref{tab:rule-classes} groups the rules by logical class.
 Boolean normalization and algebraic identities together cover most dMIR
 rules---these are precisely the patterns the canonical-form enumerator
-(\S\ref{sec:synthesis}) is designed to cover. Identity-elimination
+is designed to cover. Identity-elimination
 and shift-zero patterns admit Z3-discharged proofs in milliseconds,
 while the carry-chain class is the one that motivates the operator
-extension of \S\ref{sec:bvmodel}.
+extension introduced earlier in this section.
 
 \paragraph{Selection asymmetry.} The 70 dMIR production rules are
 selected manually from recurring profile hotspots and lowering
@@ -194,5 +186,4 @@ curation, not a claim of systematic optimality. The enumeration pipeline
 is a measurement channel: it does not drive production rule maintenance,
 and the 1966 admitted candidates are not automatically promoted to
 production. The x86-layer rules are covered by code review and matched
-test suites. The limitations from this asymmetry are listed in
-\S\ref{sec:limitations}.
+test suites.
