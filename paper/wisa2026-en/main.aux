@@ -52,34 +52,34 @@
 \@writefile{toc}{\contentsline {paragraph}{Selection asymmetry.}{6}{section*.9}\protected@file@percent }
 \@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Classification of the two-tier peephole rewrite rules by evidence type. The dMIR rules are checked for equivalence by Z3 on the bit-vector semantic model; the x86 CgIR rules are covered by matched differential tests, not by SMT.}}{7}{table.2}\protected@file@percent }
 \newlabel{tab:rule-classes}{{2}{7}{Classification of the two-tier peephole rewrite rules by evidence type. The dMIR rules are checked for equivalence by Z3 on the bit-vector semantic model; the x86 CgIR rules are covered by matched differential tests, not by SMT}{table.2}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {4}Evaluation}{8}{section.4}\protected@file@percent }
-\newlabel{sec:evaluation}{{4}{8}{Evaluation}{section.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Enumeration and Admission Output vs.\ the General-Purpose IR}{8}{subsection.4.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Output of the enumeration/admission pipeline: candidate counts, Z3 passes, SAT counterexamples, timeouts, and admission rate. The two enumeration paths are described in detail in \S  \ref {sec:synthesis}.}}{7}{table.3}\protected@file@percent }
+\newlabel{tab:synth-alive2}{{3}{7}{Output of the enumeration/admission pipeline: candidate counts, Z3 passes, SAT counterexamples, timeouts, and admission rate. The two enumeration paths are described in detail in \S \ref {sec:synthesis}}{table.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Evaluation}{7}{section.4}\protected@file@percent }
+\newlabel{sec:evaluation}{{4}{7}{Evaluation}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Enumeration and Admission Output vs.\ the General-Purpose IR}{7}{subsection.4.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Production rule coverage.}{8}{section*.10}\protected@file@percent }
 \newlabel{sec:coverage-scope}{{4.1}{8}{Scope of the coverage claim}{section*.11}{}}
 \@writefile{toc}{\contentsline {paragraph}{Scope of the coverage claim.}{8}{section*.11}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2}End-to-End Performance}{8}{subsection.4.2}\protected@file@percent }
 \newlabel{sec:perf}{{4.2}{8}{End-to-End Performance}{subsection.4.2}{}}
 \@writefile{toc}{\contentsline {paragraph}{Setup.}{8}{section*.12}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Output of the enumeration/admission pipeline: candidate counts, Z3 passes, SAT counterexamples, timeouts, and admission rate. The two enumeration paths are described in detail in \S  \ref {sec:synthesis}.}}{9}{table.3}\protected@file@percent }
-\newlabel{tab:synth-alive2}{{3}{9}{Output of the enumeration/admission pipeline: candidate counts, Z3 passes, SAT counterexamples, timeouts, and admission rate. The two enumeration paths are described in detail in \S \ref {sec:synthesis}}{table.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Compilation overhead.}{8}{section*.13}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Positive-speedup benchmark configurations from enabling the peephole rewrite rule set over the upstream-main baseline (error bars are 95\% bootstrap confidence intervals, $B{=}10\,000$). The horizontal line at zero marks the no-change baseline; the dashed line at \textbf  {+7.24\%} marks the 27-benchmark geometric-mean speedup. From left to right, the benchmarks are grouped into four workload clusters: U256-heavy, Hash, Arithmetic-Logic, and Control-flow.}}{9}{figure.2}\protected@file@percent }
 \newlabel{fig:speedup}{{2}{9}{Positive-speedup benchmark configurations from enabling the peephole rewrite rule set over the upstream-main baseline (error bars are 95\% bootstrap confidence intervals, $B{=}10\,000$). The horizontal line at zero marks the no-change baseline; the dashed line at \textbf {+7.24\%} marks the 27-benchmark geometric-mean speedup. From left to right, the benchmarks are grouped into four workload clusters: U256-heavy, Hash, Arithmetic-Logic, and Control-flow}{figure.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{Compilation overhead.}{9}{section*.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Correctness and Rule Coverage}{9}{subsection.4.3}\protected@file@percent }
+\newlabel{sec:correctness}{{4.3}{9}{Correctness and Rule Coverage}{subsection.4.3}{}}
 \bibstyle{unsrt}
 \bibdata{references}
 \bibcite{alive}{1}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Results on four differential test categories for the rules-enabled side (83 added rules) and the baseline side (upstream main): passes/total. Matching numbers in both columns indicate that the enabled rule set introduces no correctness regression.}}{10}{table.4}\protected@file@percent }
-\newlabel{tab:correctness}{{4}{10}{Results on four differential test categories for the rules-enabled side (83 added rules) and the baseline side (upstream main): passes/total. Matching numbers in both columns indicate that the enabled rule set introduces no correctness regression}{table.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Correctness and Rule Coverage}{10}{subsection.4.3}\protected@file@percent }
-\newlabel{sec:correctness}{{4.3}{10}{Correctness and Rule Coverage}{subsection.4.3}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{10}{section.5}\protected@file@percent }
-\newlabel{sec:availability}{{5}{10}{Conclusion}{section*.14}{}}
 \bibcite{demoura2008z3}{2}
 \bibcite{denali_pldi02}{3}
 \bibcite{bansal_aiken_asplos06}{4}
 \bibcite{stoke}{5}
 \bibcite{stratified}{6}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Results on four differential test categories for the rules-enabled side (83 added rules) and the baseline side (upstream main): passes/total. Matching numbers in both columns indicate that the enabled rule set introduces no correctness regression.}}{10}{table.4}\protected@file@percent }
+\newlabel{tab:correctness}{{4}{10}{Results on four differential test categories for the rules-enabled side (83 added rules) and the baseline side (upstream main): passes/total. Matching numbers in both columns indicate that the enabled rule set introduces no correctness regression}{table.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{10}{section.5}\protected@file@percent }
+\newlabel{sec:availability}{{5}{10}{Conclusion}{section*.14}{}}
 \bibcite{egg}{7}
 \bibcite{alive2}{8}
 \bibcite{souper}{9}
@@ -94,4 +94,4 @@
 \bibcite{maxsmt_evm}{18}
 \bibcite{vmil24_superinst}{19}
 \bibcite{ist25_neural_superopt}{20}
-\gdef \@abspage@last{12}
+\gdef \@abspage@last{11}
