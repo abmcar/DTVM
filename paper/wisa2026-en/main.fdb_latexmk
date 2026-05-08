@@ -1,13 +1,13 @@
 # Fdb version 4
-["bibtex main"] 1778224540.31185 "main.aux" "main.bbl" "main" 1778224595.42519 0
+["bibtex main"] 1778225052.74289 "main.aux" "main.bbl" "main" 1778225053.60763 0
   "./references.bib" 1778208584.14273 7450 972aa5994893f98bf8c3b7ea18feb4d0 ""
   "/home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/bibtex/bst/base/unsrt.bst" 1772380719 18030 1376b4b231b50c66211e47e42eda2875 ""
-  "main.aux" 1778224595.22239 11144 b32b09322ccb13bb7aca115f45688d1c "pdflatex"
+  "main.aux" 1778225053.41605 10482 87dcfa1c219ae032f657fc4fac1bc250 "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1778224594.61107 "main.tex" "main.pdf" "main" 1778224595.42534 0
+["pdflatex"] 1778225052.80019 "main.tex" "main.pdf" "main" 1778225053.60775 0
   "/home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc" 1772380719 2971 def0b6c1f0b107b3b936def894055589 ""
   "/home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc" 1772380719 2900 1537cc8184ad1792082cd229ecc269f4 ""
   "/home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/map/fontname/texfonts.map" 1772380719 3524 cb3e574dea2d1052e39280babc910dc8 ""
@@ -246,13 +246,13 @@
   "/home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/tex/latex/xcolor/xcolor.sty" 1772380719 55384 b454dec21c2d9f45ec0b793f0995b992 ""
   "/home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/web2c/texmf.cnf" 1772380719 43633 14bbc273cebd985e64ab1a698333eaf9 ""
   "/home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-var/web2c/pdftex/pdflatex.fmt" 1772380719 3554055 50d3c84ef9de665c37b6dd14525b5ea1 ""
-  "figures/fig1-architecture.tex" 1778224589.67018 2957 82825236a40c4cfed6612e2e2bf6af76 ""
-  "figures/fig2-carry-chain.tex" 1778222876.69998 2063 0bb2cc36879cbb1d3051557197072f16 ""
+  "figures/fig1-architecture.tex" 1778225046.80779 2710 b278ceea999b88c2f977a66044a58199 ""
+  "figures/fig2-carry-chain.tex" 1778225020.63078 2154 a51f4911b915b638a1e090f63f92c133 ""
   "figures/fig4-speedup.tex" 1777873203.59058 4117 183bf5ed41e29610356ae3fefb0e7716 ""
   "llncs.cls" 1776678245.46668 43402 5fb5a2dc40571aa40f3d199c00cbb986 ""
-  "main.aux" 1778224595.22239 11144 b32b09322ccb13bb7aca115f45688d1c "pdflatex"
-  "main.bbl" 1778224540.36827 5695 694040d219eaef66910cd46e8a6d1087 "bibtex main"
-  "main.out" 1778224595.22239 508 2e0229ab8f61516cd59b357814d29367 "pdflatex"
+  "main.aux" 1778225053.41605 10482 87dcfa1c219ae032f657fc4fac1bc250 "pdflatex"
+  "main.bbl" 1778225052.79602 5695 694040d219eaef66910cd46e8a6d1087 "bibtex main"
+  "main.out" 1778225053.41605 508 2e0229ab8f61516cd59b357814d29367 "pdflatex"
   "main.tex" 1778208588.00291 3022 087d669978313405e08ea3e7e9511bd9 ""
   "sections/01-intro.tex" 1778208356.19995 3474 b8750db1d73b0a26761b240b4e9653ac ""
   "sections/02-related.tex" 1778208422.05911 2727 2c8251929c6c5062195f6570d85b77bc ""

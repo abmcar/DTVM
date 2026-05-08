@@ -348,7 +348,6 @@ INPUT ./figures/fig2-carry-chain.tex
 INPUT ./figures/fig2-carry-chain.tex
 INPUT ./figures/fig2-carry-chain.tex
 INPUT figures/fig2-carry-chain.tex
-INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/tfm/jknappen/ec/ecti0900.tfm
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/tfm/public/cm/cmr9.tfm
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/tfm/public/cm/cmr6.tfm
 INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/tfm/public/cm/cmmi9.tfm
@@ -426,6 +425,7 @@ INPUT sections/06-availability.tex
 INPUT ./main.bbl
 INPUT ./main.bbl
 INPUT main.bbl
+INPUT /home/linuxbrew/.linuxbrew/Cellar/texlive/20260301/share/texmf-dist/fonts/tfm/jknappen/ec/ecti0900.tfm
 INPUT main.aux
 INPUT ./main.out
 INPUT ./main.out

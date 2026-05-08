@@ -1,45 +1,49 @@
 % figures/fig2-carry-chain.tex — U256 4-limb carry-chain data flow
-% Single carry chain shown on the dMIR side; "1:1 lowering" header
-% conveys that the x86-64 column inherits the same chain (avoiding the
-% misreading of two independent chains).
+% Carry arrows placed in the gap BETWEEN the dMIR and x86-64 columns,
+% labeled c_0, c_1, c_2 so the chain visually connects the carry-out
+% of row N to the carry-in operand of row N+1. The 1:1 lowering
+% header conveys that the chain applies at both abstraction levels.
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}[
   every node/.style={font=\footnotesize\ttfamily},
   hdr/.style={font=\small\bfseries\rmfamily},
-  link/.style={font=\footnotesize\itshape\rmfamily},
-  carry/.style={-{Latex[length=1.6mm]}, semithick, red!70!black},
+  link/.style={font=\scriptsize\itshape\rmfamily},
+  carry/.style={-{Latex[length=1.8mm]}, semithick, red!70!black},
+  carrylab/.style={font=\scriptsize\itshape\rmfamily, red!70!black, inner sep=1pt},
 ]
 
 % Headings
-\node[hdr]  at (1.7, 0.7) {dMIR};
-\node[link] at (4.5, 0.7) {(1:1 lowering)};
-\node[hdr]  at (7.2, 0.7) {x86-64};
+\node[hdr]  at (1.7, 0.9) {dMIR};
+\node[hdr]  at (6.5, 0.9) {x86-64};
 
-% dMIR side (left)
-\node[anchor=west] (d0) at (0, 0)    {r0 = add(a0, b0)};
-\node[anchor=west] (d1) at (0, -0.6) {r1 = ADC(a1, b1, c$_0$)};
-\node[anchor=west] (d2) at (0, -1.2) {r2 = ADC(a2, b2, c$_1$)};
+% dMIR rows (left column)
+\node[anchor=west] (d0) at (0, 0.3)  {r0 = add(a0, b0)};
+\node[anchor=west] (d1) at (0, -0.4) {r1 = ADC(a1, b1, c$_0$)};
+\node[anchor=west] (d2) at (0, -1.1) {r2 = ADC(a2, b2, c$_1$)};
 \node[anchor=west] (d3) at (0, -1.8) {r3 = ADC(a3, b3, c$_2$)};
 
-% x86-64 side (right)
-\node[anchor=west] (x0) at (5.7, 0)    {add rax, rcx};
-\node[anchor=west] (x1) at (5.7, -0.6) {adc rbx, rdx};
-\node[anchor=west] (x2) at (5.7, -1.2) {adc rsi, rdi};
-\node[anchor=west] (x3) at (5.7, -1.8) {adc r8,~~r9};
+% x86-64 rows (right column)
+\node[anchor=west] (x0) at (5.0, 0.3)  {add rax, rcx};
+\node[anchor=west] (x1) at (5.0, -0.4) {adc rbx, rdx};
+\node[anchor=west] (x2) at (5.0, -1.1) {adc rsi, rdi};
+\node[anchor=west] (x3) at (5.0, -1.8) {adc r8,~~r9};
 
-% Single carry chain (only on dMIR side; lowering preserves it)
-% Arrows trace carry-out of row N -> carry-in operand of row N+1
-\draw[carry] ([xshift=-3pt]d0.south west) -- node[left,font=\scriptsize\itshape\rmfamily]{c$_0$} ([xshift=-3pt]d1.north west);
-\draw[carry] ([xshift=-3pt]d1.south west) -- node[left,font=\scriptsize\itshape\rmfamily]{c$_1$} ([xshift=-3pt]d2.north west);
-\draw[carry] ([xshift=-3pt]d2.south west) -- node[left,font=\scriptsize\itshape\rmfamily]{c$_2$} ([xshift=-3pt]d3.north west);
+% "1:1 lowering" link label centered between column headings
+\node[link] at (4.0, 0.9) {1:1 lowering};
+
+% Carry chain in MIDDLE column between dMIR and x86 (x = 4.0)
+% Arrows from below row N's c-output to above row N+1's c-input;
+% c-subscript labels visually adjacent to the arrows.
+\draw[carry] (4.0, 0.15)  -- node[carrylab, right=1pt]{c$_0$} (4.0, -0.25);
+\draw[carry] (4.0, -0.55) -- node[carrylab, right=1pt]{c$_1$} (4.0, -0.95);
+\draw[carry] (4.0, -1.25) -- node[carrylab, right=1pt]{c$_2$} (4.0, -1.65);
 
 \end{tikzpicture}
 \caption{U256 4-limb addition lowered to dMIR (left) and x86-64
-(right). The dMIR \texttt{ADC} maps 1:1 to the x86-64 \texttt{adc},
-so the serial carry chain shown on the dMIR side (red arrows
-$c_0, c_1, c_2$) is preserved end-to-end at the machine level; each
-\texttt{ADC}/\texttt{adc} consumes the carry output of the previous
-instruction.}
+(right). Each \texttt{ADC} maps 1:1 to one \texttt{adc} instruction;
+red arrows in the middle trace the serial carry chain
+$c_0, c_1, c_2$, which the lowering preserves and which
+instruction-level parallelism cannot hide.}
 \label{fig:carry-chain}
 \end{figure}
