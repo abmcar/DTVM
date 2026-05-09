@@ -50,19 +50,14 @@ IR carry modeling, independent of solver capacity.\par}
 The four rules' Alive2 command lines, failure messages, and tool
 versions (Alive2 v21.0, Z3 4.8.12) are archived in the artifact.
 
-The bottleneck is not the SMT solver~\cite{demoura2008z3}: the six
-U256 rules without multi-return carry pass Alive2 in $\sim$60\,ms each.
-
-{\sloppy
+The bottleneck is not the SMT solver~\cite{demoura2008z3}: the six U256
+rules without multi-return carry pass Alive2 in $\sim$60\,ms each.
 In LLVM IR, expressing one carry-propagating addition takes five lines
-around \texttt{uadd.with.overflow}; in dMIR, a single \texttt{ADC}
-suffices. Native carry-bit support brings all four rules into the scope
-of automatic equivalence checking.\par}
-
-We first define dMIR's bit-vector semantics, then describe enumeration
-and SMT admission, and finally summarize the two-tier rule organization.
-The JIT runs a compiled two-tier implementation: dMIR for algebraic
-rewrites and x86 CgIR (code-generation IR) for carry-chain cleanup.
+around \texttt{uadd.with.overflow}; in dMIR a single \texttt{ADC}
+suffices, bringing all four rules into the scope of automatic
+equivalence checking. The JIT runs a compiled two-tier implementation:
+dMIR for algebraic rewrites and x86 CgIR (code-generation IR) for
+carry-chain cleanup.
 
 \subsection{dMIR Bit-Vector Semantics and Carry-Chain Operators}
 \label{sec:bvmodel}
@@ -146,16 +141,35 @@ right-hand side is verified equivalent to the left-hand side by Z3 but
 is not required to be syntactically identical to the production
 rule's right-hand side.
 
-\paragraph{Counterexamples.} Two rejected carry templates illustrate
-why SMT admission is essential on the carry chain.
-$\texttt{SBB}(x, x, c_f) \to 0$ fails at $x{=}0, c_f{=}1$ (LHS is
-$\texttt{0xFF}\ldots\texttt{F}$; correct form
-$\texttt{sub}(0, c_f)$); $\texttt{SBB}(x, 0, c_f) \to \texttt{sub}(0, c_f)$
-fails at $x{=}1, c_f{=}0$ (correct form $\texttt{sub}(x, c_f)$). Both
-reflect modular-carry traps: ignored carry input and confused operand
-polarity. The artifact contains $\sim$2400 lines of Python (enumerator,
-template miner, canonical comparator, Z3 admission checks), the rule-set JSON,
-coverage output, and unit tests for canonicalization/dedup.
+\paragraph{Shadow audit and recursive commutative-aware matching.} A
+shadow-audit instrumentation runs, in parallel with production
+matching, a runtime with two configurable matchers: a baseline that
+swap-attempts only at the rule's root, and a commutative-aware matcher
+that attempts swaps recursively at every commutative-rooted subtree to
+depth four over $\{\text{add}, \text{and}, \text{or}, \text{xor},
+\text{mul}\}$. The production codegen is extended in lockstep so
+emitted matchers mirror the same recursive policy. On the existing 70
+production rules the extension is byte-identical---no commutative-rooted
+rule has a nested commutative subtree---so it ships as prod-build-clean
+infrastructure that any future rule with a nested commutative left-hand
+side composes into.
+
+\paragraph{Corpus-driven methodology check.} A separate enumerator pass
+rebuilds the rule corpus from a canonicalized opcode-bigram model of a
+Cancun trace; we use it as a methodology cross-check on the corpus
+enumeration pipeline itself, distinct from the hand-driven curation
+that selects the 70 production rules. The corpus pass reproduces,
+byte-identical to the prior corpus audit, the same 1{,}432-rule
+audit-accepted subset; the path-equivalence is the contribution, not a
+yield gain. The audit-accepted denominator used below is 1{,}432.
+
+\paragraph{Counterexamples.} A rejected carry template illustrates why
+SMT admission is essential on the chain: $\texttt{SBB}(x, x, c_f) \to 0$
+fails at $x{=}0, c_f{=}1$ (LHS is $\texttt{0xFF}\ldots\texttt{F}$;
+correct form $\texttt{sub}(0, c_f)$), reflecting a modular-carry trap
+on ignored carry input. The artifact ships the enumerator, template
+miner, canonical comparator, Z3 admission checks, rule-set JSON,
+coverage output, and unit tests.
 
 \paragraph{Two-tier rule set.} The dMIR layer handles
 machine-independent algebraic simplification (all 70 dMIR rules pass Z3);

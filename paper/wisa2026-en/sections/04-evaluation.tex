@@ -10,9 +10,7 @@ sample is summarized below.
 
 \input{tables/tab4-1-synth-alive2}
 
-Z3 discharges the hardest 256-bit queries in $\sim$60\,ms and rechecks
-all 70 dMIR rules in $\sim$0.5\,s, so width is not the bottleneck. On a
-10-rule U256 capacity-run sample, Alive2 clears the 6 without
+On a 10-rule U256 capacity-run sample, Alive2 clears the 6 without
 multi-return carry but reports type mismatch or timeout on the 4
 \texttt{adc}/\texttt{sbb} cases. This sample is separate from the four
 production-style cases in Table~\ref{tab:cannot-express}; both expose
@@ -34,24 +32,21 @@ is therefore \textbf{0/70}.
 
 \paragraph{Scope of the coverage claim.}
 \label{sec:coverage-scope}
-The claim has two boundaries. First, the result measures coverage of the
-\emph{existing} production rule set; the extended enumerator's
-left-hand-side operator tops and constant pool were broadened in light
-of an earlier 0/70 baseline that exposed mechanical gaps (missing tops
-such as \texttt{not}/\texttt{select}/\texttt{shl}/\texttt{ushr}/%
-\texttt{sshr} as left-hand-side roots, missing small constants, and
-structural-equality dedup of forms such as $\texttt{and}(x,x)$).
-Reaching 70/70 therefore demonstrates that the production rules lie
-inside an enumerable and Z3-discharged search space; it does not
-demonstrate blind recall of an unseen target. Second, coverage is
-defined on canonical left-hand sides; the enumerated right-hand side
-is verified equivalent to its own left-hand side by Z3 but is not
-required to be syntactically identical to the production rule's
-right-hand side. Together with the admission rate above, this result
-shows the tuned search space is broad enough to contain every
-hand-designed rule, while 1966 of its members pass Z3 verification; it
-does not claim that the non-production members are useful runtime
-rewrites.
+{\sloppy
+The enumerator's left-hand-side operator tops and constant pool were
+tuned in light of an earlier 0/70 baseline that exposed mechanical
+gaps (missing tops such as \texttt{not},
+\texttt{select}, \texttt{shl}, \texttt{ushr},
+\texttt{sshr}; missing small constants; structural-equality dedup of
+$\texttt{and}(x,x)$). Reaching 70/70 therefore shows the production
+rules lie inside an enumerable Z3-discharged search space, not blind
+recall of an unseen target. Coverage is on canonical left-hand sides
+only---enumerated right-hand sides are Z3-equivalent to their own
+left-hand sides but are not syntactically required to match the
+production rule's right-hand side. The tuned search space is broad
+enough to contain every hand-designed rule, with 1966 members passing
+Z3 admission; non-production members are not claimed to be useful
+runtime rewrites.\par}
 
 \subsection{End-to-End Performance}
 \label{sec:perf}
@@ -79,11 +74,55 @@ cleanup. The two layers complement each other: multi-word rules
 concentrate gains on U256-heavy contracts, x86 cleanup yields broader
 gains on ordinary code.
 
-\paragraph{Compilation overhead.} Across 776 JIT unit-test modules,
-median per-module compile time is 0.45\,ms (p95 0.87\,ms) covering the
-full loading--analysis--codegen pipeline; this is an upper bound on
-the whole pipeline rather than the incremental rewrite-pass cost
-(per-pass attribution remains future work).
+\paragraph{Compilation overhead.}
+{\sloppy
+Across 776 JIT unit-test modules, median per-module compile time is
+0.45\,ms (p95 0.87\,ms) for the full pipeline---an upper bound, not
+the incremental rewrite-pass cost (per-pass attribution is future
+work).\par}
+
+\subsection{Shadow Audit and Statistical Validation}
+\label{sec:shadow-audit}
+
+\paragraph{Noise floor calibration.}
+{\sloppy
+We calibrate a paired-bench noise floor in two stages: \textsc{0a}
+measures within-window pairwise deltas (one prod-only build, 30 reps
+$\times$ 27 benchmarks $\times$ 4 windows; $p_{99} = \mathbf{1.86\%}$),
+\textsc{0b} measures inter-run deltas under the same
+single-binary-with-env-var-swap protocol the Stage 4 single-rule bench
+uses ($p_{99} = \mathbf{2.65\%}$). With a $1.5\times$ inflation guard
+against carry-over correlation, the effective threshold for declaring
+a per-rule speedup is $\boldsymbol{2.80\%}$; the pilot fixes 15 reps
+per candidate at this threshold ($\alpha{=}0.05$, power $0.80$, median
+CV 0.73\%).\par}
+
+\paragraph{Dual-arm audit on 1{,}432 rules.}
+{\sloppy
+We run the matcher in two configurations on the audit-accepted subset
+of 1{,}432 rules: a \emph{naive} arm with root-only swap, and an
+\emph{aware} arm with recursive commutative-aware swap to depth four.
+Only \textbf{1} rule (\texttt{synth-add-1907}, the identity
+$\texttt{add}(x, 0)$) shows a non-zero recovery delta of \textbf{48}
+additional fires across the trace---about \textbf{0.02\%} of the
+217{,}325 total audit hits across the 1{,}432 rules (or 0.06\% of
+\texttt{synth-add-1907}'s own 76{,}842 hits). The remaining 1{,}431
+rules are bench-cold under both arms.\par}
+
+\paragraph{Single-rule bench and FDR.}
+{\sloppy
+The four ranked-fired candidates plus three pre-registered negative
+controls (\texttt{null\_dead\_code}, \texttt{null\_depth5},
+\texttt{null\_self\_cancel}) are bench-validated with 15 reps
+$\times$ 27 benchmarks $\times$ 2 sides per candidate, fresh process
+per run, bracketed-mean delta, bootstrap CI ($B{=}10\,000$). Across
+the resulting 189 $(\text{rule},\text{bench})$ hypotheses, the gate
+$\Delta{<}{-}2.80\% \wedge \text{ci\_high}{<}0 \wedge
+q_{\text{BH}}{<}0.05$ is satisfied by \textbf{0} pairs, and the
+negative-control gate also holds (0 of 3 valid): the pipeline records
+$n_{\text{picks}}=0$. The contribution is the methodology---turning
+matcher-capability claims into a strict statistical
+test---rather than the rule yield.\par}
 
 \subsection{Correctness and Rule Coverage}
 \label{sec:correctness}
@@ -97,9 +136,16 @@ Table~\ref{tab:correctness} (5884/5884 total). Independently,
 under multipass JIT and interpreter modes.\footnote{Cancun is selected
 via \texttt{evmone-statetest -k fork\_Cancun}; Prague tests are excluded
 because DTVM does not yet support that fork.} The suite covers Cancun
-state tests and EVM unit tests, but we do not claim opcode- or gas-branch
-coverage completeness.\par}
+state tests and EVM unit tests; opcode- and gas-branch coverage
+completeness are not claimed. CI re-runs the same admission check on
+every change to the rule file.\par}
 
-CI re-runs the same admission check on every change to the rule file;
-the timing is distinct from the per-module JIT compile time reported
-above.
+\paragraph{Codegen-extension regression.} The recursive
+commutative-aware codegen extension passes the four suites of
+Table~\ref{tab:correctness} unchanged. The in-tree \texttt{ctest} EVM
+spec runner has one pre-existing failure on the \texttt{erc20}
+contract test that is empirically independent of the extension:
+regenerated codegen artifacts are byte-identical pre/post patch on the
+current production rule set, and a baseline rerun at the immediate
+pre-extension commit reproduces the same failure; the
+\texttt{erc20} sensitivity is recorded as a separate workstream.
