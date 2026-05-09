@@ -6,51 +6,53 @@ consensus state machine: every node on the consensus path must produce
 bit-identical results for the same transaction. The EVM is a widely
 deployed smart-contract execution environment; when a client enables a
 JIT, the compiler becomes part of the consensus-critical path.
-Peephole rewrites in the JIT act directly at machine-code generation,
-so their correctness bears directly on the determinism of on-chain
-execution; a wrong equivalence judgment, deployed on only some
+Peephole rewrites in the JIT act directly during machine-code generation,
+so their correctness directly affects the determinism of on-chain
+execution; an incorrect equivalence judgment, deployed on only some
 clients, may trigger a chain fork.
 
 Existing formal verification of EVM peephole rewrites mostly targets
-the bytecode block-level abstraction. The machine-level patterns
+the block-level bytecode abstraction. The machine-level patterns
 emitted by a JIT during code generation---especially the multi-word
-carry chains that arise when the 256-bit word length is lowered onto
+carry chains that arise when the 256-bit word size is lowered onto
 64-bit hardware---sit at a different abstraction layer from bytecode
-rules and are awkward to validate as single stock LLVM/Alive2 peephole
-queries. The root cause is how IRs model bit-level side-products. In
+rules and are awkward to validate as standard LLVM/Alive2 peephole
+queries. The root cause is how IRs model bit-level side results. In
 LLVM IR, basic arithmetic is defined only on $N$-bit
 integers; the carry bit must be retrieved through an intrinsic that
 returns a multi-return tuple of \{result, carry\}. Rules depending on
-this side-product can be expressed only through indirect structures in
+this carry bit can be expressed only through indirect structures in
 Alive~\cite{alive} and similar tools; the bottleneck is the IR's
 expressiveness, not the SMT solver~\cite{demoura2008z3}. For a
 consensus-critical JIT, an unchecked rule class leaves the engineer
 with three choices---drop it (performance), ship it without verification
 (safety), or hand-prove it (scalability).
 
-Our approach: extend the IR with first-class bit-vector operators so
-that SMT-checkable peephole rules cover a larger surface, without
+Our approach is to extend the IR with first-class bit-vector operators so
+that SMT-checkable peephole rules cover a larger rule class, without
 modifying the solver or relaxing the differential-test threshold. In
 dMIR, the bit-level patterns that previously required indirect
-multi-return encoding become first-class operators, so the
+multi-return encoding are represented directly, so the
 corresponding rules fall within Z3 bit-vector equivalence. The SMT scope
 is dMIR arithmetic/flag semantics; gas, memory, storage, and x86
 equivalence remain outside it.
 
-Our main contributions are as follows. First, we extend dMIR with
-first-class carry and overflow operators; the four carry-chain
-rewrites of Table~\ref{tab:cannot-express} reduce to single Z3
-bit-vector queries, replacing the indirect LLVM/Alive2 multi-return
-tuple encoding. The two-tier rule set contains \textbf{70} SMT-checked
-dMIR rules and \textbf{13} differentially tested x86 cleanup rules.
-Second, an enumerable, Z3-admitted search space covers the production
-set: a capacity run admits \textbf{853} candidates---\textbf{98.7\%} of
-algebraic and \textbf{21.8\%} of carry templates---and a coverage run
-produces \textbf{1{,}966} admitted rewrites whose canonical left-hand
-sides match all \textbf{70} hand-designed production rules. Third, the
-full 83-rule set delivers a \textbf{+7.24\%} geometric-mean speedup on
-the 27 evmone-bench workloads (95\% CI [+2.59\%, +12.11\%], peak
-\textbf{+25.79\%}) and passes \textbf{5{,}884} differential Cancun
-tests with byte-identical final state and matching gas accounting,
-with correctness bounded by suite coverage.
-
+Concretely, we make three contributions:
+\begin{itemize}
+\item \textbf{Carry-aware dMIR semantics.} We promote carry and overflow
+from implicit side results to first-class dMIR operators, so
+ADC/SBB-style multi-word dependencies become single bit-vector
+equivalence obligations rather than indirect multi-return encodings.
+\item \textbf{SMT admission and production coverage.} An offline Z3
+pipeline admits all \textbf{70} production dMIR rewrites under
+fixed-width modular bit-vector semantics. Its enumeration also reaches
+all production left-hand sides (\textbf{70/70}), including carry-chain
+forms that resist direct formulation in LLVM IR.
+\item \textbf{Layered optimization with consensus-path evidence.}
+SMT-checked dMIR arithmetic simplifications compose with x86-64 CgIR
+cleanups validated by matched differential testing; across 27
+evmone-bench workloads, the 83-rule system attains a \textbf{+7.24\%}
+geometric-mean speedup and passes \textbf{5{,}884} Cancun differential
+tests with byte-identical final state and matching gas accounting within
+suite coverage.
+\end{itemize}

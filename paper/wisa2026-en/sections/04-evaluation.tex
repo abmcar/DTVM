@@ -4,19 +4,21 @@
 
 \subsection{Enumeration and Admission Output vs.\ the General-Purpose IR}
 
-Table~\ref{tab:synth-alive2} reports the enumeration/admission output
-of the capacity run; Alive2's verification on the same rule
-sample is summarized below.
+The capacity run asks how many offline candidates survive Z3 admission
+in the dMIR search space, and whether the same U256 sample can be
+checked in a general-purpose LLVM-IR verifier. Table~\ref{tab:synth-alive2}
+summarizes the admission output; the Alive2 run below isolates the
+remaining expressiveness gap.
 
 \input{tables/tab4-1-synth-alive2}
 
-On a 10-rule U256 capacity-run sample, Alive2 clears the 6 without
+On a 10-rule U256 capacity-run sample, Alive2 verifies the 6 without
 multi-return carry but reports type mismatch or timeout on the 4
 \texttt{adc}/\texttt{sbb} cases. This sample is separate from the four
 production-style cases in Table~\ref{tab:cannot-express}; both expose
-the same tuple cause.
+the same tuple-encoding limitation.
 
-\paragraph{Production rule coverage.} Using the canonical-LHS
+\paragraph{Production Rule Coverage.} Using the canonical-LHS
 methodology, the coverage run produces
 \textbf{1966} Z3-admitted rewrite rules: \textbf{1856} from the
 extended algebraic enumerator and \textbf{110} from pattern-template
@@ -30,7 +32,7 @@ that both production names match---equivalently \textbf{70/70}
 production rule names; the false-miss rate against the production set
 is therefore \textbf{0/70}.
 
-\paragraph{Scope of the coverage claim.}
+\paragraph{Scope of the Coverage Claim.}
 \label{sec:coverage-scope}
 {\sloppy
 The enumerator's left-hand-side operator tops and constant pool were
@@ -51,8 +53,14 @@ runtime rewrites.\par}
 \subsection{End-to-End Performance}
 \label{sec:perf}
 
+After admission, the next question is whether the production rules produce
+end-to-end speedups on real EVM workloads rather than merely enlarging the
+pool of locally valid rewrites. We compare the rules-enabled build with
+upstream main on evmone-bench; positive point-estimate speedup cases appear in
+Figure~\ref{fig:speedup}.
+
 \paragraph{Setup.} Intel Core Ultra 7 265K/Ubuntu 22.04; evmone-bench,
-baseline (upstream \texttt{main}) vs.\ rules-enabled side, 20 runs
+baseline (upstream \texttt{main}) vs.\ rules-enabled build, 20 runs
 (30 if CV $\geq3\%$), bootstrap CIs ($B{=}10\,000$), pinned CPU,
 turbo off.
 
@@ -60,21 +68,21 @@ turbo off.
 
 {\sloppy
 Across all 27 benchmarks, the full 83-rule set improves the geometric
-mean by \textbf{+7.24\%} (95\% CI [+2.59\%, +12.11\%]); the
-positive-speedup cases are shown in Figure~\ref{fig:speedup}. Peak
-speedup is \textbf{+25.79\%} on
+mean by \textbf{+7.24\%} (95\% CI [+2.59\%, +12.11\%]). Among the
+positive cases, peak speedup is \textbf{+25.79\%} on
 \texttt{JUMPDEST\_n0/}\allowbreak\texttt{empty}. The \texttt{sha1}
 family gains +19.59\%--+24.81\%, and
 \texttt{blake2b\_}\allowbreak\texttt{huff} gains +10.41\%--+11.54\%.\par}
 \noindent
 Hit rate and speedup are decoupled: \texttt{mg\_mload} matches nearly
 every U256 instruction yet gains under 8\%, while sha1 hits only 7.5\%
-of opcodes yet gains over 20\% from x86 branch and compare-merge
-cleanup. The two layers complement each other: multi-word rules
-concentrate gains on U256-heavy contracts, x86 cleanup yields broader
-gains on ordinary code.
+of opcodes yet gains over 20\% from x86 branch and compare-merge cleanup;
+blake2b follows the same pattern. The layers complement each other:
+multi-word rules concentrate gains on U256-heavy contracts, while CgIR
+handles broader hardware-specific cleanups outside machine-independent
+equivalence proofs.
 
-\paragraph{Compilation overhead.}
+\paragraph{Compilation Overhead.}
 {\sloppy
 Across 776 JIT unit-test modules, median per-module compile time is
 0.45\,ms (p95 0.87\,ms) for the full pipeline---an upper bound, not
@@ -84,20 +92,20 @@ work).\par}
 \subsection{Shadow Audit and Statistical Validation}
 \label{sec:shadow-audit}
 
-\paragraph{Noise floor calibration.}
+\paragraph{Noise Floor Calibration.}
 {\sloppy
-We calibrate a paired-bench noise floor in two stages: \textsc{0a}
+We calibrate a paired benchmark noise floor in two stages: \textsc{0a}
 measures within-window pairwise deltas (one prod-only build, 30 reps
 $\times$ 27 benchmarks $\times$ 4 windows; $p_{99} = \mathbf{1.86\%}$),
 \textsc{0b} measures inter-run deltas under the same
-single-binary-with-env-var-swap protocol the Stage 4 single-rule bench
-uses ($p_{99} = \mathbf{2.65\%}$). With a $1.5\times$ inflation guard
+single-binary, environment-variable swap protocol used by the Stage~4
+single-rule benchmark ($p_{99} = \mathbf{2.65\%}$). With a $1.5\times$ inflation guard
 against carry-over correlation, the effective threshold for declaring
 a per-rule speedup is $\boldsymbol{2.80\%}$; the pilot fixes 15 reps
 per candidate at this threshold ($\alpha{=}0.05$, power $0.80$, median
 CV 0.73\%).\par}
 
-\paragraph{Dual-arm audit on 1{,}432 rules.}
+\paragraph{Dual-Arm Audit on 1{,}432 Rules.}
 {\sloppy
 We run the matcher in two configurations on the audit-accepted subset
 of 1{,}432 rules: a \emph{naive} arm with root-only swap, and an
@@ -107,13 +115,13 @@ $\texttt{add}(x, 0)$) shows a non-zero recovery delta of \textbf{48}
 additional fires across the trace---about \textbf{0.02\%} of the
 217{,}325 total audit hits across the 1{,}432 rules (or 0.06\% of
 \texttt{synth-add-1907}'s own 76{,}842 hits). The remaining 1{,}431
-rules are bench-cold under both arms.\par}
+rules are cold in the benchmark trace under both arms.\par}
 
-\paragraph{Single-rule bench and FDR.}
+\paragraph{Single-Rule Bench and FDR.}
 {\sloppy
-The four ranked-fired candidates plus three pre-registered negative
+The four highest-firing candidates plus three pre-registered negative
 controls (\texttt{null\_dead\_code}, \texttt{null\_depth5},
-\texttt{null\_self\_cancel}) are bench-validated with 15 reps
+\texttt{null\_self\_cancel}) are benchmark-validated with 15 reps
 $\times$ 27 benchmarks $\times$ 2 sides per candidate, fresh process
 per run, bracketed-mean delta, bootstrap CI ($B{=}10\,000$). Across
 the resulting 189 $(\text{rule},\text{bench})$ hypotheses, the gate
@@ -127,25 +135,27 @@ test---rather than the rule yield.\par}
 \subsection{Correctness and Rule Coverage}
 \label{sec:correctness}
 
+The final question is whether enabling the 83-rule set changes
+observable EVM behavior relative to the baseline. We therefore run
+matched differential suites and compare final state and gas accounting
+between the two builds; the pass counts are summarized in
+Table~\ref{tab:correctness}.
+
 \input{tables/tab4-3-correctness}
+\FloatBarrier
 
 {\sloppy
-Both sides agree item-by-item across the four differential categories of
-Table~\ref{tab:correctness} (5884/5884 total). Independently,
-\texttt{evmone-statetest} on the Cancun fork reaches the same matrix
-under multipass JIT and interpreter modes.\footnote{Cancun is selected
-via \texttt{evmone-statetest -k fork\_Cancun}; Prague tests are excluded
-because DTVM does not yet support that fork.} The suite covers Cancun
-state tests and EVM unit tests; opcode- and gas-branch coverage
-completeness are not claimed. CI re-runs the same admission check on
-every change to the rule file.\par}
+Both sides agree item by item across the four differential categories
+(5884/5884 total). Independently,
+\texttt{evmone-statetest} on Cancun confirms the same pass matrix
+under multipass JIT and interpreter modes (Cancun selected via
+\texttt{evmone-statetest -k fork\_Cancun}; Prague excluded because DTVM
+does not yet support that fork). The suite covers Cancun state tests and
+EVM unit tests; opcode- and gas-branch coverage completeness are not
+claimed. CI re-runs the same admission check on every rule-file change.\par}
 
-\paragraph{Codegen-extension regression.} The recursive
+\paragraph{Codegen-Extension Regression.} The recursive
 commutative-aware codegen extension passes the four suites of
-Table~\ref{tab:correctness} unchanged. The in-tree \texttt{ctest} EVM
-spec runner has one pre-existing failure on the \texttt{erc20}
-contract test that is empirically independent of the extension:
-regenerated codegen artifacts are byte-identical pre/post patch on the
-current production rule set, and a baseline rerun at the immediate
-pre-extension commit reproduces the same failure; the
-\texttt{erc20} sensitivity is recorded as a separate workstream.
+Table~\ref{tab:correctness}. The lone in-tree \texttt{erc20}
+\texttt{ctest} failure is pre-existing: the baseline reproduces it, and
+regenerated production-rule artifacts are byte-identical pre/post patch.

@@ -1,25 +1,19 @@
 % 05-conclusion.tex — §5 Conclusion
 \section{Conclusion}
 
-This paper extends a domain-specific JIT IR (dMIR) with first-class
-carry and overflow operators and builds an SMT-checked peephole layer
-on top of it: 70 dMIR rules pass Z3 admission over arithmetic and
-flags, and 13 x86 cleanup rules are covered by matched differential
-testing. The combination delivers a +7.24\% geometric-mean speedup on
-evmone-bench while preserving byte-identical final state across
-5{,}884 Cancun differential tests, with correctness bounded by suite
-coverage.
+This paper extends dMIR with first-class carry and overflow operators
+and builds an SMT-checked peephole layer on top: 70 dMIR rules pass Z3
+admission over arithmetic and flags, and 13 x86 cleanup rules are covered
+by matched differential testing. The combination delivers a +7.24\%
+geometric-mean speedup on evmone-bench while preserving byte-identical
+final state across 5{,}884 Cancun differential tests, with correctness
+bounded by suite coverage.
 
-Beyond the peephole layer itself, we add a measurement pipeline---a
-shadow audit that pairs a baseline matcher with a recursive
-commutative-aware matcher at every commutative-rooted subtree, and a
-strict statistical validation harness that turns matcher-capability
-claims into bench-paired CI-bounded tests---which on the existing
-70-rule production set reports no statistically valid recovery
-($n_{\text{picks}}=0$): the contribution is the methodology and the
-negative result, not a rule yield. The recursive matcher infrastructure
-lands prod-build-clean. Future work includes a formal x86 model to
-replace the differential-test fallback at the cleanup layer,
-cross-engine validation against evmone and revm, and running the
-validation pipeline against an extended rule set drawn from per-rule
-attribution analysis on production traces.
+The shadow audit adds a stricter measurement path: a recursive matcher
+over commutative subtrees plus bench-paired CI-bounded validation reports
+no statistically valid recovery on the current production set
+($n_{\text{picks}}=0$), so the result is methodological and negative
+rather than a rule yield. Future work is to formalize the x86 CgIR tier,
+check cross-implementation equivalence across EVM engines such as evmone
+and revm, and generate carry-chain optimizations automatically through
+equality saturation or superoptimization.

@@ -9,8 +9,8 @@
   every node/.style={font=\footnotesize\ttfamily},
   hdr/.style={font=\small\bfseries\rmfamily},
   link/.style={font=\scriptsize\itshape\rmfamily},
-  carry/.style={-{Latex[length=1.8mm]}, semithick, red!70!black},
-  carrylab/.style={font=\scriptsize\itshape\rmfamily, red!70!black, inner sep=1pt},
+  carry/.style={-{Latex[length=1.8mm]}, semithick, dashed},
+  carrylab/.style={font=\scriptsize\itshape\rmfamily, inner sep=1pt},
 ]
 
 % Headings
@@ -41,7 +41,7 @@
 
 \end{tikzpicture}
 \caption{U256 4-limb addition in dMIR (left) and x86-64 (right). Each
-\texttt{ADC} lowers 1:1 to \texttt{adc}; red arrows trace the serial
+\texttt{ADC} lowers 1:1 to \texttt{adc}; dashed arrows trace the serial
 carry chain $c_0, c_1, c_2$ that the lowering preserves.}
 \label{fig:carry-chain}
 \end{figure}

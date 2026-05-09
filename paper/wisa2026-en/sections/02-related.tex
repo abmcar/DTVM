@@ -6,7 +6,10 @@
 
 {\sloppy
 We position our work by abstraction layer, verification method, and
-carry-chain coverage. Classical synthesize-then-verify systems include
+carry-chain coverage. Peephole synthesis and verification frameworks
+provide the closest methodological baseline, but they do not by
+themselves provide a complete solution for EVM JIT-backend carry
+chains. Classical synthesis-then-verification systems include
 Denali~\cite{denali_pldi02}, Bansal--Aiken~\cite{bansal_aiken_asplos06},
 STOKE~\cite{stoke}, Stratified Synthesis~\cite{stratified}, and
 egg~\cite{egg}; SMT-based peephole checking is exemplified by
@@ -20,14 +23,15 @@ encoding limit that motivates this paper.\par}
 
 {\sloppy
 LeanMLIR~\cite{leanmlir} formalizes IR-parametric peephole verification
-in Lean~4, whereas this paper reports an instantiated EVM JIT rule set.
+in Lean~4, whereas this paper reports a concrete EVM JIT rule set.
 Hydra~\cite{hydra} generalizes bit-width-independent rules but, like
 Alive2, builds on LLVM IR and inherits the multi-return tuple limit on
 the four carry-chain examples in Table~\ref{tab:cannot-express}; closing
-that gap via an auxiliary lifted encoding is orthogonal to our IR-extension
-contribution. Schett and Nagele~\cite{fmbc20_evm_peephole} enumerate
-SMT-checked EVM \emph{bytecode} rules; we instead target the JIT
-code-generation path with dMIR matching and x86 cleanup.\par}
+that gap via an auxiliary lifted encoding is orthogonal to our
+IR-extension contribution. Schett and Nagele~\cite{fmbc20_evm_peephole}
+enumerate SMT-checked EVM \emph{bytecode} rules, a higher abstraction
+layer than the JIT code-generation path we target with dMIR matching and
+x86 cleanup.\par}
 
 \subsection{Verification Work on the Consensus-Critical Path}
 
@@ -35,17 +39,19 @@ Albert et al.~\cite{verified_evm_cav23} give a Coq proof of AOT EVM
 bytecode-block rules. Our scope sits at lower abstraction layers: JIT IR
 and machine-code, SMT admission at synthesis time, and multi-word carry
 chains. Seven rules overlap: 7/83 in our set and 7/14 in their
-\texttt{forves} set. This supports a complementary-scope reading rather
-than a superset claim: the remaining 76 cover dMIR algebraic and Boolean
+\texttt{forves} set. This suggests complementary scope rather than a
+superset relationship: the remaining 76 cover dMIR algebraic and Boolean
 simplifications (including ADC/SBB carry-chain rewrites that motivate
-the first-class carry-chain operators) plus 13 x86 cleanup rewrites, none of which are
+the first-class carry operators) plus 13 x86 cleanup rewrites, none of which are
 reachable from the bytecode-block abstraction.
 
 {\sloppy
 Runtime divergence detection---Hydra Framework~\cite{hydra_framework},
 multi-client detectors, EVM fuzzing, consensus test networks---catches
 faults after deployment; our workflow validates rules before deployment.
-Bytecode-side EVM
+Bytecode-level EVM
 optimization~\cite{maxsmt_evm,vmil24_superinst,ist25_neural_superopt}
-is orthogonal to our JIT IR/code-generation focus.\par}
-
+is orthogonal to our JIT IR/code-generation focus. Existing work
+therefore does not jointly address JIT-backend rewrites, multi-word
+carry chains, automated SMT admission, and consensus-path determinism;
+this combination is the gap targeted by our dMIR-based design.\par}

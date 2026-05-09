@@ -1,9 +1,8 @@
 % tables/tab4-1-synth-alive2.tex — Enumeration/admission output with Alive2 comparison
-\begin{table}[t]
+\begin{table}[!h]
 \centering
-\caption{Output of the enumeration/admission pipeline: candidate counts, Z3 passes,
-SAT counterexamples, timeouts, and admission rate. The two enumeration
-paths are described in detail in \S\ref{sec:synthesis}.}
+\caption{Capacity-run enumeration/admission output; the two candidate
+paths are described in \S\ref{sec:synthesis}.}
 \label{tab:synth-alive2}
 \footnotesize
 \begin{tabular}{@{}lrrrrr@{}}
@@ -14,7 +13,7 @@ Algebraic enumeration & 775 & 765 &  0 & 10 & 98.7\% \\
 Carry templates       &  78 &  17 & 61 &  0 & 21.8\% \\
 \bottomrule
 \end{tabular}
-\vspace{2pt}
+\vspace{1pt}
 \par\noindent{\scriptsize SAT counterexamples are semantic rejections;
-timeouts are conservatively rejected without counterexamples.}
+timeouts are rejected conservatively.}
 \end{table}

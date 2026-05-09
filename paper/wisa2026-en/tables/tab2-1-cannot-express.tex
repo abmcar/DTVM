@@ -1,8 +1,8 @@
 % tables/tab2-1-cannot-express.tex — 4 carry-chain rules that general-purpose IR cannot verify directly
-\begin{table}[t]
+\begin{table}[!h]
 \centering
-\caption{Four typical carry-chain rules that Alive2 (based on LLVM IR)
-cannot directly verify for equivalence because of the multi-return
+\caption{Four representative carry-chain rules that Alive2 (based on
+LLVM IR) cannot directly verify for equivalence because of the multi-return
 tuple encoding. The first three are single \texttt{ADC}/\texttt{SBB}
 rules where the right-hand side drops the carry output; the fourth is a
 4-limb carry-chain merge rule.}

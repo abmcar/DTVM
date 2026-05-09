@@ -32,66 +32,73 @@
 \@writefile{toc}{\contentsline {section}{\numberline {3}SMT-Checked dMIR Peephole Rewrites}{3}{section.3}\protected@file@percent }
 \newlabel{sec:method}{{3}{3}{SMT-Checked dMIR Peephole Rewrites}{section.3}{}}
 \citation{alive,alive2}
-\citation{demoura2008z3}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces U256 4-limb addition in dMIR (left) and x86-64 (right). Each \texttt  {ADC} lowers 1:1 to \texttt  {adc}; red arrows trace the serial carry chain $c_0, c_1, c_2$ that the lowering preserves.}}{4}{figure.1}\protected@file@percent }
-\newlabel{fig:carry-chain}{{1}{4}{U256 4-limb addition in dMIR (left) and x86-64 (right). Each \texttt {ADC} lowers 1:1 to \texttt {adc}; red arrows trace the serial carry chain $c_0, c_1, c_2$ that the lowering preserves}{figure.1}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Four typical carry-chain rules that Alive2 (based on LLVM IR) cannot directly verify for equivalence because of the multi-return tuple encoding. The first three are single \texttt  {ADC}/\texttt  {SBB} rules where the right-hand side drops the carry output; the fourth is a 4-limb carry-chain merge rule.}}{4}{table.1}\protected@file@percent }
-\newlabel{tab:cannot-express}{{1}{4}{Four typical carry-chain rules that Alive2 (based on LLVM IR) cannot directly verify for equivalence because of the multi-return tuple encoding. The first three are single \texttt {ADC}/\texttt {SBB} rules where the right-hand side drops the carry output; the fourth is a 4-limb carry-chain merge rule}{table.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces U256 4-limb addition in dMIR (left) and x86-64 (right). Each \texttt  {ADC} lowers 1:1 to \texttt  {adc}; dashed arrows trace the serial carry chain $c_0, c_1, c_2$ that the lowering preserves.}}{4}{figure.1}\protected@file@percent }
+\newlabel{fig:carry-chain}{{1}{4}{U256 4-limb addition in dMIR (left) and x86-64 (right). Each \texttt {ADC} lowers 1:1 to \texttt {adc}; dashed arrows trace the serial carry chain $c_0, c_1, c_2$ that the lowering preserves}{figure.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Four representative carry-chain rules that Alive2 (based on LLVM IR) cannot directly verify for equivalence because of the multi-return tuple encoding. The first three are single \texttt  {ADC}/\texttt  {SBB} rules where the right-hand side drops the carry output; the fourth is a 4-limb carry-chain merge rule.}}{4}{table.1}\protected@file@percent }
+\newlabel{tab:cannot-express}{{1}{4}{Four representative carry-chain rules that Alive2 (based on LLVM IR) cannot directly verify for equivalence because of the multi-return tuple encoding. The first three are single \texttt {ADC}/\texttt {SBB} rules where the right-hand side drops the carry output; the fourth is a 4-limb carry-chain merge rule}{table.1}{}}
 \citation{demoura2008z3}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}dMIR Bit-Vector Semantics and Carry-Chain Operators}{5}{subsection.3.1}\protected@file@percent }
 \newlabel{sec:bvmodel}{{3.1}{5}{dMIR Bit-Vector Semantics and Carry-Chain Operators}{subsection.3.1}{}}
-\@writefile{toc}{\contentsline {paragraph}{Trusted base.}{5}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Trusted Base.}{5}{section*.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Candidate Enumeration and SMT Admission}{5}{subsection.3.2}\protected@file@percent }
 \newlabel{sec:synthesis}{{3.2}{5}{Candidate Enumeration and SMT Admission}{subsection.3.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{Admission check.}{5}{section*.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Two enumeration runs.}{5}{section*.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Throughput and admission rate.}{6}{section*.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Production rule coverage (methodology).}{6}{section*.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Counterexamples.}{6}{section*.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Two-tier rule set.}{6}{section*.8}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Selection asymmetry.}{6}{section*.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Admission Check.}{5}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Two Enumeration Runs.}{5}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Throughput and Admission Rate.}{6}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Production Rule Coverage (Methodology).}{6}{section*.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Shadow Audit and Recursive Commutative-Aware Matching.}{6}{section*.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Corpus-Driven Methodology Check.}{6}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Counterexamples.}{6}{section*.9}\protected@file@percent }
 \@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Classification of the two-tier peephole rewrite rules by evidence type. The dMIR rules are checked for equivalence by Z3 on the bit-vector semantic model; the x86 CgIR rules are covered by matched differential tests, not by SMT.}}{7}{table.2}\protected@file@percent }
 \newlabel{tab:rule-classes}{{2}{7}{Classification of the two-tier peephole rewrite rules by evidence type. The dMIR rules are checked for equivalence by Z3 on the bit-vector semantic model; the x86 CgIR rules are covered by matched differential tests, not by SMT}{table.2}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Output of the enumeration/admission pipeline: candidate counts, Z3 passes, SAT counterexamples, timeouts, and admission rate. The two enumeration paths are described in detail in \S  \ref {sec:synthesis}.}}{7}{table.3}\protected@file@percent }
-\newlabel{tab:synth-alive2}{{3}{7}{Output of the enumeration/admission pipeline: candidate counts, Z3 passes, SAT counterexamples, timeouts, and admission rate. The two enumeration paths are described in detail in \S \ref {sec:synthesis}}{table.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Two-Tier Rule Set.}{7}{section*.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Selection Asymmetry.}{7}{section*.11}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {4}Evaluation}{7}{section.4}\protected@file@percent }
 \newlabel{sec:evaluation}{{4}{7}{Evaluation}{section.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Enumeration and Admission Output vs.\ the General-Purpose IR}{7}{subsection.4.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Production rule coverage.}{8}{section*.10}\protected@file@percent }
-\newlabel{sec:coverage-scope}{{4.1}{8}{Scope of the coverage claim}{section*.11}{}}
-\@writefile{toc}{\contentsline {paragraph}{Scope of the coverage claim.}{8}{section*.11}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Capacity-run enumeration/admission output; the two candidate paths are described in \S  \ref {sec:synthesis}.}}{8}{table.3}\protected@file@percent }
+\newlabel{tab:synth-alive2}{{3}{8}{Capacity-run enumeration/admission output; the two candidate paths are described in \S \ref {sec:synthesis}}{table.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Production Rule Coverage.}{8}{section*.12}\protected@file@percent }
+\newlabel{sec:coverage-scope}{{4.1}{8}{Scope of the Coverage Claim}{section*.13}{}}
+\@writefile{toc}{\contentsline {paragraph}{Scope of the Coverage Claim.}{8}{section*.13}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2}End-to-End Performance}{8}{subsection.4.2}\protected@file@percent }
 \newlabel{sec:perf}{{4.2}{8}{End-to-End Performance}{subsection.4.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{Setup.}{8}{section*.12}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Compilation overhead.}{8}{section*.13}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Positive-speedup benchmark configurations from enabling the peephole rewrite rule set over the upstream-main baseline (error bars are 95\% bootstrap confidence intervals, $B{=}10\,000$). The horizontal line at zero marks the no-change baseline; the dashed line at \textbf  {+7.24\%} marks the 27-benchmark geometric-mean speedup. From left to right, the benchmarks are grouped into four workload clusters: U256-heavy, Hash, Arithmetic-Logic, and Control-flow.}}{9}{figure.2}\protected@file@percent }
-\newlabel{fig:speedup}{{2}{9}{Positive-speedup benchmark configurations from enabling the peephole rewrite rule set over the upstream-main baseline (error bars are 95\% bootstrap confidence intervals, $B{=}10\,000$). The horizontal line at zero marks the no-change baseline; the dashed line at \textbf {+7.24\%} marks the 27-benchmark geometric-mean speedup. From left to right, the benchmarks are grouped into four workload clusters: U256-heavy, Hash, Arithmetic-Logic, and Control-flow}{figure.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Correctness and Rule Coverage}{9}{subsection.4.3}\protected@file@percent }
-\newlabel{sec:correctness}{{4.3}{9}{Correctness and Rule Coverage}{subsection.4.3}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Results on four differential test categories for the rules-enabled side (83 added rules) and the baseline side (upstream main): passes/total. Matching numbers in both columns indicate that the enabled rule set introduces no correctness regression.}}{9}{table.4}\protected@file@percent }
-\newlabel{tab:correctness}{{4}{9}{Results on four differential test categories for the rules-enabled side (83 added rules) and the baseline side (upstream main): passes/total. Matching numbers in both columns indicate that the enabled rule set introduces no correctness regression}{table.4}{}}
-\bibstyle{unsrt}
+\@writefile{toc}{\contentsline {paragraph}{Setup.}{9}{section*.14}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Positive point-estimate speedup configurations over upstream main. Error bars are 95\% bootstrap CIs ($B{=}10\,000$); the dashed line marks the \textbf  {+7.24\%} 27-benchmark geometric mean. Bars are grouped as U256-heavy, Hash, Arithmetic-Logic, and Control-flow.}}{9}{figure.2}\protected@file@percent }
+\newlabel{fig:speedup}{{2}{9}{Positive point-estimate speedup configurations over upstream main. Error bars are 95\% bootstrap CIs ($B{=}10\,000$); the dashed line marks the \textbf {+7.24\%} 27-benchmark geometric mean. Bars are grouped as U256-heavy, Hash, Arithmetic-Logic, and Control-flow}{figure.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{Compilation Overhead.}{9}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Shadow Audit and Statistical Validation}{9}{subsection.4.3}\protected@file@percent }
+\newlabel{sec:shadow-audit}{{4.3}{9}{Shadow Audit and Statistical Validation}{subsection.4.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Noise Floor Calibration.}{9}{section*.16}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Dual-Arm Audit on 1{,}432 Rules.}{10}{section*.17}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Single-Rule Bench and FDR.}{10}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Correctness and Rule Coverage}{10}{subsection.4.4}\protected@file@percent }
+\newlabel{sec:correctness}{{4.4}{10}{Correctness and Rule Coverage}{subsection.4.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Differential test results for the rules-enabled build (83 added rules) and upstream-main baseline: passes/total.}}{10}{table.4}\protected@file@percent }
+\newlabel{tab:correctness}{{4}{10}{Differential test results for the rules-enabled build (83 added rules) and upstream-main baseline: passes/total}{table.4}{}}
+\bibstyle{splncs04}
 \bibdata{references}
-\bibcite{alive}{1}
-\bibcite{demoura2008z3}{2}
-\bibcite{denali_pldi02}{3}
+\bibcite{ist25_neural_superopt}{1}
+\bibcite{verified_evm_cav23}{2}
+\bibcite{maxsmt_evm}{3}
 \bibcite{bansal_aiken_asplos06}{4}
-\bibcite{stoke}{5}
-\bibcite{stratified}{6}
-\bibcite{egg}{7}
-\bibcite{alive2}{8}
-\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{10}{section.5}\protected@file@percent }
-\newlabel{sec:availability}{{5}{10}{Conclusion}{section*.14}{}}
-\bibcite{souper}{9}
-\bibcite{peek}{10}
-\bibcite{dataflow_pruning}{11}
-\bibcite{lampo2025}{12}
-\bibcite{leanmlir}{13}
+\bibcite{leanmlir}{5}
+\@writefile{toc}{\contentsline {paragraph}{Codegen-Extension Regression.}{11}{section*.19}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{11}{section.5}\protected@file@percent }
+\newlabel{sec:availability}{{5}{11}{Conclusion}{section*.20}{}}
+\bibcite{hydra_framework}{6}
+\bibcite{stratified}{7}
+\bibcite{vmil24_superinst}{8}
+\bibcite{denali_pldi02}{9}
+\bibcite{alive2}{10}
+\bibcite{alive}{11}
+\bibcite{demoura2008z3}{12}
+\bibcite{dataflow_pruning}{13}
 \bibcite{hydra}{14}
-\bibcite{fmbc20_evm_peephole}{15}
-\bibcite{verified_evm_cav23}{16}
-\bibcite{hydra_framework}{17}
-\bibcite{maxsmt_evm}{18}
-\bibcite{vmil24_superinst}{19}
-\bibcite{ist25_neural_superopt}{20}
-\gdef \@abspage@last{11}
+\bibcite{peek}{15}
+\bibcite{souper}{16}
+\bibcite{fmbc20_evm_peephole}{17}
+\bibcite{stoke}{18}
+\bibcite{egg}{19}
+\bibcite{lampo2025}{20}
+\gdef \@abspage@last{12}
