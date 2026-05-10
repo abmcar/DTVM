@@ -59,12 +59,16 @@ pool of locally valid rewrites. We compare the rules-enabled build with
 upstream main on evmone-bench; positive point-estimate speedup cases appear in
 Figure~\ref{fig:speedup}.
 
-\paragraph{Setup.} Intel Core Ultra 7 265K/Ubuntu 22.04; evmone-bench,
-baseline (upstream \texttt{main}) vs.\ rules-enabled build, 20 runs
-(30 if CV $\geq3\%$), bootstrap CIs ($B{=}10\,000$), pinned CPU,
-turbo off. The bars use evmone-bench
-\texttt{external}/\allowbreak\texttt{total} execution measurements;
-compile latency is measured separately below.
+\paragraph{Setup.} Intel Core Ultra 7 265K/Ubuntu 22.04; evmone-bench
+paired \emph{2-side} mode (\texttt{upstream/main} vs.\ rules-enabled,
+same session, $|x|<2\%$ drift gate), 20 runs (30 if CV $\geq3\%$),
+bootstrap CIs ($B{=}10\,000$), pinned CPU, turbo off. Both binaries
+use CI production flags including
+\texttt{ZEN\_ENABLE\_JIT\_PRECOMPILE\_FALLBACK=ON} (no-fallback
+not measured); the comparison spans two branches rather than toggling
+rules in one binary, so per-rule attribution comes from the single-rule
+audit (Sec.~\ref{sec:shadow-audit}). Bars report evmone-bench
+\texttt{external}/\allowbreak\texttt{total}; compile latency below.
 
 \input{figures/fig4-speedup}
 
@@ -103,12 +107,14 @@ We calibrate a paired benchmark noise floor in two stages: \textsc{0a}
 measures within-window pairwise deltas (one prod-only build, 30 reps
 $\times$ 27 benchmarks $\times$ 4 windows; $p_{99} = \mathbf{1.86\%}$),
 \textsc{0b} measures inter-run deltas under the same
-single-binary, environment-variable swap protocol used by the Stage~4
-single-rule benchmark ($p_{99} = \mathbf{2.65\%}$). With a $1.5\times$ inflation guard
-against carry-over correlation, the effective threshold for declaring
-a per-rule speedup is $\boldsymbol{2.80\%}$; the pilot fixes 15 reps
-per candidate at this threshold ($\alpha{=}0.05$, power $0.80$, median
-CV 0.73\%).\par}
+single-binary, environment-variable swap protocol used by the single-rule
+audit benchmark ($p_{99} = \mathbf{2.65\%}$). These $p_{99}$ values use a
+trimmed estimator (\texttt{trim\_frac=0.10}); untrimmed values
+3.94\%/5.23\% (threshold 5.92\%) would only strengthen the null below.
+With a $1.5\times$ inflation guard against carry-over correlation, the
+effective threshold for declaring a per-rule speedup is
+$\boldsymbol{2.80\%}$; the pilot fixes 15 reps per candidate at this
+threshold ($\alpha{=}0.05$, power $0.80$, median CV $0.73\%$).\par}
 
 \paragraph{Dual-Arm Audit on 1{,}432 Rules.}
 {\sloppy
@@ -123,15 +129,16 @@ additional fires across the trace---about \textbf{0.02\%} of the
 rules are cold in the benchmark trace under both arms.\par}
 
 \paragraph{Single-Rule Bench and FDR.}
-We benchmark seven pre-registered candidates: the four highest-firing
-rules and three negative controls. Each candidate uses 15 reps $\times$
-27 benchmarks $\times$ 2 sides, a fresh process per run, bracketed-mean
+We benchmark seven pre-registered candidates (four highest-firing rules,
+three negative controls). Each candidate uses 15 reps $\times$ 27
+benchmarks $\times$ 2 sides, a fresh process per run, bracketed-mean
 deltas, and bootstrap CIs ($B{=}10\,000$). Across 189
 $(\text{rule},\text{bench})$ hypotheses, no pair satisfies all three
 selection tests ($\Delta{<}{-}2.80\%$, $\text{ci\_high}{<}0$,
-$q_{\text{BH}}{<}0.05$), and the negative-control gate also holds (0 of
-3 valid). The pipeline records $n_{\text{picks}}=0$, so the contribution
-is the methodology rather than the rule yield.
+$q_{\text{BH}}{<}0.05$, the Benjamini--Hochberg-corrected $q$-value),
+and the negative-control gate also holds (0 of 3 valid). The pipeline
+records $n_{\text{picks}}=0$ (false-discovery-rate-controlled picks),
+so the contribution is the methodology rather than the rule yield.
 
 \subsection{Correctness and Rule Coverage}
 \label{sec:correctness}
@@ -146,9 +153,10 @@ Table~\ref{tab:correctness}.
 \FloatBarrier
 
 All four matched suites pass on both builds (5{,}884/5{,}884 each). A
-separate Cancun statetest run confirms the same matrix under multipass JIT
-and interpreter modes; Prague is excluded because DTVM does not yet support
-that fork. Suite coverage is Cancun state tests plus EVM unit tests, not
+separate Cancun-fork \emph{statetest} suite (Ethereum spec-compliance
+regression tests) confirms the same matrix under multipass JIT (the
+production path) and interpreter modes; the newer Prague fork is
+excluded as DTVM does not yet support it. Suite coverage is Cancun state tests plus EVM unit tests, not
 exhaustive opcode- or gas-branch coverage. The recursive commutative-aware
 codegen extension passes the same suites; the lone in-tree \texttt{erc20}
 \texttt{ctest} failure is pre-existing, reproduced by the baseline, and

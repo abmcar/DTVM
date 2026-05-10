@@ -9,17 +9,13 @@ We position our work by abstraction layer, verification method, and
 carry-chain coverage. Peephole synthesis and verification frameworks
 provide the closest methodological baseline, but they do not by
 themselves provide a complete solution for EVM JIT-backend carry
-chains. Classical synthesis-then-verification systems include
-Denali~\cite{denali_pldi02}, Bansal--Aiken~\cite{bansal_aiken_asplos06},
-STOKE~\cite{stoke}, Stratified Synthesis~\cite{stratified}, and
-egg~\cite{egg}; SMT-based peephole checking is exemplified by
-Alive~\cite{alive}, Alive2~\cite{alive2}, Souper~\cite{souper}, and
-PEEK~\cite{peek}; dataflow filtering~\cite{dataflow_pruning} accelerates
-search. Recent JIT systems include PyPy's integer-peephole DSL with
-build-time Z3 proofs~\cite{pypy_ruleopt} and JOG, which derives Java JIT
-optimizations and tests from patterns and detects shadowed optimization
-relations~\cite{jog_jit}; LLM-driven LLVM peephole synthesis~\cite{lampo2025}
-is a generative complement to deductive enumeration.
+chains. Stochastic synthesis baselines include STOKE~\cite{stoke} and
+Stratified Synthesis~\cite{stratified}; SMT-based peephole checking is
+exemplified by Alive~\cite{alive}, Alive2~\cite{alive2},
+Souper~\cite{souper}, and PEEK~\cite{peek}. Recent JIT-side work
+includes PyPy's Z3-checked integer DSL~\cite{pypy_ruleopt} and
+LLM-driven LLVM peephole synthesis~\cite{lampo2025}, a generative
+complement to deductive enumeration.
 We follow the verify-after-enumeration paradigm but move the checked IR
 from LLVM IR to dMIR, addressing the multi-return carry and overflow
 encoding limit that motivates this paper.\par}
@@ -49,9 +45,9 @@ the first-class carry operators) plus 13 x86 cleanup rewrites, none of which are
 reachable from the bytecode-block abstraction.
 
 {\sloppy
-Runtime divergence detection---Hydra Framework~\cite{hydra_framework},
-multi-client detectors, EVM fuzzing, consensus test networks---catches
-faults after deployment; our workflow validates rules before deployment.
+Runtime divergence detection (multi-client detectors, EVM fuzzing,
+consensus test networks) catches faults after deployment; our workflow
+validates rules before deployment.
 Bytecode-level EVM
 optimization~\cite{maxsmt_evm,vmil24_superinst,ist25_neural_superopt}
 is orthogonal to our JIT IR/code-generation focus. Existing work

@@ -45,14 +45,16 @@ ADC/SBB-style multi-word dependencies become single bit-vector
 equivalence obligations rather than indirect multi-return encodings.
 \item \textbf{SMT admission and production coverage.} An offline Z3
 pipeline admits all \textbf{70} production dMIR rewrites under
-fixed-width modular bit-vector semantics. Its enumeration also reaches
-all production left-hand sides (\textbf{70/70}), including carry-chain
-forms that resist direct formulation in LLVM IR.
+fixed-width modular bit-vector semantics. Its enumerator also reaches
+all production left-hand sides (\textbf{70/70}, after canonicalization
+tuning informed by an initial 0/70 baseline; Sec.~\ref{sec:coverage-scope}),
+including carry-chain forms that resist direct formulation in LLVM IR.
 \item \textbf{Layered optimization with consensus-path evidence.}
 The production system combines SMT-checked dMIR arithmetic
 simplifications with x86-64 CgIR cleanups validated by matched
-differential testing; across 27 evmone-bench workloads, the 83-rule
-system attains a \textbf{+7.24\%} geometric-mean speedup and passes
-\textbf{5{,}884} Cancun differential tests with byte-identical final
-state and matching gas accounting within suite coverage.
+differential testing; across 27 evmone-bench~\cite{evmone} workloads,
+the 83-rule system attains a \textbf{+7.24\%} geometric-mean speedup
+and passes \textbf{5{,}884} paired differential tests (Cancun statetests
+plus EVM-spec unit tests) with byte-identical final state and matching
+gas accounting within suite coverage.
 \end{itemize}

@@ -7,7 +7,8 @@ The implemented two-tier system admits 70 dMIR rules with Z3 and checks
 13 x86 cleanup rules empirically through matched differential tests. On
 evmone-bench, the rules-enabled build improves the 27-benchmark geometric
 mean by +7.24\% while preserving byte-identical final state across
-5{,}884 Cancun differential tests within suite coverage. The shadow audit
+5{,}884 paired differential tests (Cancun statetests plus EVM-spec unit
+tests) within suite coverage. The shadow audit
 finds no statistically valid recovery on the current production set
 ($n_{\text{picks}}=0$), so its contribution is a stricter measurement path
 rather than immediate rule yield. Future work is to formalize x86 CgIR,
