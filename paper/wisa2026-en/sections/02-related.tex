@@ -15,10 +15,11 @@ STOKE~\cite{stoke}, Stratified Synthesis~\cite{stratified}, and
 egg~\cite{egg}; SMT-based peephole checking is exemplified by
 Alive~\cite{alive}, Alive2~\cite{alive2}, Souper~\cite{souper}, and
 PEEK~\cite{peek}; dataflow filtering~\cite{dataflow_pruning} accelerates
-search. Recent JIT-focused systems include PyPy's Z3-backed integer
-peephole DSL~\cite{pypy_ruleopt} and JOG's pattern-based Java JIT tests
-with shadow validation~\cite{jog_jit}; LLM-driven LLVM peephole
-synthesis~\cite{lampo2025} is a generative complement to deductive enumeration.
+search. Recent JIT systems include PyPy's integer-peephole DSL with
+build-time Z3 proofs~\cite{pypy_ruleopt} and JOG, which derives Java JIT
+optimizations and tests from patterns and detects shadowed optimization
+relations~\cite{jog_jit}; LLM-driven LLVM peephole synthesis~\cite{lampo2025}
+is a generative complement to deductive enumeration.
 We follow the verify-after-enumeration paradigm but move the checked IR
 from LLVM IR to dMIR, addressing the multi-return carry and overflow
 encoding limit that motivates this paper.\par}
@@ -55,5 +56,5 @@ Bytecode-level EVM
 optimization~\cite{maxsmt_evm,vmil24_superinst,ist25_neural_superopt}
 is orthogonal to our JIT IR/code-generation focus. Existing work
 therefore does not jointly address JIT-backend rewrites, multi-word
-carry chains, automated SMT admission, and consensus-path determinism;
+carry chains, automated SMT admission, and consensus-critical JIT rewrite validation;
 this combination is the gap targeted by our dMIR-based design.\par}

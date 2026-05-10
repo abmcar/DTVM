@@ -118,11 +118,11 @@ capacity run admits 765/775 algebraic candidates (98.7\%, 10 timeouts)
 and 17/78 carry templates (21.8\%, 61 semantic rejections):
 the rejected carry templates are semantic counterexamples, grouped in
 the artifact as dropped carry inputs, wrong carry polarity, and
-cross-operand substitution. Thus the high rejection rate reflects the
-fragility of hand-written carry-chain shortcuts, not parser or width
-clerical failures; the algebraic side has only 10 timeouts and zero
-semantic rejections. These candidates measure enumeration capacity; only
-the curated production rules are loaded into the JIT at runtime.
+cross-operand substitution; the high rejection rate therefore reflects
+semantic brittleness in carry-chain shortcuts rather than syntactic or
+typing failures. The algebraic side has only 10 timeouts and zero semantic
+rejections. These candidates measure enumeration capacity; only the
+curated production rules are loaded into the JIT at runtime.
 
 \paragraph{Production Rule Coverage (Methodology).} The coverage run asks
 whether the search space contains the 70 hand-designed production dMIR
@@ -176,9 +176,10 @@ machine-independent algebraic simplification (all 70 dMIR rules pass Z3).
 The x86 CgIR layer runs after lowering and performs local syntactic cleanup
 on register, flag, and branch patterns: 13 rewrites have
 \textbf{no separate SMT script}, and the dMIR proof is not claimed to
-extend to this layer. Its residual machine-code risk is bounded by
-the matched differential suites summarized in Table~\ref{tab:correctness};
-a formal x86 SMT model remains future work.
+extend to this layer. Its residual machine-code risk is not formally
+bounded here; it is empirically exercised by the matched differential
+suites summarized in Table~\ref{tab:correctness}; a formal x86 SMT model
+remains future work.
 
 Boolean normalization and algebraic identities together cover most dMIR
 rules---these are precisely the patterns the canonical-form enumerator

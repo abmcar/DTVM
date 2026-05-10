@@ -1,19 +1,15 @@
 % 05-conclusion.tex — §5 Conclusion
 \section{Conclusion}
 
-This paper extends dMIR with first-class carry and overflow operators
-and builds an SMT-checked peephole layer on top: 70 dMIR rules pass Z3
-admission over arithmetic and flags, and 13 x86 cleanup rules are covered
-by matched differential testing. The combination delivers a +7.24\%
-geometric-mean speedup on evmone-bench while preserving byte-identical
-final state across 5{,}884 Cancun differential tests, with correctness
-bounded by suite coverage.
-
-The shadow audit adds a stricter measurement path: a recursive matcher
-over commutative subtrees plus bench-paired CI-bounded validation reports
-no statistically valid recovery on the current production set
-($n_{\text{picks}}=0$), so the result is methodological and negative
-rather than a rule yield. Future work is to formalize the x86 CgIR tier,
-check cross-implementation equivalence across EVM engines such as evmone
-and revm, and generate carry-chain optimizations automatically through
-equality saturation or superoptimization.
+This paper extends dMIR with first-class carry and overflow operators,
+turning carry-sensitive EVM JIT rewrites into Z3 bit-vector obligations.
+The implemented two-tier system admits 70 dMIR rules with Z3 and checks
+13 x86 cleanup rules empirically through matched differential tests. On
+evmone-bench, the rules-enabled build improves the 27-benchmark geometric
+mean by +7.24\% while preserving byte-identical final state across
+5{,}884 Cancun differential tests within suite coverage. The shadow audit
+finds no statistically valid recovery on the current production set
+($n_{\text{picks}}=0$), so its contribution is a stricter measurement path
+rather than immediate rule yield. Future work is to formalize x86 CgIR,
+check cross-engine equivalence, and generate carry-chain rewrites
+automatically.

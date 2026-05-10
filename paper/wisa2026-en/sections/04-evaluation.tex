@@ -88,11 +88,11 @@ equivalence proofs.
 {\sloppy
 Across 776 JIT unit-test modules, median per-module compile time is
 0.45\,ms (p95 0.87\,ms; nearest-rank p99 23.59\,ms) for the full
-pipeline---loading, analysis, and JIT code generation. The p99 tail is
-dominated by a small number of large fixtures and cold-start records,
-including stress fixtures above realistic on-chain code size; this remains
-an upper-bound distribution, not the incremental rewrite-pass cost.
-Isolating per-pass rewrite latency is future work.\par}
+pipeline---loading, analysis, and JIT code generation. The nearest-rank
+p99 sample is a 1\,MB stress fixture; a few larger early-run outliers
+remain beyond that percentile, so this is an upper-bound distribution,
+not the incremental rewrite-pass cost. Isolating per-pass rewrite latency
+is future work.\par}
 
 \subsection{Shadow Audit and Statistical Validation}
 \label{sec:shadow-audit}
@@ -123,19 +123,15 @@ additional fires across the trace---about \textbf{0.02\%} of the
 rules are cold in the benchmark trace under both arms.\par}
 
 \paragraph{Single-Rule Bench and FDR.}
-{\sloppy
-The four highest-firing candidates plus three pre-registered negative
-controls (\texttt{null\_dead\_code}, \texttt{null\_depth5},
-\texttt{null\_self\_cancel}) are benchmark-validated with 15 reps
-$\times$ 27 benchmarks $\times$ 2 sides per candidate, fresh process
-per run, bracketed-mean delta, bootstrap CI ($B{=}10\,000$). Across
-the resulting 189 $(\text{rule},\text{bench})$ hypotheses, the gate
-$\Delta{<}{-}2.80\% \wedge \text{ci\_high}{<}0 \wedge
-q_{\text{BH}}{<}0.05$ is satisfied by \textbf{0} pairs, and the
-negative-control gate also holds (0 of 3 valid): the pipeline records
-$n_{\text{picks}}=0$. The contribution is the methodology---turning
-matcher-capability claims into a strict statistical
-test---rather than the rule yield.\par}
+We benchmark seven pre-registered candidates: the four highest-firing
+rules and three negative controls. Each candidate uses 15 reps $\times$
+27 benchmarks $\times$ 2 sides, a fresh process per run, bracketed-mean
+deltas, and bootstrap CIs ($B{=}10\,000$). Across 189
+$(\text{rule},\text{bench})$ hypotheses, no pair satisfies all three
+selection tests ($\Delta{<}{-}2.80\%$, $\text{ci\_high}{<}0$,
+$q_{\text{BH}}{<}0.05$), and the negative-control gate also holds (0 of
+3 valid). The pipeline records $n_{\text{picks}}=0$, so the contribution
+is the methodology rather than the rule yield.
 
 \subsection{Correctness and Rule Coverage}
 \label{sec:correctness}
@@ -149,18 +145,12 @@ Table~\ref{tab:correctness}.
 \input{tables/tab4-3-correctness}
 \FloatBarrier
 
-{\sloppy
-Both sides agree item by item across the four differential categories
-(5884/5884 total). Independently,
-\texttt{evmone-statetest} on Cancun confirms the same pass matrix
-under multipass JIT and interpreter modes (Cancun selected via
-\texttt{evmone-statetest -k fork\_Cancun}; Prague excluded because DTVM
-does not yet support that fork). The suite covers Cancun state tests and
-EVM unit tests; opcode- and gas-branch coverage completeness are not
-claimed. CI re-runs the same admission check on every rule-file change.\par}
-
-\paragraph{Codegen-Extension Regression.} The recursive
-commutative-aware codegen extension passes the four suites of
-Table~\ref{tab:correctness}. The lone in-tree \texttt{erc20}
-\texttt{ctest} failure is pre-existing: the baseline reproduces it, and
-regenerated production-rule artifacts are byte-identical pre/post patch.
+All four matched suites pass on both builds (5{,}884/5{,}884 each). A
+separate Cancun statetest run confirms the same matrix under multipass JIT
+and interpreter modes; Prague is excluded because DTVM does not yet support
+that fork. Suite coverage is Cancun state tests plus EVM unit tests, not
+exhaustive opcode- or gas-branch coverage. The recursive commutative-aware
+codegen extension passes the same suites; the lone in-tree \texttt{erc20}
+\texttt{ctest} failure is pre-existing, reproduced by the baseline, and
+independent of regenerated production-rule artifacts. CI re-runs admission
+on every rule-file change.

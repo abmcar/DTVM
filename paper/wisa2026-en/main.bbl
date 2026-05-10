@@ -28,7 +28,7 @@ Bhat, S., Keizer, A., Hughes, C., Goens, A., Grosser, T.: Verifying peephole
   9:1--9:20 (2024). \doi{10.4230/LIPIcs.ITP.2024.9}
 
 \bibitem{pypy_ruleopt}
-Bolz-Tereick, C.F.: A dsl for peephole transformation rules of integer
+Bolz-Tereick, C.F.: A {DSL} for peephole transformation rules of integer
   operations in the {PyPy} {JIT}.
   \url{https://pypy.org/posts/2024/10/jit-peephole-dsl.html} (2024)
 
@@ -57,7 +57,7 @@ Lopes, N.P., Lee, J., Hur, C.K., Liu, Z., Regehr, J.: Alive2: Bounded
 
 \bibitem{alive}
 Lopes, N.P., Menendez, D., Nagarakatte, S., Regehr, J.: Provably correct
-  peephole optimizations with alive. In: Proc. PLDI (2015).
+  peephole optimizations with {Alive}. In: Proc. PLDI (2015).
   \doi{10.1145/2737924.2737965}
 
 \bibitem{demoura2008z3}
@@ -89,7 +89,7 @@ Schett, M.A., Nagele, J.: Populating the peephole optimizer of a smart contract
 
 \bibitem{stoke}
 Schkufza, E., Sharma, R., Aiken, A.: Stochastic superoptimization. In: Proc.
-  ASPLOS (2013). \doi{10.1145/2451116.2451150}
+  {\mbox{ASPLOS}} (2013). \doi{10.1145/2451116.2451150}
 
 \bibitem{egg}
 Willsey, M., Nandi, C., Wang, Y.R., Flatt, O., Tatlock, Z., Panchekha, P.: egg:
@@ -103,6 +103,7 @@ Xu, Z., Xu, H., Tian, Y., Zhou, X., Sun, C.: {LPO}: Discovering missed peephole
 
 \bibitem{jog_jit}
 Zang, Z., Thimmaiah, A., Gligoric, M.: Pattern-based peephole optimizations
-  with java {JIT} tests. In: Proc. ISSTA (2023). \doi{10.1145/3597926.3598038}
+  with {Java} {JIT} tests. In: Proc. ISSTA (2023).
+  \doi{10.1145/3597926.3598038}
 
 \end{thebibliography}
