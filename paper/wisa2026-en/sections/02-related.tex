@@ -15,8 +15,10 @@ STOKE~\cite{stoke}, Stratified Synthesis~\cite{stratified}, and
 egg~\cite{egg}; SMT-based peephole checking is exemplified by
 Alive~\cite{alive}, Alive2~\cite{alive2}, Souper~\cite{souper}, and
 PEEK~\cite{peek}; dataflow filtering~\cite{dataflow_pruning} accelerates
-search; recent LLM-driven peephole synthesis on LLVM
-IR~\cite{lampo2025} is a generative complement to deductive enumeration.
+search. Recent JIT-focused systems include PyPy's Z3-backed integer
+peephole DSL~\cite{pypy_ruleopt} and JOG's pattern-based Java JIT tests
+with shadow validation~\cite{jog_jit}; LLM-driven LLVM peephole
+synthesis~\cite{lampo2025} is a generative complement to deductive enumeration.
 We follow the verify-after-enumeration paradigm but move the checked IR
 from LLVM IR to dMIR, addressing the multi-return carry and overflow
 encoding limit that motivates this paper.\par}

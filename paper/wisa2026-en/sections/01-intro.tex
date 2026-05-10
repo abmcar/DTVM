@@ -49,10 +49,10 @@ fixed-width modular bit-vector semantics. Its enumeration also reaches
 all production left-hand sides (\textbf{70/70}), including carry-chain
 forms that resist direct formulation in LLVM IR.
 \item \textbf{Layered optimization with consensus-path evidence.}
-SMT-checked dMIR arithmetic simplifications compose with x86-64 CgIR
-cleanups validated by matched differential testing; across 27
-evmone-bench workloads, the 83-rule system attains a \textbf{+7.24\%}
-geometric-mean speedup and passes \textbf{5{,}884} Cancun differential
-tests with byte-identical final state and matching gas accounting within
-suite coverage.
+The production system combines SMT-checked dMIR arithmetic
+simplifications with x86-64 CgIR cleanups validated by matched
+differential testing; across 27 evmone-bench workloads, the 83-rule
+system attains a \textbf{+7.24\%} geometric-mean speedup and passes
+\textbf{5{,}884} Cancun differential tests with byte-identical final
+state and matching gas accounting within suite coverage.
 \end{itemize}

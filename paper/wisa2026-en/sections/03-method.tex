@@ -116,11 +116,13 @@ candidates concentrate, we group generated candidates by enumeration path
 and outcome; Section~\ref{sec:evaluation} reports the full table. The
 capacity run admits 765/775 algebraic candidates (98.7\%, 10 timeouts)
 and 17/78 carry templates (21.8\%, 61 semantic rejections):
-carry-template admission is limited by 61 semantic rejections, mostly
-width-mismatch edge cases (full breakdown in the artifact), while the
-algebraic side has only 10 timeouts and zero semantic rejections. These
-candidates measure enumeration capacity; only the curated production rules are
-loaded into the JIT at runtime.
+the rejected carry templates are semantic counterexamples, grouped in
+the artifact as dropped carry inputs, wrong carry polarity, and
+cross-operand substitution. Thus the high rejection rate reflects the
+fragility of hand-written carry-chain shortcuts, not parser or width
+clerical failures; the algebraic side has only 10 timeouts and zero
+semantic rejections. These candidates measure enumeration capacity; only
+the curated production rules are loaded into the JIT at runtime.
 
 \paragraph{Production Rule Coverage (Methodology).} The coverage run asks
 whether the search space contains the 70 hand-designed production dMIR
@@ -170,11 +172,13 @@ Table~\ref{tab:rule-classes} gives this classification.
 \input{tables/tab3-1-rule-classes}
 
 \paragraph{Two-Tier Rule Set.} The dMIR layer handles
-machine-independent algebraic simplification (all 70 dMIR rules pass Z3);
-the x86 CgIR layer handles hardware-specific cleanup on registers, flags,
-and branches (13 syntactic rewrites with \textbf{no separate SMT script},
-covered by the matched differential suites summarized in
-Table~\ref{tab:correctness}); a formal x86 SMT model remains future work.
+machine-independent algebraic simplification (all 70 dMIR rules pass Z3).
+The x86 CgIR layer runs after lowering and performs local syntactic cleanup
+on register, flag, and branch patterns: 13 rewrites have
+\textbf{no separate SMT script}, and the dMIR proof is not claimed to
+extend to this layer. Its residual machine-code risk is bounded by
+the matched differential suites summarized in Table~\ref{tab:correctness};
+a formal x86 SMT model remains future work.
 
 Boolean normalization and algebraic identities together cover most dMIR
 rules---these are precisely the patterns the canonical-form enumerator

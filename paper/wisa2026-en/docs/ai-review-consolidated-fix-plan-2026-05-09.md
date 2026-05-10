@@ -303,13 +303,13 @@ Run:
 python3 - <<'PY'
 from urllib.request import urlopen, Request
 urls = [
-  'https://rpython.readthedocs.io/en/latest/jit/ruleopt.html',
+  'https://pypy.org/posts/2024/10/jit-peephole-dsl.html',
   'https://2023.issta.org/details/issta-2023-technical-papers/112/Pattern-Based-Peephole-Optimizations-with-Java-JIT-Tests',
   'https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.ITP.2024.9',
 ]
 needles = {
-  urls[0]: ['Peephole', 'Z3', 'Bolz-Tereick'],
-  urls[1]: ['JOG', 'Java JIT Peephole Optimizations and Tests from Patterns', '10.1145/3597926.3598038'],
+  urls[0]: ['Peephole', 'Z3', 'CF Bolz-Tereick'],
+  urls[1]: ['Pattern-Based Peephole Optimizations with Java JIT Tests', 'Zhiqiang Zang', '10.1145/3597926.3598038'],
   urls[2]: ['Verifying Peephole Rewriting in SSA Compiler IRs', 'Bhat', 'ITP 2024'],
 }
 for url in urls:
@@ -345,8 +345,8 @@ egg~\cite{egg}; SMT-based peephole checking is exemplified by
 Alive~\cite{alive}, Alive2~\cite{alive2}, Souper~\cite{souper}, and
 PEEK~\cite{peek}; dataflow filtering~\cite{dataflow_pruning} accelerates
 search. Recent JIT-focused systems include PyPy's Z3-backed integer
-peephole DSL~\cite{pypy_ruleopt} and JOG's Java-JIT pattern tests
-and shadow validation~\cite{jog_jit}; LLM-driven LLVM peephole
+peephole DSL~\cite{pypy_ruleopt} and JOG's pattern-based Java JIT tests
+with shadow validation~\cite{jog_jit}; LLM-driven LLVM peephole
 synthesis~\cite{lampo2025} is a generative complement to deductive
 enumeration. We follow the verify-after-enumeration paradigm but move
 the checked IR from LLVM IR to dMIR, addressing the multi-return carry
@@ -360,9 +360,9 @@ Use verified metadata from the primary pages. Keep key names exactly as used in 
 ```bibtex
 @misc{pypy_ruleopt,
   title = {A DSL for Peephole Transformation Rules of Integer Operations in the {PyPy} {JIT}},
-  author = {Bolz-Tereick, Carl Friedrich},
+  author = {Bolz-Tereick, C. F.},
   year = {2024},
-  howpublished = {\url{https://rpython.readthedocs.io/en/latest/jit/ruleopt.html}}
+  howpublished = {\url{https://pypy.org/posts/2024/10/jit-peephole-dsl.html}}
 }
 ```
 
@@ -370,8 +370,8 @@ For JOG, use the official ISSTA page's title/authors/year and DOI. A verified mi
 
 ```bibtex
 @inproceedings{jog_jit,
-  title = {{JOG}: Java {JIT} Peephole Optimizations and Tests from Patterns},
-  author = {Zang, Zhenyao and Thimmaiah, Anirudh and Gligoric, Milos},
+  title = {Pattern-Based Peephole Optimizations with Java {JIT} Tests},
+  author = {Zang, Zhiqiang and Thimmaiah, Aditya and Gligoric, Milos},
   booktitle = {Proc. ISSTA},
   year = {2023},
   doi = {10.1145/3597926.3598038}

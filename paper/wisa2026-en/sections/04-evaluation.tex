@@ -62,7 +62,9 @@ Figure~\ref{fig:speedup}.
 \paragraph{Setup.} Intel Core Ultra 7 265K/Ubuntu 22.04; evmone-bench,
 baseline (upstream \texttt{main}) vs.\ rules-enabled build, 20 runs
 (30 if CV $\geq3\%$), bootstrap CIs ($B{=}10\,000$), pinned CPU,
-turbo off.
+turbo off. The bars use evmone-bench
+\texttt{external}/\allowbreak\texttt{total} execution measurements;
+compile latency is measured separately below.
 
 \input{figures/fig4-speedup}
 
@@ -85,9 +87,12 @@ equivalence proofs.
 \paragraph{Compilation Overhead.}
 {\sloppy
 Across 776 JIT unit-test modules, median per-module compile time is
-0.45\,ms (p95 0.87\,ms) for the full pipeline---an upper bound, not
-the incremental rewrite-pass cost (per-pass attribution is future
-work).\par}
+0.45\,ms (p95 0.87\,ms; nearest-rank p99 23.59\,ms) for the full
+pipeline---loading, analysis, and JIT code generation. The p99 tail is
+dominated by a small number of large fixtures and cold-start records,
+including stress fixtures above realistic on-chain code size; this remains
+an upper-bound distribution, not the incremental rewrite-pass cost.
+Isolating per-pass rewrite latency is future work.\par}
 
 \subsection{Shadow Audit and Statistical Validation}
 \label{sec:shadow-audit}

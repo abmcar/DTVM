@@ -27,6 +27,11 @@ Bhat, S., Keizer, A., Hughes, C., Goens, A., Grosser, T.: Verifying peephole
   rewriting in {SSA} compiler {IR}s. In: Proc. ITP. LIPIcs, vol.~309, pp.
   9:1--9:20 (2024). \doi{10.4230/LIPIcs.ITP.2024.9}
 
+\bibitem{pypy_ruleopt}
+Bolz-Tereick, C.F.: A dsl for peephole transformation rules of integer
+  operations in the {PyPy} {JIT}.
+  \url{https://pypy.org/posts/2024/10/jit-peephole-dsl.html} (2024)
+
 \bibitem{hydra_framework}
 Breidenbach, L., Daian, P., Tram{\`e}r, F., Juels, A.: Hydra: Principled bug
   bounties for smart contract security. In: Proc. USENIX Security (2018)
@@ -95,5 +100,9 @@ Willsey, M., Nandi, C., Wang, Y.R., Flatt, O., Tatlock, Z., Panchekha, P.: egg:
 Xu, Z., Xu, H., Tian, Y., Zhou, X., Sun, C.: {LPO}: Discovering missed peephole
   optimizations with large language models. In: Proc. ASPLOS (2026).
   \doi{10.1145/3779212.3790184}
+
+\bibitem{jog_jit}
+Zang, Z., Thimmaiah, A., Gligoric, M.: Pattern-based peephole optimizations
+  with java {JIT} tests. In: Proc. ISSTA (2023). \doi{10.1145/3597926.3598038}
 
 \end{thebibliography}
