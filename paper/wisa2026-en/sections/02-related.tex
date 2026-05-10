@@ -41,9 +41,11 @@ and machine-code, SMT admission at synthesis time, and multi-word carry
 chains. Seven rules overlap: 7/83 in our set and 7/14 in their
 \texttt{forves} set. This suggests complementary scope rather than a
 superset relationship: the remaining 76 cover dMIR algebraic and Boolean
-simplifications (including ADC/SBB carry-chain rewrites that motivate
-the first-class carry operators) plus 13 x86 cleanup rewrites, none of which are
-reachable from the bytecode-block abstraction.
+simplifications (including the ADC/SBB carry-chain rewrites enabled by
+the first-class carry operators) plus 13 x86 cleanup rewrites; the
+carry-chain and x86 components fall outside the bytecode-block
+abstraction, while some Boolean identities overlap in scope but are
+absent from the verified \texttt{forves} set.
 
 {\sloppy
 Runtime divergence detection (multi-client detectors, EVM fuzzing,

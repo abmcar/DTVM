@@ -49,8 +49,8 @@ expressing one carry-propagating addition takes five lines of scaffolding
 around \texttt{uadd.with.overflow}; in dMIR a single \texttt{ADC}
 suffices, bringing all four rules into the scope of automatic
 equivalence checking. The JIT runs a compiled two-tier implementation:
-dMIR for algebraic rewrites and x86 CgIR (code-generation IR) for
-carry-chain cleanup.
+dMIR handles algebraic, Boolean, and carry-chain (ADC/SBB) rewrites;
+x86 CgIR (code-generation IR) handles hardware-specific syntactic cleanup.
 
 \subsection{dMIR Bit-Vector Semantics and Carry-Chain Operators}
 \label{sec:bvmodel}
