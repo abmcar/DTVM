@@ -61,7 +61,7 @@ Figure~\ref{fig:speedup}.
 
 \paragraph{Setup.} Intel Core Ultra 7 265K/Ubuntu 22.04; evmone-bench
 paired \emph{2-side} mode (\texttt{upstream/main} vs.\ rules-enabled,
-same session, $|x|<2\%$ drift gate), 20 runs (30 if CV $\geq3\%$),
+same session, $|\Delta_{\text{drift}}|<2\%$ gate), 20 runs (30 if CV $\geq3\%$),
 bootstrap CIs ($B{=}10\,000$), pinned CPU, turbo off. Both binaries
 use CI production flags including
 \texttt{ZEN\_ENABLE\_JIT\_PRECOMPILE\_FALLBACK=ON} (no-fallback
@@ -152,7 +152,7 @@ Table~\ref{tab:correctness}.
 \input{tables/tab4-3-correctness}
 \FloatBarrier
 
-All four matched suites pass on both builds (5{,}884/5{,}884 each). A
+All four matched suites pass on both builds (5{,}884/5{,}884 per build). A
 separate Cancun-fork \emph{statetest} suite (Ethereum spec-compliance
 regression tests) confirms the same matrix under multipass JIT (the
 production path) and interpreter modes; the newer Prague fork is
@@ -160,5 +160,4 @@ excluded as DTVM does not yet support it. Suite coverage is Cancun state tests p
 exhaustive opcode- or gas-branch coverage. The recursive commutative-aware
 codegen extension passes the same suites; the lone in-tree \texttt{erc20}
 \texttt{ctest} failure is pre-existing, reproduced by the baseline, and
-independent of regenerated production-rule artifacts. CI re-runs admission
-on every rule-file change.
+independent of regenerated production-rule artifacts.

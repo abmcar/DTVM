@@ -9,8 +9,9 @@ We position our work by abstraction layer, verification method, and
 carry-chain coverage. Peephole synthesis and verification frameworks
 provide the closest methodological baseline, but they do not by
 themselves provide a complete solution for EVM JIT-backend carry
-chains. Stochastic synthesis baselines include STOKE~\cite{stoke} and
-Stratified Synthesis~\cite{stratified}; SMT-based peephole checking is
+chains. Search-based superoptimization baselines include
+STOKE~\cite{stoke} (stochastic) and Stratified
+Synthesis~\cite{stratified} (enumerative); SMT-based peephole checking is
 exemplified by Alive~\cite{alive}, Alive2~\cite{alive2},
 Souper~\cite{souper}, and PEEK~\cite{peek}. Recent JIT-side work
 includes PyPy's Z3-checked integer DSL~\cite{pypy_ruleopt} and

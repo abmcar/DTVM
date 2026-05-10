@@ -87,8 +87,8 @@ the rule under fixed-width modular bit-vector semantics; \emph{sat} or
 timeout rejects (sat returns a counterexample). Equivalence assumes
 nothing beyond modular arithmetic---no signed interpretation and no
 undefined-overflow assumptions. All 70 production dMIR rules pass the
-offline Z3 admission check, and CI re-runs this check on every change
-to the rule file.
+offline Z3 admission check, which is re-run as part of the rule-file
+development workflow.
 
 \paragraph{Two Enumeration Runs.} We report two separate enumeration
 experiments with disjoint goals. The \emph{capacity run} fixes a single
