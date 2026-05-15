@@ -84,7 +84,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
