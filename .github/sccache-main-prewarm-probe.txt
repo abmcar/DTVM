@@ -1,0 +1,2 @@
+Temporary probe file for measuring whether pull_request can restore sccache
+objects prewarmed on the fork default branch.
