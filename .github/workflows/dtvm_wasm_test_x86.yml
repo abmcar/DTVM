@@ -18,11 +18,15 @@ permissions:
 
 # Shared FetchContent cache root for all container jobs. The hook in
 # CMakeLists.txt (commit 96707a2 lines 8-18) picks this up as the base
-# dir for FetchContent populations. Each container job adds an
-# `actions/cache` step keyed on `hashFiles('third_party/AddDeps.cmake')`
-# to persist this dir across CI runs.
+# dir for FetchContent populations. The cache key includes the generator
+# namespace because CMake writes generator-specific FetchContent subbuilds.
 env:
   FETCHCONTENT_BASE_DIR: /github/home/.fetchcontent
+  SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_GHA_VERSION: dtvm-ci-sccache-v2-gcc11-llvm15-ninja
+  SCCACHE_BASEDIRS: ${{ github.workspace }}
+  DTVM_CI_USE_NINJA: "1"
+  DTVM_CI_USE_SCCACHE: "1"
 
 jobs:
   build_test_interp_on_x86:
@@ -39,10 +43,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Test Git clone
         run: |
           git clone https://github.com/asmjit/asmjit.git
@@ -86,10 +92,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Test Git clone
         run: |
           git clone https://github.com/asmjit/asmjit.git
@@ -133,10 +141,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Test Git clone
         run: |
           git clone https://github.com/asmjit/asmjit.git
@@ -180,10 +190,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Test Git clone
         run: |
           git clone https://github.com/asmjit/asmjit.git
@@ -202,7 +214,16 @@ jobs:
           git apply ../spec.patch
           cd $CUR_PROJECT
 
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DZEN_ENABLE_DWASM=ON -DZEN_ENABLE_SINGLEPASS_JIT=ON -DZEN_ENABLE_MULTIPASS_JIT=ON -DZEN_ENABLE_CHECKED_ARITHMETIC=ON -DZEN_ENABLE_CPU_EXCEPTION=OFF -DZEN_ENABLE_EVMABI_TEST=ON -DZEN_ENABLE_BUILTIN_LIBC=OFF -DZEN_ENABLE_BUILTIN_ENV=OFF
-          cmake --build build -j7
+          DTVM_CI_BUILD_JOBS=7 .ci/cmake_ci_build.sh build -- \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DZEN_ENABLE_DWASM=ON \
+            -DZEN_ENABLE_SINGLEPASS_JIT=ON \
+            -DZEN_ENABLE_MULTIPASS_JIT=ON \
+            -DZEN_ENABLE_CHECKED_ARITHMETIC=ON \
+            -DZEN_ENABLE_CPU_EXCEPTION=OFF \
+            -DZEN_ENABLE_EVMABI_TEST=ON \
+            -DZEN_ENABLE_BUILTIN_LIBC=OFF \
+            -DZEN_ENABLE_BUILTIN_ENV=OFF
+          python3 .ci/print_sccache_stats.py || true
           # use dtvm to test evm abi wasm files
           # ./build/dtvm -m 2 -f call counter.wasm

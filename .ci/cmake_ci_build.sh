@@ -14,6 +14,7 @@ if [ "${1:-}" = "--" ]; then
     shift
 fi
 
+SOURCE_DIR=${DTVM_CI_SOURCE_DIR:-.}
 USE_NINJA=${DTVM_CI_USE_NINJA:-0}
 USE_SCCACHE=${DTVM_CI_USE_SCCACHE:-0}
 DRY_RUN=${DTVM_CI_DRY_RUN:-0}
@@ -34,7 +35,7 @@ fi
 
 CONFIGURE_CMD=(
     cmake
-    -S .
+    -S "$SOURCE_DIR"
     -B "$BUILD_DIR"
     "${GENERATOR_ARGS[@]}"
     "${LAUNCHER_ARGS[@]}"
@@ -42,6 +43,7 @@ CONFIGURE_CMD=(
 )
 BUILD_CMD=(cmake --build "$BUILD_DIR" -j "$BUILD_JOBS")
 
+echo "DTVM CI CMake source dir: ${SOURCE_DIR}"
 echo "DTVM CI CMake generator: ${USE_NINJA}"
 echo "DTVM CI CMake sccache launcher: ${USE_SCCACHE}"
 

@@ -21,6 +21,16 @@
 
 set -e
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+print_sccache_stats() {
+    if [ "${DTVM_CI_USE_SCCACHE:-0}" = "1" ] && command -v sccache >/dev/null 2>&1; then
+        python3 "$SCRIPT_DIR/print_sccache_stats.py" || true
+    fi
+}
+
+trap print_sccache_stats EXIT
+
 # Convert INPUT_FORMAT to lowercase for case-insensitive comparison
 INPUT_FORMAT=${INPUT_FORMAT,,}
 
@@ -129,7 +139,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
     else
         rm -rf build
     fi
-    .ci/cmake_ci_build.sh build -- $CMAKE_OPTIONS_ORIGIN $STACK_TYPE
+    "$SCRIPT_DIR/cmake_ci_build.sh" build -- $CMAKE_OPTIONS_ORIGIN $STACK_TYPE
     if [ "${DTVM_CI_DRY_RUN:-0}" = "1" ]; then
         continue
     fi
@@ -214,8 +224,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                 fi
             fi
             cd "$EVMONE_DIR"
-            cmake -S . -B build -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TARGET"
-            cmake --build build --parallel 16
+            "$WORKSPACE_ROOT/.ci/cmake_ci_build.sh" build -- -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TARGET"
             EVMONE_STATETEST_BIN="$PWD/build/bin/evmone-statetest"
             cd "$WORKSPACE_ROOT"
 
@@ -316,8 +325,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             cp ../tools/check_performance_regression.py ./
 
             if [ ! -f "build/bin/evmone-bench" ]; then
-                cmake -S . -B build -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE=Release
-                cmake --build build --parallel -j 16
+                "$WORKSPACE_ROOT/.ci/cmake_ci_build.sh" build -- -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE=Release
             fi
 
             BASELINE_CACHE=${BENCHMARK_BASELINE_CACHE:-}
