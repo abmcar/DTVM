@@ -69,6 +69,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dtvmdev1/dtvm-dev-x64:main
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_VERSION: dtvm-ci-sccache-v1
+      SCCACHE_BASEDIRS: ${{ github.workspace }}
+      DTVM_CI_USE_NINJA: "1"
+      DTVM_CI_USE_SCCACHE: "1"
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -82,12 +88,24 @@ jobs:
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build and Test
         run: |
           echo "current home is $HOME"
           export LLVM_SYS_150_PREFIX=/opt/llvm15
           export LLVM_DIR=$LLVM_SYS_150_PREFIX/lib/cmake/llvm
           export PATH=$LLVM_SYS_150_PREFIX/bin:$PATH
+          echo "DTVM_CI_USE_NINJA=$DTVM_CI_USE_NINJA"
+          echo "DTVM_CI_USE_SCCACHE=$DTVM_CI_USE_SCCACHE"
+          echo "SCCACHE_GHA_VERSION=$SCCACHE_GHA_VERSION"
+          echo "SCCACHE_BASEDIRS=$SCCACHE_BASEDIRS"
+          which sccache
+          sccache --version
+          cmake --version
+          ninja --version
+          cc --version | head -n 1
+          c++ --version | head -n 1
           export CMAKE_BUILD_TARGET=Release
           export ENABLE_ASAN=true
           export RUN_MODE=multipass
@@ -99,6 +117,45 @@ jobs:
           export ENABLE_GAS_METER=true
 
           bash .ci/run_test_suite.sh
+      - name: Print sccache stats
+        if: always()
+        run: |
+          if ! command -v sccache >/dev/null 2>&1; then
+            echo "sccache is not in PATH"
+            exit 1
+          fi
+          sccache --show-stats
+          sccache --show-stats --stats-format=json > /tmp/sccache-stats.json
+          python3 - <<'PY'
+          import json
+          import numbers
+          import sys
+
+          with open("/tmp/sccache-stats.json", encoding="utf-8") as f:
+              data = json.load(f)
+
+          stats = data.get("stats", {})
+          compile_requests = int(stats.get("compile_requests") or 0)
+
+          def sum_numbers(value):
+              if isinstance(value, bool):
+                  return 0
+              if isinstance(value, numbers.Number):
+                  return int(value)
+              if isinstance(value, dict):
+                  return sum(sum_numbers(item) for item in value.values())
+              if isinstance(value, list):
+                  return sum(sum_numbers(item) for item in value)
+              return 0
+
+          cache_hits = sum_numbers(stats.get("cache_hits", {}).get("counts", {}))
+          print(f"sccache compile_requests={compile_requests}")
+          print(f"sccache aggregate_cache_hits={cache_hits}")
+
+          if compile_requests <= 0:
+              print("sccache did not observe compiler requests", file=sys.stderr)
+              sys.exit(1)
+          PY
 
   build_test_evm_interpreter_x86_cli:
     name: Test DTVM-EVM interpreter with CLI on x86-64
