@@ -206,10 +206,12 @@ void EVMInstance::triggerInstanceExceptionOnJIT(EVMInstance *Inst,
 }
 #endif // ZEN_ENABLE_JIT
 
-void EVMInstance::expandMemory(uint64_t RequiredSize) {
+bool EVMInstance::expandMemory(uint64_t RequiredSize) {
   auto NewSize = (RequiredSize + 31) / 32 * 32;
   uint64_t ExpansionCost = calculateMemoryExpansionCost(MemorySize, NewSize);
-  chargeGas(ExpansionCost);
+  if (!chargeGas(ExpansionCost)) {
+    return false;
+  }
   if (NewSize > MemorySize) {
     if (!MemoryBase) {
       ensureMemoryBuffer(Memory, MemoryBase);
@@ -220,6 +222,7 @@ void EVMInstance::expandMemory(uint64_t RequiredSize) {
       MemorySize = NewSize;
     }
   }
+  return true;
 }
 
 void EVMInstance::expandMemoryNoGas(uint64_t RequiredSize) {
@@ -237,24 +240,34 @@ void EVMInstance::expandMemoryNoGas(uint64_t RequiredSize) {
 }
 
 bool EVMInstance::expandMemoryChecked(uint64_t Offset, uint64_t Size) {
+  auto markOutOfGasForOversizedMemory = [this]() {
+    // Intentionally force an OOG path so all modes share one behavior:
+    // - check mode: chargeGas sets GasLimitExceeded (soft error, no throw)
+    // - CPU exception mode: trigger trap
+    // - interpreter mode: throw
+    (void)chargeGas(getGas() + 1);
+  };
   if (Size == 0) {
     return true;
   }
   uint64_t RequiredSize = 0;
   if (!calcRequiredMemorySize(Offset, Size, RequiredSize)) {
-    chargeGas(getGas() + 1);
+    markOutOfGasForOversizedMemory();
     return false;
   }
   if (RequiredSize > zen::evm::MAX_REQUIRED_MEMORY_SIZE) {
-    chargeGas(getGas() + 1);
+    markOutOfGasForOversizedMemory();
     return false;
   }
-  expandMemory(RequiredSize);
-  return true;
+  return expandMemory(RequiredSize);
 }
 
 bool EVMInstance::expandMemoryChecked(uint64_t OffsetA, uint64_t SizeA,
                                       uint64_t OffsetB, uint64_t SizeB) {
+  auto markOutOfGasForOversizedMemory = [this]() {
+    // Keep oversize/overflow handling consistent with single-range overload.
+    (void)chargeGas(getGas() + 1);
+  };
   const bool NeedA = SizeA > 0;
   const bool NeedB = SizeB > 0;
   if (!NeedA && !NeedB) {
@@ -270,41 +283,49 @@ bool EVMInstance::expandMemoryChecked(uint64_t OffsetA, uint64_t SizeA,
   uint64_t RequiredSizeB = 0;
   if (!calcRequiredMemorySize(OffsetA, SizeA, RequiredSizeA) ||
       !calcRequiredMemorySize(OffsetB, SizeB, RequiredSizeB)) {
-    chargeGas(getGas() + 1);
+    markOutOfGasForOversizedMemory();
     return false;
   }
   const uint64_t RequiredSize = std::max(RequiredSizeA, RequiredSizeB);
   if (RequiredSize > zen::evm::MAX_REQUIRED_MEMORY_SIZE) {
-    chargeGas(getGas() + 1);
+    markOutOfGasForOversizedMemory();
     return false;
   }
-  expandMemory(RequiredSize);
-  return true;
+  return expandMemory(RequiredSize);
 }
 
-void EVMInstance::chargeGas(uint64_t GasCost) {
+bool EVMInstance::chargeGas(uint64_t GasCost) {
   evmc_message *Msg = getCurrentMessage();
   ZEN_ASSERT(Msg && "Active message required for gas accounting");
   uint64_t GasLeft = getGas();
   if (GasLeft < GasCost) {
 #if defined(ZEN_ENABLE_JIT) && defined(ZEN_ENABLE_CPU_EXCEPTION)
     triggerInstanceExceptionOnJIT(this, common::ErrorCode::GasLimitExceeded);
+#elif defined(ZEN_ENABLE_JIT) && !defined(ZEN_ENABLE_CPU_EXCEPTION)
+    setInstanceExceptionOnJIT(this, common::ErrorCode::GasLimitExceeded);
+    return false;
 #else
     throw common::getError(common::ErrorCode::GasLimitExceeded);
 #endif
+    return false;
   }
   uint64_t NewGas = GasLeft - GasCost;
   setGas(NewGas);
   Msg->gas = static_cast<int64_t>(NewGas);
+  return true;
 }
 
-void EVMInstance::addGas(uint64_t GasAmount) {
+bool EVMInstance::addGas(uint64_t GasAmount) {
   evmc_message *Msg = getCurrentMessage();
   ZEN_ASSERT(Msg && "Active message required for gas accounting");
   uint64_t GasLeft = getGas();
   if (GasLeft > UINT64_MAX - GasAmount) {
-#if defined(ZEN_ENABLE_JIT) && defined(ZEN_ENABLE_CPU_EXCEPTION)
+#if defined(ZEN_ENABLE_JIT) && !defined(ZEN_ENABLE_CPU_EXCEPTION)
+    setInstanceExceptionOnJIT(this, common::ErrorCode::GasLimitExceeded);
+    return false;
+#elif defined(ZEN_ENABLE_JIT) && defined(ZEN_ENABLE_CPU_EXCEPTION)
     triggerInstanceExceptionOnJIT(this, common::ErrorCode::GasLimitExceeded);
+    return false;
 #else
     throw common::getError(common::ErrorCode::GasLimitExceeded);
 #endif
@@ -312,6 +333,7 @@ void EVMInstance::addGas(uint64_t GasAmount) {
   uint64_t NewGas = GasLeft + GasAmount;
   setGas(NewGas);
   Msg->gas = static_cast<int64_t>(NewGas);
+  return true;
 }
 
 } // namespace zen::runtime
