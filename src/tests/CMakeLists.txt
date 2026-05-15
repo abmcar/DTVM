@@ -67,6 +67,7 @@ if(ZEN_ENABLE_SPEC_TEST)
     target_link_libraries(evmCacheComplexityDemo PRIVATE dtvmcore)
     if(ZEN_ENABLE_MULTIPASS_JIT)
       add_executable(evmJitFrontendTests evm_jit_frontend_tests.cpp)
+      add_executable(evmRangeAnalyzerTests evm_range_analyzer_tests.cpp)
     endif()
     add_executable(
       solidityContractTests evm_precompiles.hpp solidity_contract_tests.cpp
@@ -107,6 +108,7 @@ if(ZEN_ENABLE_SPEC_TEST)
       target_compile_options(evmCacheTests PRIVATE -fsanitize=address)
       if(ZEN_ENABLE_MULTIPASS_JIT)
         target_compile_options(evmJitFrontendTests PRIVATE -fsanitize=address)
+        target_compile_options(evmRangeAnalyzerTests PRIVATE -fsanitize=address)
       endif()
       target_compile_options(solidityContractTests PRIVATE -fsanitize=address)
       target_compile_options(mptCompareCpp PRIVATE -fsanitize=address)
@@ -138,6 +140,11 @@ if(ZEN_ENABLE_SPEC_TEST)
         if(ZEN_ENABLE_MULTIPASS_JIT)
           target_link_libraries(
             evmJitFrontendTests
+            PRIVATE compiler dtvmcore gtest_main -fsanitize=address
+            PUBLIC ${GTEST_BOTH_LIBRARIES}
+          )
+          target_link_libraries(
+            evmRangeAnalyzerTests
             PRIVATE compiler dtvmcore gtest_main -fsanitize=address
             PUBLIC ${GTEST_BOTH_LIBRARIES}
           )
@@ -199,6 +206,12 @@ if(ZEN_ENABLE_SPEC_TEST)
         if(ZEN_ENABLE_MULTIPASS_JIT)
           target_link_libraries(
             evmJitFrontendTests
+            PRIVATE compiler dtvmcore gtest_main -fsanitize=address
+                    -static-libasan
+            PUBLIC ${GTEST_BOTH_LIBRARIES}
+          )
+          target_link_libraries(
+            evmRangeAnalyzerTests
             PRIVATE compiler dtvmcore gtest_main -fsanitize=address
                     -static-libasan
             PUBLIC ${GTEST_BOTH_LIBRARIES}
@@ -272,6 +285,11 @@ if(ZEN_ENABLE_SPEC_TEST)
           PRIVATE compiler dtvmcore gtest_main
           PUBLIC ${GTEST_BOTH_LIBRARIES}
         )
+        target_link_libraries(
+          evmRangeAnalyzerTests
+          PRIVATE compiler dtvmcore gtest_main
+          PUBLIC ${GTEST_BOTH_LIBRARIES}
+        )
       endif()
       target_link_libraries(
         solidityContractTests
@@ -316,6 +334,7 @@ if(ZEN_ENABLE_SPEC_TEST)
     add_test(NAME evmCacheTests COMMAND evmCacheTests)
     if(ZEN_ENABLE_MULTIPASS_JIT)
       add_test(NAME evmJitFrontendTests COMMAND evmJitFrontendTests)
+      add_test(NAME evmRangeAnalyzerTests COMMAND evmRangeAnalyzerTests)
     endif()
     add_test(
       NAME solidityContractTests

@@ -1132,7 +1132,7 @@ private:
       CurrentBlockLifted = true;
       CurrentBlockHiddenLiveInPrefixDepth =
           static_cast<uint32_t>(std::max(BlockInfo.HiddenLiveInPrefixDepth, 0));
-      materializeLiftedBlockMergeRequests(PC);
+      materializeLiftedBlockMergeRequests(PC, BlockInfo);
       restoreLiftedBlockLogicalEntryState(PC);
       return;
     }
@@ -1140,9 +1140,23 @@ private:
     CurrentBlockLifted = false;
     int32_t TotalPopSize = -BlockInfo.MinPopHeight;
     EvalStack ReverseStack;
+    // Refine each popped Operand's ValueRange from analyzer-computed entry
+    // ranges so u64-narrow fast paths fire on values flowing through CFG
+    // joins (see EVMRangeAnalyzer /
+    // docs/changes/2026-05-07-value-range-cfg-join). EntryStackRanges[0] is the
+    // bottom of entry stack; pop order is top-first.
+    const auto &EntryRanges = BlockInfo.EntryStackRanges;
+    const int32_t EntryTopIdx = static_cast<int32_t>(EntryRanges.size()) - 1;
+    int32_t PopIter = 0;
     while (TotalPopSize > 0) {
-      ReverseStack.push(Builder.stackPop());
-      TotalPopSize--;
+      Operand Opnd = Builder.stackPop();
+      const int32_t SlotIdx = EntryTopIdx - PopIter;
+      if (SlotIdx >= 0 && SlotIdx < static_cast<int32_t>(EntryRanges.size())) {
+        Opnd.setRange(EntryRanges[SlotIdx]);
+      }
+      ReverseStack.push(Opnd);
+      ++PopIter;
+      --TotalPopSize;
     }
     while (!ReverseStack.empty()) {
       Operand Opnd = ReverseStack.pop();
@@ -1150,7 +1164,9 @@ private:
     }
   }
 
-  void materializeLiftedBlockMergeRequests(uint64_t BlockPC) {
+  void
+  materializeLiftedBlockMergeRequests(uint64_t BlockPC,
+                                      const EVMAnalyzer::BlockInfo &BlockInfo) {
     for (const MergeMaterializationRequest &Request :
          StackLifter.getMergeMaterializationRequests(BlockPC)) {
       std::vector<std::pair<uint64_t, Operand>> IncomingValues;
@@ -1159,10 +1175,12 @@ private:
         IncomingValues.emplace_back(IncomingValue.PredBlockPC,
                                     IncomingValue.Value);
       }
-      StackLifter.assignMergeOperand(
-          BlockPC, Request.SlotIndex,
-          materializeStackMergeOperandCompat(Request.ExpectedPredBlockPCs,
-                                             IncomingValues));
+      Operand Merge = materializeStackMergeOperandCompat(
+          Request.ExpectedPredBlockPCs, IncomingValues);
+      if (Request.SlotIndex < BlockInfo.EntryStackRanges.size()) {
+        Merge.setRange(BlockInfo.EntryStackRanges[Request.SlotIndex]);
+      }
+      StackLifter.assignMergeOperand(BlockPC, Request.SlotIndex, Merge);
     }
   }
 

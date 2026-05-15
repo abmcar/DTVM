@@ -79,6 +79,8 @@ struct MockOperand {
     *Slot = Other.resolvedValue();
   }
 
+  void setRange(COMPILER::EVMValueRange) {}
+
 private:
   U256Value Value = {0, 0, 0, 0};
   bool Constant = false;
@@ -179,7 +181,8 @@ public:
     }
   }
 
-  Operand createStackEntryOperand() {
+  Operand createStackEntryOperand(
+      COMPILER::EVMValueRange = COMPILER::EVMValueRange::U256) {
     return Operand(std::make_shared<MockOperand::U256Value>(
         MockOperand::U256Value{0, 0, 0, 0}));
   }
