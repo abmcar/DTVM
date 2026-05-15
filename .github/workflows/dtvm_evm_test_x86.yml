@@ -351,6 +351,11 @@ jobs:
         run: |
           ./tools/format.sh check
 
+      # Cache the BUILT baseline libdtvmapi.so (a deterministic function of
+      # base.sha), not the bench output JSON (a function of source + host +
+      # load). Forces every PR to re-run baseline benchmarks on the same
+      # runner as the PR benchmarks via the `elif` dispatch branch in
+      # .ci/run_test_suite.sh.
       - name: Restore baseline lib cache
         id: baseline-cache
         uses: actions/cache@v4
