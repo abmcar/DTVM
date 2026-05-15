@@ -351,12 +351,12 @@ jobs:
         run: |
           ./tools/format.sh check
 
-      - name: Restore baseline cache
+      - name: Restore baseline lib cache
         id: baseline-cache
         uses: actions/cache@v4
         with:
-          path: /tmp/perf_baseline_${{ matrix.mode }}.json
-          key: perf-baseline-${{ matrix.mode }}-${{ github.event.pull_request.base.sha }}
+          path: /tmp/baseline_lib
+          key: perf-baseline-lib-${{ matrix.mode }}-${{ github.event.pull_request.base.sha }}
 
       - name: Build baseline library (${{ github.base_ref }})
         if: steps.baseline-cache.outputs.cache-hit != 'true'
@@ -382,7 +382,12 @@ jobs:
           cmake --build build -j 16
 
           mkdir -p /tmp/baseline_lib
-          cp build/lib/* /tmp/baseline_lib/
+          # Resolve SONAME chain (libdtvmapi.so -> .0.1 -> .0.1.0) and copy
+          # the real file only. Plain `cp build/lib/*` dereferences each
+          # symlink and produces 3 full copies (~105 MB) plus any
+          # libgtest*.a present. The dispatcher at .ci/run_test_suite.sh
+          # consumes the bare name `libdtvmapi.so` only.
+          cp "$(readlink -f build/lib/libdtvmapi.so)" /tmp/baseline_lib/libdtvmapi.so
 
           rm -rf build
           git checkout ${{ github.sha }}
@@ -408,7 +413,6 @@ jobs:
           export CPU_EXCEPTION_TYPE='cpu'
           export BENCHMARK_MODE=${{ matrix.mode }}
           export BENCHMARK_THRESHOLD=0.25
-          export BENCHMARK_BASELINE_CACHE=/tmp/perf_baseline_${{ matrix.mode }}.json
           export BENCHMARK_BASELINE_LIB=/tmp/baseline_lib
           export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary_${{ matrix.mode }}.md
           export BENCHMARK_REPETITIONS=5
