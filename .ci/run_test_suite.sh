@@ -114,14 +114,25 @@ export PATH=$PATH:$PWD/build
 CMAKE_OPTIONS_ORIGIN="$CMAKE_OPTIONS"
 
 if [[ ${INPUT_FORMAT} == "evm" ]]; then
-    ./tools/easm2bytecode.sh ./tests/evm_asm ./tests/evm_asm
-    ./tools/solc_batch_compile.sh
+    if [ "${DTVM_CI_DRY_RUN:-0}" = "1" ]; then
+        echo "+ ./tools/easm2bytecode.sh ./tests/evm_asm ./tests/evm_asm"
+        echo "+ ./tools/solc_batch_compile.sh"
+    else
+        ./tools/easm2bytecode.sh ./tests/evm_asm ./tests/evm_asm
+        ./tools/solc_batch_compile.sh
+    fi
 fi
 
 for STACK_TYPE in ${STACK_TYPES[@]}; do
-    rm -rf build
-    cmake -S . -B build $CMAKE_OPTIONS_ORIGIN $STACK_TYPE
-    cmake --build build -j 16
+    if [ "${DTVM_CI_DRY_RUN:-0}" = "1" ]; then
+        echo "+ rm -rf build"
+    else
+        rm -rf build
+    fi
+    .ci/cmake_ci_build.sh build -- $CMAKE_OPTIONS_ORIGIN $STACK_TYPE
+    if [ "${DTVM_CI_DRY_RUN:-0}" = "1" ]; then
+        continue
+    fi
 
     case $TestSuite in
         "microsuite")
