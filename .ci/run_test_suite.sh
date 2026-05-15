@@ -224,7 +224,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
                 fi
             fi
             cd "$EVMONE_DIR"
-            "$WORKSPACE_ROOT/.ci/cmake_ci_build.sh" build -- -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TARGET"
+            "$SCRIPT_DIR/cmake_ci_build.sh" build -- -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TARGET"
             EVMONE_STATETEST_BIN="$PWD/build/bin/evmone-statetest"
             cd "$WORKSPACE_ROOT"
 
@@ -325,7 +325,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             cp ../tools/check_performance_regression.py ./
 
             if [ ! -f "build/bin/evmone-bench" ]; then
-                "$WORKSPACE_ROOT/.ci/cmake_ci_build.sh" build -- -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+                "$SCRIPT_DIR/cmake_ci_build.sh" build -- -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE=Release
             fi
 
             BASELINE_CACHE=${BENCHMARK_BASELINE_CACHE:-}
