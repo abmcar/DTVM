@@ -101,6 +101,16 @@ private:
   void initBytecodeCache() const;
   mutable bool BytecodeCacheInitialized = false;
   mutable evm::EVMBytecodeCache BytecodeCache;
+  // Whether this module will be consumed by the multipass JIT. When true,
+  // buildBytecodeCache runs the expensive SPP metering pipeline so the JIT
+  // can read shifted gas costs from GasChunkCostSPP. When false, only the
+  // cheap per-block pass runs — interpreter-only modules pay nothing extra.
+  //
+  // Must be set before any getBytecodeCache() call: once the cache is
+  // built, the EnableSPP decision is fixed for the lifetime of the
+  // module. Future lazy / on-demand JIT paths must flip this flag before
+  // triggering the lazy cache build.
+  bool CacheNeedsSPP = false;
   evmc_revision Revision = zen::evm::DEFAULT_REVISION;
   EVMMemorySpecializationProfile MemoryProfile = {};
 
