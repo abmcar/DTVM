@@ -288,6 +288,13 @@ jobs:
         with:
           path: /github/home/.fetchcontent
           key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
+      - name: Cache Hunter
+        uses: actions/cache@v4
+        with:
+          path: /github/home/.hunter
+          key: ${{ runner.os }}-hunter-evmone-v1-${{ hashFiles('.ci/run_test_suite.sh', '.github/workflows/dtvm_evm_test_x86.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-hunter-evmone-v1-
       - name: Code Format Check
         run: |
           ./tools/format.sh check
@@ -422,6 +429,14 @@ jobs:
         with:
           path: /github/home/.fetchcontent
           key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
+
+      - name: Cache Hunter
+        uses: actions/cache@v4
+        with:
+          path: /github/home/.hunter
+          key: ${{ runner.os }}-hunter-evmone-v1-${{ hashFiles('.ci/run_test_suite.sh', '.github/workflows/dtvm_evm_test_x86.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-hunter-evmone-v1-
 
       - name: Setup git safe directory
         run: |
