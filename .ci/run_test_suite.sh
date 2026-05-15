@@ -299,10 +299,26 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             ;;
         "benchmarksuite")
             # Clone evmone and run performance regression check
-            EVMONE_DIR="evmone"
-            if [ ! -d "$EVMONE_DIR" ]; then
-                git clone --depth 1 --recurse-submodules -b for_test https://github.com/DTVMStack/evmone.git $EVMONE_DIR
+            EVMONE_DIR=${EVMONE_DIR:-evmone}
+            EVMONE_REPO=${EVMONE_REPO:-https://github.com/DTVMStack/evmone.git}
+            EVMONE_REF=${EVMONE_REF:-for_test}
+            EVMONE_COMMIT=${EVMONE_COMMIT:-}
+
+            if [ -z "$EVMONE_COMMIT" ]; then
+                EVMONE_COMMIT=$(git ls-remote "$EVMONE_REPO" "refs/heads/$EVMONE_REF" | awk '{print $1}')
             fi
+            if [ -z "$EVMONE_COMMIT" ]; then
+                echo "Unable to resolve $EVMONE_REPO refs/heads/$EVMONE_REF"
+                exit 1
+            fi
+
+            if [ ! -d "$EVMONE_DIR/.git" ]; then
+                rm -rf "$EVMONE_DIR"
+                git clone --depth 1 --recurse-submodules -b "$EVMONE_REF" "$EVMONE_REPO" "$EVMONE_DIR"
+            fi
+            git -C "$EVMONE_DIR" fetch --depth 1 origin "$EVMONE_REF"
+            git -C "$EVMONE_DIR" checkout --detach "$EVMONE_COMMIT"
+            git -C "$EVMONE_DIR" submodule update --init --recursive
 
             BENCHMARK_THRESHOLD=${BENCHMARK_THRESHOLD:-0.15}
             BENCHMARK_MODE=${BENCHMARK_MODE:-multipass}
@@ -325,7 +341,10 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             cp ../tools/check_performance_regression.py ./
 
             if [ ! -f "build/bin/evmone-bench" ]; then
-                "$SCRIPT_DIR/cmake_ci_build.sh" build -- -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+                DTVM_CI_BUILD_TARGETS=evmone-bench \
+                    "$SCRIPT_DIR/cmake_ci_build.sh" build -- \
+                    -DEVMONE_TESTING=ON \
+                    -DCMAKE_BUILD_TYPE=Release
             fi
 
             BASELINE_CACHE=${BENCHMARK_BASELINE_CACHE:-}

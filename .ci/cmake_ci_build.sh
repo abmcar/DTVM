@@ -19,6 +19,7 @@ USE_NINJA=${DTVM_CI_USE_NINJA:-0}
 USE_SCCACHE=${DTVM_CI_USE_SCCACHE:-0}
 DRY_RUN=${DTVM_CI_DRY_RUN:-0}
 BUILD_JOBS=${DTVM_CI_BUILD_JOBS:-16}
+BUILD_TARGETS=${DTVM_CI_BUILD_TARGETS:-}
 
 GENERATOR_ARGS=()
 if [ "$USE_NINJA" = "1" ]; then
@@ -41,7 +42,13 @@ CONFIGURE_CMD=(
     "${LAUNCHER_ARGS[@]}"
     "$@"
 )
-BUILD_CMD=(cmake --build "$BUILD_DIR" -j "$BUILD_JOBS")
+BUILD_CMD=(cmake --build "$BUILD_DIR")
+if [ -n "$BUILD_TARGETS" ]; then
+    for TARGET in $BUILD_TARGETS; do
+        BUILD_CMD+=(--target "$TARGET")
+    done
+fi
+BUILD_CMD+=(-j "$BUILD_JOBS")
 
 echo "DTVM CI CMake source dir: ${SOURCE_DIR}"
 echo "DTVM CI CMake generator: ${USE_NINJA}"
