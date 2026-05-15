@@ -13,7 +13,7 @@ Switch the `Performance Regression Check` job (`.github/workflows/dtvm_evm_test_
 
 Concrete evidence — PR #493 CI run `25775768632`:
 
-The current job (line numbers from `.github/workflows/dtvm_evm_test_x86.yml`):
+The pre-PR job (line numbers from `.github/workflows/dtvm_evm_test_x86.yml` on `main`):
 
 ```yaml
 # Lines 354-359
@@ -58,7 +58,7 @@ CI reports 13–18% regressions; same-machine A-B-A reports ≤0.6% deltas, all 
 
 ## Impact
 
-- **Touched files**: `.github/workflows/dtvm_evm_test_x86.yml` only — `performance_regression_check` job.
+- **Behavior-affecting files**: `.github/workflows/dtvm_evm_test_x86.yml` only — `performance_regression_check` job. (This change doc itself, `docs/changes/2026-05-15-perf-check-baseline-lib-cache/README.md`, is added in the same commit as a non-functional design record.)
 - **Behavior change**: per-PR perf-check job wall-clock increases on cache-hit runs by the baseline-bench step (which under the old scheme was skipped); cache-miss runs are unchanged.
 - **Cost / quota**: cache-hit runs now do both a baseline bench AND a PR bench on the same runner (cache-miss already does both, plus a baseline build). Both modes (`matrix.mode = {interpreter, multipass}`) run per PR. Empirically verified on fork CI runs `25897744713` (cache miss) and `25900131271` (cache hit) that all 11 non-Lint jobs go green; cache-hit runs spend longer than the old cache-hit scheme (which skipped baseline bench entirely) but shorter than cache-miss (which adds the baseline build on top). Acceptable under the public-repo GitHub Actions allowance for our PR volume.
 - **No source-code change**, no test runner change, no `.ci/run_test_suite.sh` change. The `elif [ -n "$BENCHMARK_BASELINE_LIB" ]` path it routes to already exists and is exercised today on cache miss.
