@@ -325,6 +325,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             BENCHMARK_SUMMARY_FILE=${BENCHMARK_SUMMARY_FILE:-/tmp/perf_summary.md}
             BENCHMARK_REPETITIONS=${BENCHMARK_REPETITIONS:-3}
             BENCHMARK_MIN_TIME=${BENCHMARK_MIN_TIME:-""}
+            BENCHMARK_JOBS=${BENCHMARK_JOBS:-1}
 
             PERF_ARGS=""
             if [ -n "$BENCHMARK_REPETITIONS" ]; then
@@ -332,6 +333,9 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             fi
             if [ -n "$BENCHMARK_MIN_TIME" ]; then
                 PERF_ARGS="$PERF_ARGS --benchmark-min-time $BENCHMARK_MIN_TIME"
+            fi
+            if [ -n "$BENCHMARK_JOBS" ]; then
+                PERF_ARGS="$PERF_ARGS --benchmark-jobs $BENCHMARK_JOBS"
             fi
 
             cp build/lib/* $EVMONE_DIR/
