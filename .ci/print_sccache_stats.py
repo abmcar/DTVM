@@ -30,13 +30,15 @@ def count_bucket(stats, name):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--require-requests", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     if shutil.which("sccache") is None:
         print("sccache is not in PATH", file=sys.stderr)
         return 1 if args.require_requests else 0
 
-    subprocess.run(["sccache", "--show-stats"], check=False)
+    if args.verbose:
+        subprocess.run(["sccache", "--show-stats"], check=False)
 
     stats_json = subprocess.check_output(
         ["sccache", "--show-stats", "--stats-format=json"],

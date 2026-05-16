@@ -21,16 +21,20 @@ DRY_RUN=${DTVM_CI_DRY_RUN:-0}
 BUILD_JOBS=${DTVM_CI_BUILD_JOBS:-16}
 
 GENERATOR_ARGS=()
+GENERATOR_NAME=default
 if [ "$USE_NINJA" = "1" ]; then
     GENERATOR_ARGS=(-G Ninja)
+    GENERATOR_NAME=Ninja
 fi
 
 LAUNCHER_ARGS=()
+LAUNCHER_NAME=none
 if [ "$USE_SCCACHE" = "1" ]; then
     LAUNCHER_ARGS=(
         -DCMAKE_C_COMPILER_LAUNCHER=sccache
         -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
     )
+    LAUNCHER_NAME=sccache
 fi
 
 CONFIGURE_CMD=(
@@ -44,8 +48,8 @@ CONFIGURE_CMD=(
 BUILD_CMD=(cmake --build "$BUILD_DIR" -j "$BUILD_JOBS")
 
 echo "DTVM CI CMake source dir: ${SOURCE_DIR}"
-echo "DTVM CI CMake generator: ${USE_NINJA}"
-echo "DTVM CI CMake sccache launcher: ${USE_SCCACHE}"
+echo "DTVM CI CMake generator: ${GENERATOR_NAME}"
+echo "DTVM CI CMake compiler launcher: ${LAUNCHER_NAME}"
 
 printf '+'
 printf ' %q' "${CONFIGURE_CMD[@]}"
