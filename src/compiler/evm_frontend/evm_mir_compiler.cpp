@@ -3090,9 +3090,77 @@ EVMMirBuilder::handleCompareGtRhsU64(const Operand &LHSOp, uint64_t RhsU64) {
 
 typename EVMMirBuilder::Operand
 EVMMirBuilder::handleClz(const Operand &ValueOp) {
-  const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  return callRuntimeFor<const intx::uint256 *, const intx::uint256 &>(
-      RuntimeFunctions.GetClz, ValueOp);
+  // EIP-7939 CLZ inlined: 4-limb chain-select on the highest non-zero limb
+  // plus a base offset (limb index 3 -> 0, 2 -> 64, 1 -> 128, 0 -> 192).
+  // CLZ(0) = 256 is enforced by an outer Select(IsZero, 256, partial).
+  // Pattern mirrors handleExp's computeExpByteSize lambda (see
+  // evm_mir_compiler.cpp:2511-2562) for parity with proven MIR shapes.
+  MType *MirI64Type =
+      EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  MInstruction *Zero = createIntConstInstruction(MirI64Type, 0);
+  MInstruction *One = createIntConstInstruction(MirI64Type, 1);
+  MInstruction *Const64 = createIntConstInstruction(MirI64Type, 64);
+  MInstruction *Const128 = createIntConstInstruction(MirI64Type, 128);
+  MInstruction *Const192 = createIntConstInstruction(MirI64Type, 192);
+  MInstruction *Const256 = createIntConstInstruction(MirI64Type, 256);
+
+  U256Inst Value = extractU256Operand(ValueOp);
+
+  auto NePred = CmpInstruction::Predicate::ICMP_NE;
+  MInstruction *Has1 = createInstruction<CmpInstruction>(
+      false, NePred, &Ctx.I64Type, Value[1], Zero);
+  MInstruction *Has2 = createInstruction<CmpInstruction>(
+      false, NePred, &Ctx.I64Type, Value[2], Zero);
+  MInstruction *Has3 = createInstruction<CmpInstruction>(
+      false, NePred, &Ctx.I64Type, Value[3], Zero);
+
+  // OR all four limbs to detect the all-zero case.
+  MInstruction *Any01 = createInstruction<BinaryInstruction>(
+      false, OP_or, MirI64Type, Value[0], Value[1]);
+  MInstruction *Any23 = createInstruction<BinaryInstruction>(
+      false, OP_or, MirI64Type, Value[2], Value[3]);
+  MInstruction *Any = createInstruction<BinaryInstruction>(
+      false, OP_or, MirI64Type, Any01, Any23);
+  auto EqPred = CmpInstruction::Predicate::ICMP_EQ;
+  MInstruction *IsZero =
+      createInstruction<CmpInstruction>(false, EqPred, &Ctx.I64Type, Any, Zero);
+
+  // Chain-select the highest non-zero limb.
+  MInstruction *Limb01 = createInstruction<SelectInstruction>(
+      false, MirI64Type, Has1, Value[1], Value[0]);
+  MInstruction *Limb02 = createInstruction<SelectInstruction>(
+      false, MirI64Type, Has2, Value[2], Limb01);
+  MInstruction *Limb = createInstruction<SelectInstruction>(
+      false, MirI64Type, Has3, Value[3], Limb02);
+
+  // Chain-select the matching base offset.
+  MInstruction *Off01 = createInstruction<SelectInstruction>(
+      false, MirI64Type, Has1, Const128, Const192);
+  MInstruction *Off02 = createInstruction<SelectInstruction>(
+      false, MirI64Type, Has2, Const64, Off01);
+  MInstruction *Offset = createInstruction<SelectInstruction>(
+      false, MirI64Type, Has3, Zero, Off02);
+
+  // Defense-in-depth against clz(0) UB on the picked limb (mirrors
+  // handleExp:2547-2548). The outer Select discards Partial when IsZero,
+  // but we keep the guard so the MIR is self-contained.
+  MInstruction *SafeLimb =
+      createInstruction<BinaryInstruction>(false, OP_or, MirI64Type, Limb, One);
+  MInstruction *Clz =
+      createInstruction<UnaryInstruction>(false, OP_clz, MirI64Type, SafeLimb);
+  MInstruction *Partial = createInstruction<BinaryInstruction>(
+      false, OP_add, MirI64Type, Offset, Clz);
+
+  // EIP-7939: CLZ(0) = 256.
+  MInstruction *FinalResult = createInstruction<SelectInstruction>(
+      false, MirI64Type, IsZero, Const256, Partial);
+
+  U256Inst Result = {};
+  Result[0] = protectUnsafeValue(FinalResult, MirI64Type);
+  for (size_t I = 1; I < EVM_ELEMENTS_COUNT; ++I) {
+    Result[I] = Zero;
+  }
+  return Operand(Result, EVMType::UINT256, ValueRange::U64);
 }
 
 namespace {
