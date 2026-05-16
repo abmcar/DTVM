@@ -546,7 +546,7 @@ jobs:
           export BENCHMARK_BASELINE_LIB=/tmp/baseline_lib
           export BENCHMARK_SUMMARY_FILE=/tmp/perf_summary_${{ matrix.mode }}.md
           export BENCHMARK_REPETITIONS=5
-          export BENCHMARK_JOBS=4
+          export BENCHMARK_JOBS=3
           export EVMONE_COMMIT=${{ steps.evmone.outputs.commit }}
 
           bash .ci/run_test_suite.sh
