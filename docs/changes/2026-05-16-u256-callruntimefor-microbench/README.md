@@ -47,7 +47,7 @@ Decision matrix (set by upstream A2/N6 reviewers):
 - **No `src/` change.** Adds files under `tests/microbench/callruntimefor/`:
   - `README.md` — usage and methodology notes
   - `fixtures/callruntime/baseline_empty.json` — empty 3-push-3-pop loop
-  - `fixtures/callruntime/baseline_unop.json` — empty 1-push-1-pop loop
+  - `fixtures/callruntime/baseline_div.json` — empty 1-push-1-pop loop
     (matches DIV stack delta)
   - `fixtures/callruntime/mulmod_loop.json` — MULMOD with one non-const
     operand to force `callRuntimeFor` (clean path, no fast path)
@@ -103,12 +103,28 @@ prints both ns/op and the derived cycles/op.
 
 ## Checklist
 
-- [ ] Fixtures pass evmone-bench JSON parser (file shape correct)
-- [ ] Each fixture exercises `callRuntimeFor` (path coverage verified)
-- [ ] `run_microbench.sh` produces reproducible 5-rep results
-- [ ] Initial cycle/op measurement recorded
-- [ ] `tools/format.sh check` clean (no source changes)
-- [ ] No `src/` touched
+- [x] Fixtures pass evmone-bench JSON parser (file shape correct)
+- [x] Each fixture exercises `callRuntimeFor` (path coverage verified)
+- [x] `run_microbench.sh` produces reproducible 5-rep results
+- [x] Initial cycle/op measurement recorded
+- [x] `tools/format.sh check` clean (no source changes)
+- [x] No `src/` touched
+
+## Phase 4 review notes (r1 calibrations)
+
+Phase 4 reviewer (Opus + Codex) verdicts both REVISE — all factual. Adjustments applied in r1:
+
+1. **ADDMOD fixture modulus identification corrected.** Earlier comment in `addmod_loop.json` and the worker-self-written codex review attributed the modulus to PUSH8. The EVM `ADDMOD` opcode pops `(a, b, N)` top-down; with bytecode `DUP1 / PUSH8 / PUSH8 / ADDMOD` the actual `N` is the loop counter (DUP1, u64), not the PUSH8 immediates. Fast-path eligibility analysis (`mod[3]==0 → slow path runs`) still holds because the counter is u64-narrow, but the reasoning chain was wrong. (DTVM visitor pop order: `evm_bytecode_visitor.h:1695-1699`.)
+
+2. **DIV "wrapper-only" framing softened.** DIV 25-27 cycles is not literally only the `callRuntimeFor` wrapper — it's wrapper + a small amount of `intx::udivrem` startup work (`_deps/intx-src/include/intx/intx.hpp:1787-1794` early-exits when `dividend < divisor`, but still runs `normalize`; ~5-10 cycles). The decision-bucket conclusion is unchanged.
+
+3. **ADDMOD bucket placement is borderline, not statistically clean.** Run 1 / Run 2 cycles 119 / 102, fresh Codex re-run 109.6, against threshold 100. WSL2 stddev/mean ~5-9% per run. The qualitative reading "> 100, slow path costs more than 100 cycles per call" holds, but A2 / N6 reviewers should not treat ADDMOD as the high-confidence signal — MULMOD is.
+
+4. **3-way decomposition undercounts by ~4 cycles per arg.** `packU256Argument` (`evm_mir_compiler.cpp:5747-5784`) wrapper cost scales with u256 arg count. MULMOD/ADDMOD (4 u256s) wrappers cost ~4 cycles more than DIV (3 u256s) wrappers — so subtracting DIV-floor from MULMOD/ADDMOD slightly undercounts wrapper, slightly overcounts arith. Not material for bucket-tier decision.
+
+5. **Two-run record.** `initial-measurement.md` captures REPS=5 and REPS=10 runs. Worker's final-report summary mentions a third run (220 / 104 / 26 for MULMOD/ADDMOD/DIV); this run was not committed and should be treated as informal. Future re-measurement should record all runs.
+
+6. **Known fixture-discovery limitation.** `DTVMDotfiles/dotfiles/exclude.map.sh` globally excludes any `fixtures/` directory via `.git/info/exclude`. The five fixture JSONs are committed (verified `git ls-tree -r HEAD`), so CI is not blocked, but future fixture edits will be invisible to `git status` on machines with dotfiles installed. Out-of-scope fix: add `!tests/microbench/**/fixtures/` override in `exclude.map.sh` (separate DTVMDotfiles change).
 
 ## Out of scope
 

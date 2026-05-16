@@ -1,7 +1,7 @@
 {
     "addmod_loop" : {
         "_info" : {
-            "comment" : "Loop 65000 iters: ADDMOD with PUSH8 (u64) modulus. handleAddMod fast path requires mod[3] != 0 (i.e., modulus >= 2^192). With u64 modulus, mod[3] == 0 and the slow path runs (evm_mir_compiler.cpp:2444-2455), which calls callRuntimeFor.",
+            "comment" : "Loop 65000 iters: ADDMOD where modulus is the loop counter (DUP1, u64). Bytecode shape DUP1/PUSH8/PUSH8/ADDMOD — EVM ADDMOD pops (a, b, N) top-down, so the actual N is the counter at stack-bottom, not the PUSH8 immediates. handleAddMod fast path requires mod[3] != 0; counter is u64 so mod[3] == 0 and the slow path runs (evm_mir_compiler.cpp:2444-2455), which calls callRuntimeFor.",
             "labels" : {"0" : "loop"},
             "source" : "hand-crafted for callRuntimeFor microbench"
         },
