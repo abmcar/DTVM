@@ -25,6 +25,9 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 print_sccache_stats() {
     if [ "${DTVM_CI_USE_SCCACHE:-0}" = "1" ] && command -v sccache >/dev/null 2>&1; then
+        if [ -n "${1:-}" ]; then
+            echo "sccache stats checkpoint: $1"
+        fi
         python3 "$SCRIPT_DIR/print_sccache_stats.py" || true
     fi
 }
@@ -140,6 +143,9 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
         rm -rf build
     fi
     "$SCRIPT_DIR/cmake_ci_build.sh" build -- $CMAKE_OPTIONS_ORIGIN $STACK_TYPE
+    if [[ $TestSuite == "benchmarksuite" ]]; then
+        print_sccache_stats "after DTVM build"
+    fi
     if [ "${DTVM_CI_DRY_RUN:-0}" = "1" ]; then
         continue
     fi
@@ -327,6 +333,7 @@ for STACK_TYPE in ${STACK_TYPES[@]}; do
             if [ ! -f "build/bin/evmone-bench" ]; then
                 "$SCRIPT_DIR/cmake_ci_build.sh" build -- -DEVMONE_TESTING=ON -DCMAKE_BUILD_TYPE=Release
             fi
+            print_sccache_stats "before benchmarks"
 
             BASELINE_CACHE=${BENCHMARK_BASELINE_CACHE:-}
 

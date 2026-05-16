@@ -25,6 +25,7 @@ env:
   SCCACHE_GHA_ENABLED: "true"
   SCCACHE_GHA_VERSION: dtvm-ci-sccache-v2-gcc11-llvm15-ninja
   SCCACHE_BASEDIRS: ${{ github.workspace }}
+  SCCACHE_IDLE_TIMEOUT: "0"
   DTVM_CI_USE_NINJA: "1"
   DTVM_CI_USE_SCCACHE: "1"
 
