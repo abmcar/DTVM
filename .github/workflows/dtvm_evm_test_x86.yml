@@ -18,11 +18,16 @@ permissions:
 
 # Shared FetchContent cache root for all container jobs. The hook in
 # CMakeLists.txt (commit 96707a2 lines 8-18) picks this up as the base
-# dir for FetchContent populations. Each container job adds an
-# `actions/cache` step keyed on `hashFiles('third_party/AddDeps.cmake')`
-# to persist this dir across CI runs.
+# dir for FetchContent populations. The cache key includes the generator
+# namespace because CMake writes generator-specific FetchContent subbuilds.
 env:
   FETCHCONTENT_BASE_DIR: /github/home/.fetchcontent
+  SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_GHA_VERSION: dtvm-ci-sccache-v2-gcc11-llvm15-ninja
+  SCCACHE_BASEDIRS: ${{ github.workspace }}
+  SCCACHE_IDLE_TIMEOUT: "0"
+  DTVM_CI_USE_NINJA: "1"
+  DTVM_CI_USE_SCCACHE: "1"
 
 jobs:
   build_test_evm_interpreter_x86_ctest:
@@ -39,10 +44,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Clone asmjit
         run: |
           git clone https://github.com/asmjit/asmjit.git
@@ -78,10 +85,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build and Test
         run: |
           echo "current home is $HOME"
@@ -114,10 +123,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build and Test
         run: |
           echo "current home is $HOME"
@@ -161,10 +172,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build and Test
         run: |
           echo "current home is $HOME"
@@ -197,10 +210,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build and Test
         run: |
           echo "current home is $HOME"
@@ -234,10 +249,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build and Test
         run: |
           echo "current home is $HOME"
@@ -271,10 +288,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
+      - name: Cache Hunter
+        uses: actions/cache@v4
+        with:
+          path: /github/home/.hunter
+          key: ${{ runner.os }}-hunter-evmone-v1-${{ hashFiles('.ci/run_test_suite.sh', '.github/workflows/dtvm_evm_test_x86.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-hunter-evmone-v1-
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build and Test
         env:
           LLVM_SYS_150_PREFIX: /opt/llvm15
@@ -306,7 +332,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Cache Hunter
         uses: actions/cache@v4
         with:
@@ -317,6 +343,8 @@ jobs:
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build and Test
         env:
           LLVM_SYS_150_PREFIX: /opt/llvm15
@@ -352,10 +380,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build and Test
         run: |
           echo "current home is $HOME"
@@ -399,7 +429,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /github/home/.fetchcontent
-          key: ${{ runner.os }}-fc-${{ github.workflow }}-v1-${{ hashFiles('third_party/AddDeps.cmake') }}
+          key: ${{ runner.os }}-fc-${{ github.workflow }}-ninja-v2-${{ hashFiles('third_party/AddDeps.cmake') }}
+
+      - name: Cache Hunter
+        uses: actions/cache@v4
+        with:
+          path: /github/home/.hunter
+          key: ${{ runner.os }}-hunter-evmone-v1-${{ hashFiles('.ci/run_test_suite.sh', '.github/workflows/dtvm_evm_test_x86.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-hunter-evmone-v1-
 
       - name: Setup git safe directory
         run: |
@@ -409,6 +447,8 @@ jobs:
       - name: Code Format Check
         run: |
           ./tools/format.sh check
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
 
       # Cache the BUILT baseline libdtvmapi.so (a deterministic function of
       # base.sha), not the bench output JSON (a function of source + host +
@@ -435,6 +475,9 @@ jobs:
           git checkout ${{ github.base_ref }}
 
           cmake -S . -B build \
+            -G Ninja \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DCMAKE_BUILD_TYPE=Release \
             -DZEN_ENABLE_SINGLEPASS_JIT=OFF \
             -DZEN_ENABLE_MULTIPASS_JIT=ON \
