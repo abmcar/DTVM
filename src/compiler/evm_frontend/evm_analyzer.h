@@ -409,6 +409,11 @@ public:
     return It == JumpDestCanonicalPCs.end() ? PC : It->second;
   }
 
+  void setResolvedJumpTargets(
+      const std::unordered_map<uint32_t, uint32_t> *Targets) {
+    SharedResolvedJumpTargets = Targets;
+  }
+
   bool hasUnknownDynamicJumpTargets() const { return HasUnknownDynamicJump; }
 
   bool analyzeSuitabilityOnly(const uint8_t *Bytecode, size_t BytecodeSize) {
@@ -433,6 +438,48 @@ public:
   }
 
 private:
+  // Fallback: look up pre-resolved jump target from the shared cache.
+  // Used when local abstract stack analysis cannot resolve the jump.
+  // The shared map stores raw (non-canonicalized) PCs; we canonicalize here
+  // because the SSA analyzer uses canonical JUMPDEST PCs for block identity.
+  // Overload for JUMP (unconditional).
+  bool tryResolveFromSharedMap(size_t JumpPC, BlockInfo &Info) {
+    if (!SharedResolvedJumpTargets) {
+      return false;
+    }
+    auto It = SharedResolvedJumpTargets->find(static_cast<uint32_t>(JumpPC));
+    if (It == SharedResolvedJumpTargets->end()) {
+      return false;
+    }
+    uint64_t RawPC = static_cast<uint64_t>(It->second);
+    uint64_t TargetPC = getCanonicalJumpDestPC(RawPC);
+    Info.HasConstantJump = true;
+    Info.ConstantJumpTargetPC = TargetPC;
+    Info.Successors.push_back(TargetPC);
+    return true;
+  }
+
+  // Overload for JUMPI (conditional): also receives FallthroughEntryPC to
+  // avoid adding a duplicate successor edge.
+  bool tryResolveFromSharedMap(size_t JumpPC, BlockInfo &Info,
+                               uint64_t FallthroughEntryPC) {
+    if (!SharedResolvedJumpTargets) {
+      return false;
+    }
+    auto It = SharedResolvedJumpTargets->find(static_cast<uint32_t>(JumpPC));
+    if (It == SharedResolvedJumpTargets->end()) {
+      return false;
+    }
+    uint64_t RawPC = static_cast<uint64_t>(It->second);
+    uint64_t TargetPC = getCanonicalJumpDestPC(RawPC);
+    Info.HasConstantJump = true;
+    Info.ConstantJumpTargetPC = TargetPC;
+    if (TargetPC != FallthroughEntryPC) {
+      Info.Successors.push_back(TargetPC);
+    }
+    return true;
+  }
+
   void resetAnalysisState() {
     BlockInfos.clear();
     DynamicJumpRegions.clear();
@@ -673,6 +720,8 @@ private:
           Info.HasConstantJump = true;
           Info.ConstantJumpTargetPC = getCanonicalJumpDestPC(Dest.Low);
           Info.Successors.push_back(Info.ConstantJumpTargetPC);
+        } else if (tryResolveFromSharedMap(ScanPC - 1, Info)) {
+          // Resolved via shared cache (covers patterns like SWAPn→JUMP).
         } else {
           Info.HasDynamicJump = true;
           HasUnknownDynamicJump = true;
@@ -710,10 +759,18 @@ private:
             Info.Successors.push_back(Info.ConstantJumpTargetPC);
           }
         } else if (!Dest.KnownConst || !Dest.FitsU64) {
-          Info.HasDynamicJump = true;
-          HasUnknownDynamicJump = true;
-          Info.DynamicJumpTargetRegionEntryPC = FallthroughEntryPC;
+          if (tryResolveFromSharedMap(ScanPC - 1, Info, FallthroughEntryPC)) {
+            // Resolved via shared cache.
+          } else {
+            Info.HasDynamicJump = true;
+            HasUnknownDynamicJump = true;
+            Info.DynamicJumpTargetRegionEntryPC = FallthroughEntryPC;
+          }
         }
+        // Note: the implicit else (KnownConst && FitsU64 but NOT a valid
+        // JUMPDEST) is intentionally left without a successor for the taken
+        // branch — at runtime that path traps with BAD_JUMP_DESTINATION,
+        // so it is effectively dead. Only the fallthrough is reachable.
         NextEntryPC = FallthroughEntryPC;
         NextBodyStartPC = FallthroughBodyStartPC;
         HasNextBlock = true;
@@ -1854,6 +1911,8 @@ private:
   const evmc_instruction_metrics *InstructionMetrics = nullptr;
   const char *const *InstructionNames = nullptr;
   JITSuitabilityResult JITResult;
+  const std::unordered_map<uint32_t, uint32_t> *SharedResolvedJumpTargets =
+      nullptr;
 };
 
 } // namespace COMPILER

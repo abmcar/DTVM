@@ -13,6 +13,7 @@
 #include "evm/evm.h"
 #include "evmc/instructions.h"
 #include "intx/intx.hpp"
+#include <unordered_map>
 #include <vector>
 
 // Forward declaration to avoid circular dependency
@@ -81,6 +82,14 @@ public:
     return GasChunkEnd && GasChunkCost && GasChunkSize > 0;
   }
 
+  void setResolvedJumpTargets(
+      const std::unordered_map<uint32_t, uint32_t> *Targets) {
+    ResolvedJumpTargets = Targets;
+  }
+  const std::unordered_map<uint32_t, uint32_t> *getResolvedJumpTargets() const {
+    return ResolvedJumpTargets;
+  }
+
   void setRevision(evmc_revision Rev) { Revision = Rev; }
   evmc_revision getRevision() const { return Revision; }
   void setMemoryLinearStrideSkipLeadingZeroLimbStores(uint8_t Count) {
@@ -103,6 +112,7 @@ private:
   const uint64_t *GasChunkCost = nullptr;
   const uint64_t *GasChunkCostSPP = nullptr;
   size_t GasChunkSize = 0;
+  const std::unordered_map<uint32_t, uint32_t> *ResolvedJumpTargets = nullptr;
   evmc_revision Revision = zen::evm::DEFAULT_REVISION;
   uint8_t MemoryLinearStrideSkipLeadingZeroLimbStores = 0;
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER

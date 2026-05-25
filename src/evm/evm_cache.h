@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 namespace zen::evm {
@@ -25,6 +26,11 @@ struct EVMBytecodeCache {
   // Per-chunk-start SPP-shifted gas cost for the multipass JIT. Produced by
   // buildGasChunksSPP's metering pass; never read by the interpreter.
   std::vector<uint64_t> GasChunkCostSPP;
+  /// Pre-resolved jump targets via abstract stack simulation.
+  /// Key: PC of the JUMP/JUMPI opcode.
+  /// Value: canonical target JUMPDEST PC.
+  /// Only constant jumps are present; absence means dynamic/unresolved.
+  std::unordered_map<uint32_t, uint32_t> ResolvedJumpTargets;
 };
 
 // Build the bytecode cache. When EnableSPP is true, the expensive SPP

@@ -144,6 +144,9 @@ private:
           reinterpret_cast<const uint8_t *>(Ctx->getBytecode());
       size_t BytecodeSize = Ctx->getBytecodeSize();
       EVMAnalyzer Analyzer(Ctx->getRevision());
+      if (Ctx->getResolvedJumpTargets()) {
+        Analyzer.setResolvedJumpTargets(Ctx->getResolvedJumpTargets());
+      }
       Analyzer.analyze(Bytecode, BytecodeSize);
       initializeLiftedBlocks(Analyzer);
 

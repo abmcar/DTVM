@@ -48,6 +48,7 @@ Typical triggers:
 | Date | Name | Status | Tier | Description |
 |------|------|--------|------|-------------|
 | 2026-03-10 | [evm-stack-ssa-lifting](2026-03-10-evm-stack-ssa-lifting/README.md) | Implemented | Full | True-SSA stack lifting for EVM multipass JIT |
+| 2026-04-11 | [evm-shared-jump-resolution](2026-04-11-evm-shared-jump-resolution/README.md) | Implemented | Light | Extract shared jump target resolution pass into bytecode cache |
 | 2026-04-14 | [handlecompare-bounds-check](2026-04-14-handlecompare-bounds-check/README.md) | Implemented | Light | Add bounds check before macro-fusion read in handleCompare |
 | 2026-04-14 | [from-raw-pointer-safety-checks](2026-04-14-from-raw-pointer-safety-checks/README.md) | Accepted | Light | Add null/alignment safety checks to `from_raw_pointer` in Rust bindings |
 
