@@ -631,14 +631,13 @@ evmc_result executeMultipassFastPath(DTVM *VM, const evmc_host_interface *Host,
   }
   ModuleGuard ModGuard(VM, Mod, IsTransientMod);
 
-#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
   // O(1) flag check replaces per-call O(n) EVMAnalyzer scan.
   // The flag was set once at module creation in EVMModule::newEVMModule().
-  if (Mod->ShouldFallbackToInterp) {
+  bool ShouldFallbackToInterp = Mod->ShouldFallbackToInterp;
+  if (ShouldFallbackToInterp || Mod->getJITCode() == nullptr) {
     return executeInterpreterFastPath(VM, Host, Context, Rev, Msg, Code,
                                       CodeSize);
   }
-#endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
 
   // Instance reuse (shared only for cacheable top-level calls)
   EVMInstance *TheInst = getOrCreateInstance(VM, Mod, Rev, Msg->depth);

@@ -15,21 +15,13 @@
 #include <memory>
 #include <string>
 
-#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
-#include "compiler/evm_frontend/evm_analyzer.h"
-#endif
-
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
 #include "compiler/evm_compiler.h"
 #endif
-
-#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
 #include "compiler/evm_frontend/evm_analyzer.h"
-#endif
 
 namespace zen::runtime {
 
-#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
 namespace {
 
 bool hasUnresolvedCompatibleDynamicReturnTrampoline(
@@ -52,7 +44,6 @@ bool hasUnresolvedCompatibleDynamicReturnTrampoline(
 }
 
 } // namespace
-#endif
 
 EVMModule::EVMModule(Runtime *RT)
     : BaseModule(RT, ModuleType::EVM), Code(nullptr), CodeSize(0) {
@@ -101,7 +92,6 @@ EVMModule::newEVMModule(Runtime &RT, CodeHolderUniquePtr CodeHolder,
   Mod->Host = RT.getEVMHost();
 
   if (RT.getConfig().Mode != common::RunMode::InterpMode) {
-#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
     // Run the EVMAnalyzer once at module creation to determine if this
     // contract should fall back to interpreter. This avoids per-call O(n)
     // bytecode scans in the execute() hot path.
@@ -110,11 +100,10 @@ EVMModule::newEVMModule(Runtime &RT, CodeHolderUniquePtr CodeHolder,
                      Mod->CodeSize);
     Mod->ShouldFallbackToInterp =
         Analyzer.getJITSuitability().ShouldFallback ||
-        hasUnresolvedCompatibleDynamicReturnTrampoline(Analyzer);
-    if (!Mod->ShouldFallbackToInterp)
-#endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
-    {
-      // JIT is about to compile this module — mark the bytecode cache so the
+        hasUnresolvedCompatibleDynamicReturnTrampoline(Analyzer) ||
+        Analyzer.hasUnresolvedNonLiftedDeepEntryRisk();
+    if (!Mod->ShouldFallbackToInterp) {
+      // JIT is about to compile this module -- mark the bytecode cache so the
       // SPP metering pipeline runs on first access.
       Mod->CacheNeedsSPP = true;
       action::performEVMJITCompile(*Mod);

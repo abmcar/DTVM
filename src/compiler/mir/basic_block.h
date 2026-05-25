@@ -32,6 +32,17 @@ public:
     Inst->setParentBB(this);
   }
 
+  void addStatementBeforeFirstNonPhi(MInstruction *Inst) {
+    size_t InsertIdx = 0;
+    for (MInstruction *Stmt : Statements) {
+      if (Stmt->getOpcode() != OP_phi) {
+        break;
+      }
+      ++InsertIdx;
+    }
+    addStatement(InsertIdx, Inst);
+  }
+
   void addStatement(size_t Idx, MInstruction *Inst) {
     auto It = Statements.begin();
     std::advance(It, Idx);

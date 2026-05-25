@@ -400,6 +400,35 @@ public:
 
   const JITSuitabilityResult &getJITSuitability() const { return JITResult; }
 
+  bool hasUnresolvedNonLiftedDeepEntryRisk() const {
+    for (const auto &[BlockPC, Info] : BlockInfos) {
+      if (Info.CanLiftStack || Info.ResolvedEntryStackDepth >= 0) {
+        continue;
+      }
+
+      const int32_t RequiredEntryDepth = -Info.MinStackHeight;
+      if (RequiredEntryDepth <= 1) {
+        continue;
+      }
+
+      for (uint64_t PredBlockPC : Info.Predecessors) {
+        auto PredIt = BlockInfos.find(PredBlockPC);
+        if (PredIt == BlockInfos.end()) {
+          continue;
+        }
+
+        const BlockInfo &PredInfo = PredIt->second;
+        if (PredInfo.CanLiftStack || PredInfo.ResolvedEntryStackDepth >= 0) {
+          continue;
+        }
+
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   bool hasCanonicalJumpDest(uint64_t PC) const {
     return JumpDestCanonicalPCs.count(PC) != 0;
   }
@@ -1274,6 +1303,23 @@ private:
     return false;
   }
 
+  bool hasNonLiftableDynamicJumpSource(uint64_t TargetBlockPC) const {
+    for (uint64_t SourceBlockPC :
+         getDynamicJumpSourceBlocksForBlock(TargetBlockPC)) {
+      auto SourceIt = BlockInfos.find(SourceBlockPC);
+      if (SourceIt == BlockInfos.end()) {
+        return true;
+      }
+      const auto &SourceInfo = SourceIt->second;
+      const bool SourceEntryKnown = SourceInfo.IsEntryStateCompatible &&
+                                    !SourceInfo.HasInconsistentEntryDepth;
+      if (!SourceEntryKnown || SourceInfo.HasUndefinedInstr) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void finalizeLiftability() {
     for (auto &[EntryPC, Info] : BlockInfos) {
       (void)EntryPC;
@@ -1281,12 +1327,21 @@ private:
       bool DynamicJumpDestConflict = HasUnknownDynamicJump &&
                                      Info.IsDynamicJumpTargetCandidate &&
                                      !Info.HasCompatibleDynamicJumpTargetShape;
+      bool NonLiftableDynamicSource = HasUnknownDynamicJump &&
+                                      Info.IsDynamicJumpTargetCandidate &&
+                                      hasNonLiftableDynamicJumpSource(EntryPC);
       Info.CanLiftStack = EntryKnown && !Info.HasUndefinedInstr &&
                           !Info.HasInconsistentEntryDepth &&
-                          !DynamicJumpDestConflict;
+                          !DynamicJumpDestConflict && !NonLiftableDynamicSource;
       if (Info.CanLiftStack && Info.IsDynamicJumpTargetCandidate &&
           Info.HasDeferredEntryMerge && Info.HiddenLiveInPrefixDepth > 0 &&
           getDynamicJumpSourceBlocksForBlock(EntryPC).empty()) {
+        Info.CanLiftStack = false;
+      }
+      if (Info.CanLiftStack && Info.IsDynamicJumpTargetCandidate &&
+          Info.HasDeferredEntryMerge &&
+          getDynamicJumpSourceBlocksForBlock(EntryPC).size() > 1 &&
+          getPotentialEntryPredecessorsForBlock(EntryPC).size() > 4) {
         Info.CanLiftStack = false;
       }
     }
