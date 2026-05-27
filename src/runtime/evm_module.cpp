@@ -51,6 +51,14 @@ EVMModule::EVMModule(Runtime *RT)
 }
 
 EVMModule::~EVMModule() {
+#ifdef ZEN_ENABLE_JIT
+  if (JITCompileFuture.valid()) {
+    // The JIT task dereferences this EVMModule. Destruction must not
+    // continue until the background compilation has fully finished.
+    JITCompileFuture.get();
+  }
+#endif
+
   if (Name) {
     this->freeSymbol(Name);
     Name = common::WASM_SYMBOL_NULL;
@@ -92,9 +100,11 @@ EVMModule::newEVMModule(Runtime &RT, CodeHolderUniquePtr CodeHolder,
   Mod->Host = RT.getEVMHost();
 
   if (RT.getConfig().Mode != common::RunMode::InterpMode) {
+#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
     // Run the EVMAnalyzer once at module creation to determine if this
-    // contract should fall back to interpreter. This avoids per-call O(n)
-    // bytecode scans in the execute() hot path.
+    // contract should fall back to interpreter. We do this even in
+    // profile-guided JIT mode so the background trigger can rely on the
+    // same persisted decision instead of re-evaluating per call.
     COMPILER::EVMAnalyzer Analyzer(Rev);
     Analyzer.analyze(reinterpret_cast<const uint8_t *>(Mod->Code),
                      Mod->CodeSize);
@@ -102,11 +112,26 @@ EVMModule::newEVMModule(Runtime &RT, CodeHolderUniquePtr CodeHolder,
         Analyzer.getJITSuitability().ShouldFallback ||
         hasUnresolvedCompatibleDynamicReturnTrampoline(Analyzer) ||
         Analyzer.hasUnresolvedNonLiftedDeepEntryRisk();
-    if (!Mod->ShouldFallbackToInterp) {
-      // JIT is about to compile this module -- mark the bytecode cache so the
-      // SPP metering pipeline runs on first access.
-      Mod->CacheNeedsSPP = true;
-      action::performEVMJITCompile(*Mod);
+#endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+    if (RT.getConfig().EnableProfileGuidedJIT) {
+      // Profile-guided JIT: skip JIT compilation at load time.
+      // JIT will be triggered later by the profiling logic in execute().
+      // Eagerly init bytecode cache for interpreter use.
+      (void)Mod->getBytecodeCache();
+    } else
+#endif
+    {
+#ifdef ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+      if (!Mod->ShouldFallbackToInterp)
+#endif // ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK
+      {
+        // Mark the bytecode cache so the SPP metering pipeline runs on
+        // first access.
+        Mod->CacheNeedsSPP = true;
+        action::performEVMJITCompile(*Mod);
+      }
     }
   }
 
