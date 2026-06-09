@@ -1152,6 +1152,8 @@ private:
   MBasicBlock *
   resolveReachablePhiIncomingPredecessorBB(uint64_t TargetBlockPC,
                                            MBasicBlock *CandidateBB) const;
+  MBasicBlock *resolveReachablePredecessorBB(MBasicBlock *TargetBB,
+                                             MBasicBlock *CandidateBB) const;
 
   CompilerContext &Ctx;
   MFunction *CurFunc = nullptr;

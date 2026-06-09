@@ -15,6 +15,7 @@
 #include <map>
 #include <queue>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -1118,7 +1119,11 @@ private:
   // dynamic-jump dispatch source codegen will wire. Otherwise the phi is
   // undersized relative to the block's actual MIR predecessor count and the
   // verifier/regalloc path breaks.
-  bool dynamicJumpTargetPredecessorsCoverCodegenEdges(uint64_t BlockPC) const {
+  // DispatchSources is the codegen dispatch-source set, computed once by the
+  // caller (collectAllDynamicJumpDispatchSourceBlocks) and reused across blocks
+  // to avoid rescanning all BlockInfos per block.
+  bool dynamicJumpTargetPredecessorsCoverCodegenEdges(
+      uint64_t BlockPC, const std::vector<uint64_t> &DispatchSources) const {
     auto It = BlockInfos.find(BlockPC);
     if (It == BlockInfos.end() || !It->second.IsDynamicJumpTargetCandidate) {
       return true;
@@ -1126,10 +1131,10 @@ private:
 
     const std::vector<uint64_t> EnumeratedSources =
         collectDynamicJumpSourceBlocksForInfo(It->second);
-    for (uint64_t DispatchSourcePC :
-         collectAllDynamicJumpDispatchSourceBlocks()) {
-      if (std::find(EnumeratedSources.begin(), EnumeratedSources.end(),
-                    DispatchSourcePC) == EnumeratedSources.end()) {
+    const std::unordered_set<uint64_t> EnumeratedSet(EnumeratedSources.begin(),
+                                                     EnumeratedSources.end());
+    for (uint64_t DispatchSourcePC : DispatchSources) {
+      if (EnumeratedSet.find(DispatchSourcePC) == EnumeratedSet.end()) {
         return false;
       }
     }
@@ -1367,6 +1372,10 @@ private:
   }
 
   void finalizeLiftability() {
+    // Computed once and reused across blocks; independent of the per-block
+    // loop.
+    const std::vector<uint64_t> DispatchSources =
+        collectAllDynamicJumpDispatchSourceBlocks();
     for (auto &[EntryPC, Info] : BlockInfos) {
       (void)EntryPC;
       bool EntryKnown = Info.IsEntryStateCompatible;
@@ -1396,8 +1405,8 @@ private:
       // enumeration is a strict subset of codegen's "all JUMPDESTs reachable
       // from every dynamic jump" wiring, so such a block's phi would be
       // undersized relative to its actual MIR predecessor count.
-      if (Info.CanLiftStack &&
-          !dynamicJumpTargetPredecessorsCoverCodegenEdges(EntryPC)) {
+      if (Info.CanLiftStack && !dynamicJumpTargetPredecessorsCoverCodegenEdges(
+                                   EntryPC, DispatchSources)) {
         Info.CanLiftStack = false;
       }
     }

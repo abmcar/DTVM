@@ -165,7 +165,21 @@ MBasicBlock *EVMMirBuilder::resolveReachablePhiIncomingPredecessorBB(
     return CandidateBB;
   }
 
-  MBasicBlock *TargetBB = TargetIt->second;
+  return resolveReachablePredecessorBB(TargetIt->second, CandidateBB);
+}
+
+// Resolve CandidateBB to a real predecessor of TargetBB. If CandidateBB is
+// already a predecessor it is returned unchanged; otherwise the CFG is walked
+// forward from CandidateBB to the first reachable block that is a predecessor
+// of TargetBB. Returns CandidateBB when no such block is found, so callers can
+// detect failure by checking predecessor membership of the result.
+MBasicBlock *
+EVMMirBuilder::resolveReachablePredecessorBB(MBasicBlock *TargetBB,
+                                             MBasicBlock *CandidateBB) const {
+  if (TargetBB == nullptr || CandidateBB == nullptr) {
+    return CandidateBB;
+  }
+
   auto PredRange = TargetBB->predecessors();
   if (std::find(PredRange.begin(), PredRange.end(), CandidateBB) !=
       PredRange.end()) {
@@ -221,32 +235,20 @@ void EVMMirBuilder::finalizeStackMergePhiIncomingBlocks() {
           PredRange.end()) {
         continue;
       }
-      // Walk the successors of the recorded block to find the MIR block that is
-      // an actual predecessor of the phi's owning block.
-      MBasicBlock *ResolvedBB = nullptr;
-      std::queue<MBasicBlock *> Worklist;
-      std::set<MBasicBlock *> Visited;
-      Worklist.push(IncomingBB);
-      Visited.insert(IncomingBB);
-      while (!Worklist.empty() && ResolvedBB == nullptr) {
-        MBasicBlock *CurrentBB = Worklist.front();
-        Worklist.pop();
-        for (MBasicBlock *SuccBB : CurrentBB->successors()) {
-          if (SuccBB == nullptr || !Visited.insert(SuccBB).second) {
-            continue;
-          }
-          if (std::find(PredRange.begin(), PredRange.end(), SuccBB) !=
-              PredRange.end()) {
-            ResolvedBB = SuccBB;
-            break;
-          }
-          Worklist.push(SuccBB);
-        }
-      }
-      if (ResolvedBB != nullptr && ResolvedBB != IncomingBB) {
-        Phi->setIncoming(
-            Index, ResolvedBB,
-            const_cast<MInstruction *>(Phi->getIncomingValue(Index)));
+      // Walk forward from the recorded block to the actual predecessor of the
+      // phi's owning block, reusing the shared reachability resolver.
+      MBasicBlock *ResolvedBB =
+          resolveReachablePredecessorBB(OwnerBB, IncomingBB);
+      // The walk must land on a real predecessor; otherwise the phi would keep
+      // an incoming block that is not a predecessor and the verifier would
+      // reject it. Make that failure explicit in debug builds.
+      ZEN_ASSERT(std::find(PredRange.begin(), PredRange.end(), ResolvedBB) !=
+                     PredRange.end() &&
+                 "stack-merge phi incoming block did not resolve to a real "
+                 "predecessor");
+      if (ResolvedBB != IncomingBB) {
+        // Only the incoming-block pointer changes; the value is preserved.
+        Phi->setIncomingBlock(Index, ResolvedBB);
       }
     }
   }
