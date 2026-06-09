@@ -1090,6 +1090,52 @@ private:
     return SourceBlockPCs;
   }
 
+  // Codegen's indirect-jump dispatch wires an edge from every block that emits
+  // a dynamic (computed) JUMP/JUMPI to every JUMPDEST in the global jump-dest
+  // table (see implementIndirectJump / getOrCreateIndirectJumpBB). The set of
+  // such dispatch source blocks is therefore independent of the analyzer's
+  // shape-class partitioning. Enumerate it so the lifter can size phis to match
+  // the edges codegen actually wires.
+  std::vector<uint64_t> collectAllDynamicJumpDispatchSourceBlocks() const {
+    std::vector<uint64_t> SourceBlockPCs;
+    for (const auto &[EntryPC, Info] : BlockInfos) {
+      // Codegen emits the indirect-jump dispatch for every block whose JUMP /
+      // JUMPI target is non-constant (Info.HasDynamicJump), independent of
+      // whether the analyzer could resolve that block's entry stack depth. The
+      // depth filter used elsewhere would drop sources codegen still wires, so
+      // it must not be applied here.
+      if (!Info.HasDynamicJump) {
+        continue;
+      }
+      appendUniqueBlockPC(SourceBlockPCs, EntryPC);
+    }
+    return SourceBlockPCs;
+  }
+
+  // A dynamic-jump-target block is only safe to lift when the static
+  // predecessor enumeration that sizes its merge phis
+  // (getPotentialEntryPredecessorsForBlock) already accounts for every
+  // dynamic-jump dispatch source codegen will wire. Otherwise the phi is
+  // undersized relative to the block's actual MIR predecessor count and the
+  // verifier/regalloc path breaks.
+  bool dynamicJumpTargetPredecessorsCoverCodegenEdges(uint64_t BlockPC) const {
+    auto It = BlockInfos.find(BlockPC);
+    if (It == BlockInfos.end() || !It->second.IsDynamicJumpTargetCandidate) {
+      return true;
+    }
+
+    const std::vector<uint64_t> EnumeratedSources =
+        collectDynamicJumpSourceBlocksForInfo(It->second);
+    for (uint64_t DispatchSourcePC :
+         collectAllDynamicJumpDispatchSourceBlocks()) {
+      if (std::find(EnumeratedSources.begin(), EnumeratedSources.end(),
+                    DispatchSourcePC) == EnumeratedSources.end()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   bool getUniformDynamicJumpEntryDepthForRegion(uint64_t RegionEntryPC,
                                                 int32_t &EntryDepth) const {
     bool SawDynamicJump = false;
@@ -1342,6 +1388,16 @@ private:
           Info.HasDeferredEntryMerge &&
           getDynamicJumpSourceBlocksForBlock(EntryPC).size() > 1 &&
           getPotentialEntryPredecessorsForBlock(EntryPC).size() > 4) {
+        Info.CanLiftStack = false;
+      }
+      // Never lift a dynamic-jump-target block whose statically enumerated
+      // predecessor set (which sizes its stack-merge phis) cannot account for
+      // every dynamic-jump dispatch edge codegen wires. The shape-class source
+      // enumeration is a strict subset of codegen's "all JUMPDESTs reachable
+      // from every dynamic jump" wiring, so such a block's phi would be
+      // undersized relative to its actual MIR predecessor count.
+      if (Info.CanLiftStack &&
+          !dynamicJumpTargetPredecessorsCoverCodegenEdges(EntryPC)) {
         Info.CanLiftStack = false;
       }
     }

@@ -196,6 +196,62 @@ MBasicBlock *EVMMirBuilder::resolveReachablePhiIncomingPredecessorBB(
   return CandidateBB;
 }
 
+void EVMMirBuilder::finalizeStackMergePhiIncomingBlocks() {
+  // Stack-merge phi incoming blocks are resolved eagerly at the time each
+  // predecessor edge's stack state is assigned. For a loop back-edge that
+  // assignment runs before the predecessor block's terminator wires the real
+  // CFG edge into the loop header, so the recorded incoming block can be the
+  // predecessor EVM block's entry MIR block instead of the MIR block that
+  // actually branches into the loop header. Now that the full CFG is built,
+  // walk forward from each recorded incoming block to the real predecessor of
+  // the phi's owning block. Only the incoming-block pointer is corrected; the
+  // incoming value is preserved.
+  for (const auto &[Phi, OwnerBB] : StackMergePhiBlocks) {
+    if (Phi == nullptr || OwnerBB == nullptr) {
+      continue;
+    }
+    auto PredRange = OwnerBB->predecessors();
+    for (size_t Index = 0; Index < Phi->getNumIncoming(); ++Index) {
+      MBasicBlock *IncomingBB = Phi->getIncomingBlock(Index);
+      if (IncomingBB == nullptr) {
+        continue;
+      }
+      // Already a real predecessor: nothing to fix.
+      if (std::find(PredRange.begin(), PredRange.end(), IncomingBB) !=
+          PredRange.end()) {
+        continue;
+      }
+      // Walk the successors of the recorded block to find the MIR block that is
+      // an actual predecessor of the phi's owning block.
+      MBasicBlock *ResolvedBB = nullptr;
+      std::queue<MBasicBlock *> Worklist;
+      std::set<MBasicBlock *> Visited;
+      Worklist.push(IncomingBB);
+      Visited.insert(IncomingBB);
+      while (!Worklist.empty() && ResolvedBB == nullptr) {
+        MBasicBlock *CurrentBB = Worklist.front();
+        Worklist.pop();
+        for (MBasicBlock *SuccBB : CurrentBB->successors()) {
+          if (SuccBB == nullptr || !Visited.insert(SuccBB).second) {
+            continue;
+          }
+          if (std::find(PredRange.begin(), PredRange.end(), SuccBB) !=
+              PredRange.end()) {
+            ResolvedBB = SuccBB;
+            break;
+          }
+          Worklist.push(SuccBB);
+        }
+      }
+      if (ResolvedBB != nullptr && ResolvedBB != IncomingBB) {
+        Phi->setIncoming(
+            Index, ResolvedBB,
+            const_cast<MInstruction *>(Phi->getIncomingValue(Index)));
+      }
+    }
+  }
+}
+
 void EVMMirBuilder::loadEVMInstanceAttr() {
   InstanceAddr = createInstruction<ConversionInstruction>(
       false, OP_ptrtoint, &Ctx.I64Type,
@@ -501,6 +557,10 @@ void EVMMirBuilder::finalizeEVMBase() {
     CurFunc->deleteMBasicBlock(ReturnBB);
     ReturnBB = nullptr;
   }
+
+  // Correct loop back-edge merge phi incoming blocks against the now-complete
+  // CFG. No-op when no stack-merge phis were built (e.g. SSA stack-lift off).
+  finalizeStackMergePhiIncomingBlocks();
 }
 
 LoadInstruction *EVMMirBuilder::getInstanceElement(MType *ValueType,
@@ -1096,6 +1156,10 @@ typename EVMMirBuilder::Operand EVMMirBuilder::materializeStackMergeOperand(
                        IncomingComponents[ComponentIndex]);
     }
     PhiComponents[ComponentIndex] = Phi;
+    // Record the phi against its loop-header block so its incoming blocks can
+    // be re-resolved once the full CFG (including back-edge terminators) is
+    // built. See finalizeStackMergePhiIncomingBlocks().
+    StackMergePhiBlocks.emplace_back(Phi, CurBB);
   }
 
   for (size_t ComponentIndex = 0; ComponentIndex < EVM_ELEMENTS_COUNT;
@@ -5234,7 +5298,24 @@ MInstruction *EVMMirBuilder::loadVariable(Variable *Var) {
 
 PhiInstruction *EVMMirBuilder::createPendingPhi(MType *Type,
                                                 size_t NumIncoming) {
-  return createInstruction<PhiInstruction>(true, Type, NumIncoming);
+  // Create the phi without appending it to the block end. Phi instructions
+  // must be contiguous at the block start (verified by the MIR verifier).
+  // When merging multiple stack slots, each slot emits phis followed by
+  // non-phi temp-store dassigns; appending at the end would interleave a
+  // later slot's phis after an earlier slot's dassigns and break the
+  // phi-contiguity invariant. Insert the phi right after the existing leading
+  // phis instead so all phis stay grouped at the front.
+  PhiInstruction *Phi =
+      createInstruction<PhiInstruction>(false, Type, NumIncoming);
+  size_t InsertIdx = 0;
+  for (MInstruction *Inst : *CurBB) {
+    if (Inst->getKind() != MInstruction::PHI) {
+      break;
+    }
+    ++InsertIdx;
+  }
+  CurBB->addStatement(InsertIdx, Phi);
+  return Phi;
 }
 
 size_t EVMMirBuilder::getPhiIncomingSlot(PhiInstruction *Phi,
