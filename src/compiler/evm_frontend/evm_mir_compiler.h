@@ -1167,6 +1167,8 @@ private:
   MBasicBlock *
   resolveReachablePhiIncomingPredecessorBB(uint64_t TargetBlockPC,
                                            MBasicBlock *CandidateBB) const;
+  MBasicBlock *resolveReachablePredecessorBB(MBasicBlock *TargetBB,
+                                             MBasicBlock *CandidateBB) const;
 
   CompilerContext &Ctx;
   MFunction *CurFunc = nullptr;
@@ -1216,6 +1218,17 @@ private:
       DynamicPhiIncomingBlockTable;
   std::map<PhiInstruction *, std::map<uint64_t, size_t>> PhiIncomingSlotMap;
   std::map<VariableIdx, PhiInstruction *> StackMergePhiVarMap;
+
+  // Stack-merge phis and the loop-header block they belong to. A merge phi's
+  // incoming block is resolved eagerly when each predecessor edge's stack
+  // state is assigned (materializeStackMergeOperand / assignStackMergeOperand).
+  // For a loop back-edge this assignment happens before the predecessor's
+  // terminator wires the real CFG edge into the loop header, so the resolved
+  // incoming block can be the predecessor EVM block's entry MIR block rather
+  // than its terminator MIR block. finalizeStackMergePhiIncomingBlocks()
+  // re-resolves every recorded incoming block against the now-complete CFG.
+  std::vector<std::pair<PhiInstruction *, MBasicBlock *>> StackMergePhiBlocks;
+  void finalizeStackMergePhiIncomingBlocks();
 
   struct MemoryCompileStats {
     uint64_t MLoadExpandCount = 0;

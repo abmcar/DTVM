@@ -165,7 +165,21 @@ MBasicBlock *EVMMirBuilder::resolveReachablePhiIncomingPredecessorBB(
     return CandidateBB;
   }
 
-  MBasicBlock *TargetBB = TargetIt->second;
+  return resolveReachablePredecessorBB(TargetIt->second, CandidateBB);
+}
+
+// Resolve CandidateBB to a real predecessor of TargetBB. If CandidateBB is
+// already a predecessor it is returned unchanged; otherwise the CFG is walked
+// forward from CandidateBB to the first reachable block that is a predecessor
+// of TargetBB. Returns CandidateBB when no such block is found, so callers can
+// detect failure by checking predecessor membership of the result.
+MBasicBlock *
+EVMMirBuilder::resolveReachablePredecessorBB(MBasicBlock *TargetBB,
+                                             MBasicBlock *CandidateBB) const {
+  if (TargetBB == nullptr || CandidateBB == nullptr) {
+    return CandidateBB;
+  }
+
   auto PredRange = TargetBB->predecessors();
   if (std::find(PredRange.begin(), PredRange.end(), CandidateBB) !=
       PredRange.end()) {
@@ -194,6 +208,50 @@ MBasicBlock *EVMMirBuilder::resolveReachablePhiIncomingPredecessorBB(
   }
 
   return CandidateBB;
+}
+
+void EVMMirBuilder::finalizeStackMergePhiIncomingBlocks() {
+  // Stack-merge phi incoming blocks are resolved eagerly at the time each
+  // predecessor edge's stack state is assigned. For a loop back-edge that
+  // assignment runs before the predecessor block's terminator wires the real
+  // CFG edge into the loop header, so the recorded incoming block can be the
+  // predecessor EVM block's entry MIR block instead of the MIR block that
+  // actually branches into the loop header. Now that the full CFG is built,
+  // walk forward from each recorded incoming block to the real predecessor of
+  // the phi's owning block. Only the incoming-block pointer is corrected; the
+  // incoming value is preserved.
+  for (const auto &[Phi, OwnerBB] : StackMergePhiBlocks) {
+    if (Phi == nullptr || OwnerBB == nullptr) {
+      continue;
+    }
+    auto PredRange = OwnerBB->predecessors();
+    for (size_t Index = 0; Index < Phi->getNumIncoming(); ++Index) {
+      MBasicBlock *IncomingBB = Phi->getIncomingBlock(Index);
+      if (IncomingBB == nullptr) {
+        continue;
+      }
+      // Already a real predecessor: nothing to fix.
+      if (std::find(PredRange.begin(), PredRange.end(), IncomingBB) !=
+          PredRange.end()) {
+        continue;
+      }
+      // Walk forward from the recorded block to the actual predecessor of the
+      // phi's owning block, reusing the shared reachability resolver.
+      MBasicBlock *ResolvedBB =
+          resolveReachablePredecessorBB(OwnerBB, IncomingBB);
+      // The walk must land on a real predecessor; otherwise the phi would keep
+      // an incoming block that is not a predecessor and the verifier would
+      // reject it. Make that failure explicit in debug builds.
+      ZEN_ASSERT(std::find(PredRange.begin(), PredRange.end(), ResolvedBB) !=
+                     PredRange.end() &&
+                 "stack-merge phi incoming block did not resolve to a real "
+                 "predecessor");
+      if (ResolvedBB != IncomingBB) {
+        // Only the incoming-block pointer changes; the value is preserved.
+        Phi->setIncomingBlock(Index, ResolvedBB);
+      }
+    }
+  }
 }
 
 void EVMMirBuilder::loadEVMInstanceAttr() {
@@ -501,6 +559,10 @@ void EVMMirBuilder::finalizeEVMBase() {
     CurFunc->deleteMBasicBlock(ReturnBB);
     ReturnBB = nullptr;
   }
+
+  // Correct loop back-edge merge phi incoming blocks against the now-complete
+  // CFG. No-op when no stack-merge phis were built (e.g. SSA stack-lift off).
+  finalizeStackMergePhiIncomingBlocks();
 }
 
 LoadInstruction *EVMMirBuilder::getInstanceElement(MType *ValueType,
@@ -1096,6 +1158,10 @@ typename EVMMirBuilder::Operand EVMMirBuilder::materializeStackMergeOperand(
                        IncomingComponents[ComponentIndex]);
     }
     PhiComponents[ComponentIndex] = Phi;
+    // Record the phi against its loop-header block so its incoming blocks can
+    // be re-resolved once the full CFG (including back-edge terminators) is
+    // built. See finalizeStackMergePhiIncomingBlocks().
+    StackMergePhiBlocks.emplace_back(Phi, CurBB);
   }
 
   for (size_t ComponentIndex = 0; ComponentIndex < EVM_ELEMENTS_COUNT;
@@ -5294,7 +5360,24 @@ MInstruction *EVMMirBuilder::loadVariable(Variable *Var) {
 
 PhiInstruction *EVMMirBuilder::createPendingPhi(MType *Type,
                                                 size_t NumIncoming) {
-  return createInstruction<PhiInstruction>(true, Type, NumIncoming);
+  // Create the phi without appending it to the block end. Phi instructions
+  // must be contiguous at the block start (verified by the MIR verifier).
+  // When merging multiple stack slots, each slot emits phis followed by
+  // non-phi temp-store dassigns; appending at the end would interleave a
+  // later slot's phis after an earlier slot's dassigns and break the
+  // phi-contiguity invariant. Insert the phi right after the existing leading
+  // phis instead so all phis stay grouped at the front.
+  PhiInstruction *Phi =
+      createInstruction<PhiInstruction>(false, Type, NumIncoming);
+  size_t InsertIdx = 0;
+  for (MInstruction *Inst : *CurBB) {
+    if (Inst->getKind() != MInstruction::PHI) {
+      break;
+    }
+    ++InsertIdx;
+  }
+  CurBB->addStatement(InsertIdx, Phi);
+  return Phi;
 }
 
 size_t EVMMirBuilder::getPhiIncomingSlot(PhiInstruction *Phi,
