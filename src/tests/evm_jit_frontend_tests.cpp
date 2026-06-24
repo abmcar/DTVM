@@ -117,6 +117,27 @@ struct MockStackAccessStats {
   uint32_t StackSetCount = 0;
 };
 
+struct MockMeterOpcodeRangeRecord {
+  uint64_t StartPC = 0;
+  uint64_t EndPCExclusive = 0;
+};
+
+struct MockMStoreRecord {
+  MockOperand::U256Value Addr = {0, 0, 0, 0};
+  MockOperand::U256Value Value = {0, 0, 0, 0};
+};
+
+struct MockKeccakCallDataSlotRecord {
+  MockOperand::U256Value Offset = {0, 0, 0, 0};
+  MockOperand::U256Value CallDataOffset = {0, 0, 0, 0};
+  MockOperand::U256Value Slot = {0, 0, 0, 0};
+};
+
+struct MockKeccakCallerSlotRecord {
+  MockOperand::U256Value Offset = {0, 0, 0, 0};
+  MockOperand::U256Value Slot = {0, 0, 0, 0};
+};
+
 class MockEVMBuilder {
 public:
   using CompilerContext = COMPILER::EVMFrontendContext;
@@ -144,9 +165,12 @@ public:
 
   void meterOpcode(evmc_opcode Opcode, uint64_t) {
     CurrentOpcode = static_cast<uint8_t>(Opcode);
+    MeteredOpcodeCounts[static_cast<uint8_t>(Opcode)]++;
   }
 
-  void meterOpcodeRange(uint64_t, uint64_t) {}
+  void meterOpcodeRange(uint64_t StartPC, uint64_t EndPCExclusive) {
+    MeteredRanges.push_back({StartPC, EndPCExclusive});
+  }
 
   void enableRuntimeStackChecks() { EnableRuntimeStackChecks = true; }
 
@@ -222,7 +246,12 @@ public:
   void setCurrentDebugBlockPC(uint64_t) {}
 
   template <zen::common::BinaryOperator Opr>
-  Operand handleBinaryArithmetic(Operand, Operand) {
+  Operand handleBinaryArithmetic(Operand LHS, Operand RHS) {
+    if constexpr (Opr == zen::common::BinaryOperator::BO_ADD) {
+      const auto LHSValue = LHS.resolvedValue();
+      const auto RHSValue = RHS.resolvedValue();
+      return Operand(LHSValue[0] + RHSValue[0]);
+    }
     return Operand(0);
   }
 
@@ -289,7 +318,6 @@ public:
   MOCK_OPERAND_STUB(handleGas);
   MOCK_OPERAND_STUB(handleGasLimit);
   MOCK_OPERAND_STUB(handleGasPrice);
-  MOCK_OPERAND_STUB(handleKeccak256);
   MOCK_OPERAND_STUB(handleMLoad);
   MOCK_OPERAND_STUB(handleMSize);
   MOCK_OPERAND_STUB(handleMod);
@@ -313,8 +341,42 @@ public:
   MOCK_VOID_STUB(handleCodeCopy);
   MOCK_VOID_STUB(handleExtCodeCopy);
   MOCK_VOID_STUB(handleMCopy);
-  MOCK_VOID_STUB(handleMStore);
   MOCK_VOID_STUB(handleMStore8);
+
+  void handleMStore(Operand Addr, Operand Value) {
+    LastMStore = {Addr.resolvedValue(), Value.resolvedValue()};
+    MStoreCount++;
+  }
+
+  Operand handleKeccak256(Operand, Operand) {
+    KeccakCount++;
+    return Operand(0);
+  }
+
+  Operand handleKeccak256TwoWord(Operand Offset, Operand Word0, Operand Word1) {
+    KeccakTwoWordLastOffset = Offset.resolvedValue();
+    KeccakTwoWordLastWord0 = Word0.resolvedValue();
+    KeccakTwoWordLastWord1 = Word1.resolvedValue();
+    KeccakTwoWordCount++;
+    return Operand(0);
+  }
+
+  Operand handleKeccak256CallDataConstSlot(Operand Offset,
+                                           Operand CallDataOffset,
+                                           Operand SlotWord) {
+    LastKeccakCallDataSlot = {Offset.resolvedValue(),
+                              CallDataOffset.resolvedValue(),
+                              SlotWord.resolvedValue()};
+    KeccakCallDataSlotCount++;
+    return Operand(0);
+  }
+
+  Operand handleKeccak256CallerConstSlot(Operand Offset, Operand SlotWord) {
+    LastKeccakCallerSlot = {Offset.resolvedValue(), SlotWord.resolvedValue()};
+    KeccakCallerSlotCount++;
+    return Operand(0);
+  }
+
   MOCK_VOID_STUB(handleReturn);
   MOCK_VOID_STUB(handleReturnDataCopy);
   MOCK_VOID_STUB(handleRevert);
@@ -344,6 +406,41 @@ public:
     return Stats[static_cast<uint8_t>(Opcode)];
   }
 
+  uint32_t meteredOpcodeCount(evmc_opcode Opcode) const {
+    return MeteredOpcodeCounts[static_cast<uint8_t>(Opcode)];
+  }
+
+  const std::vector<MockMeterOpcodeRangeRecord> &meteredRanges() const {
+    return MeteredRanges;
+  }
+
+  uint32_t mstoreCount() const { return MStoreCount; }
+
+  uint32_t keccakCount() const { return KeccakCount; }
+
+  uint32_t keccakTwoWordCount() const { return KeccakTwoWordCount; }
+
+  uint32_t keccakCallDataSlotCount() const { return KeccakCallDataSlotCount; }
+
+  uint32_t keccakCallerSlotCount() const { return KeccakCallerSlotCount; }
+
+  const MockMStoreRecord &lastMStore() const {
+    ZEN_ASSERT(MStoreCount != 0 && "mock mstore record is missing");
+    return LastMStore;
+  }
+
+  const MockKeccakCallDataSlotRecord &lastKeccakCallDataSlot() const {
+    ZEN_ASSERT(KeccakCallDataSlotCount != 0 &&
+               "mock calldata+slot keccak record is missing");
+    return LastKeccakCallDataSlot;
+  }
+
+  const MockKeccakCallerSlotRecord &lastKeccakCallerSlot() const {
+    ZEN_ASSERT(KeccakCallerSlotCount != 0 &&
+               "mock caller+slot keccak record is missing");
+    return LastKeccakCallerSlot;
+  }
+
   bool hasLastPushValue() const { return HasLastPushValue; }
 
   MockOperand::U256Value lastPushValue() const {
@@ -365,6 +462,19 @@ private:
   bool EnableRuntimeStackChecks = false;
   uint8_t CurrentOpcode = 0xff;
   std::array<MockStackAccessStats, 256> Stats = {};
+  std::array<uint32_t, 256> MeteredOpcodeCounts = {};
+  std::vector<MockMeterOpcodeRangeRecord> MeteredRanges;
+  MockMStoreRecord LastMStore = {};
+  uint32_t MStoreCount = 0;
+  MockOperand::U256Value KeccakTwoWordLastOffset = {0, 0, 0, 0};
+  MockOperand::U256Value KeccakTwoWordLastWord0 = {0, 0, 0, 0};
+  MockOperand::U256Value KeccakTwoWordLastWord1 = {0, 0, 0, 0};
+  uint32_t KeccakCount = 0;
+  uint32_t KeccakTwoWordCount = 0;
+  MockKeccakCallDataSlotRecord LastKeccakCallDataSlot = {};
+  uint32_t KeccakCallDataSlotCount = 0;
+  MockKeccakCallerSlotRecord LastKeccakCallerSlot = {};
+  uint32_t KeccakCallerSlotCount = 0;
   std::vector<Operand> RuntimeStack;
   MockOperand::U256Value LastPushValue = {0, 0, 0, 0};
   bool HasLastPushValue = false;
@@ -774,6 +884,374 @@ TEST(EVMJITFrontendVisitorTest,
   EXPECT_TRUE(Visitor.compile());
   EXPECT_FALSE(Builder.Trapped);
   EXPECT_FALSE(Builder.Undefined);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesPushConstJumpIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x03, // PUSH1 0x03
+      0x56,       // JUMP
+      0x5b,       // JUMPDEST
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_PUSH1), 1U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_JUMP), 1U);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesPushConstJumpiIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01, // PUSH1 cond
+      0x60, 0x06, // PUSH1 jumpdest
+      0x57,       // JUMPI
+      0x00,       // STOP
+      0x5b,       // JUMPDEST
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_PUSH1), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_JUMPI), 1U);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesIszeroPushConstJumpiIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x00, // PUSH1 value
+      0x15,       // ISZERO
+      0x60, 0x06, // PUSH1 jumpdest
+      0x57,       // JUMPI
+      0x00,       // STOP
+      0x5b,       // JUMPDEST
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_ISZERO), 1U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_PUSH1), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_JUMPI), 1U);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesDupAddIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x20, // PUSH1 base
+      0x60, 0x04, // PUSH1 offset
+      0x5f,       // PUSH0
+      0x50,       // POP
+      0x81,       // DUP2
+      0x01,       // ADD
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_DUP2), 1U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_ADD), 1U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
+  EXPECT_EQ(Builder.topStackValue()[0], 0x24U);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesPushConstAddIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x20, // PUSH1 base
+      0x60, 0x04, // PUSH1 offset
+      0x01,       // ADD
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_PUSH1), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_ADD), 1U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 1U);
+  EXPECT_EQ(Builder.topStackValue()[0], 0x24U);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesPushConstDupAddIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x20, // PUSH1 base
+      0x60, 0x04, // PUSH1 offset
+      0x81,       // DUP2
+      0x01,       // ADD
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_PUSH1), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_DUP2), 1U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_ADD), 1U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
+  EXPECT_EQ(Builder.topStackValue()[0], 0x24U);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesPushConstMStoreIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PUSH1 value
+      0x60, 0x20, // PUSH1 addr
+      0x52,       // MSTORE
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_PUSH1), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE), 1U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 0U);
+  EXPECT_EQ(Builder.mstoreCount(), 1U);
+  EXPECT_EQ(Builder.lastMStore().Addr[0], 0x20U);
+  EXPECT_EQ(Builder.lastMStore().Value[0], 0xaaU);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesAddMStoreIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PUSH1 value
+      0x60, 0x20, // PUSH1 base
+      0x60, 0x04, // PUSH1 delta
+      0x01,       // ADD
+      0x52,       // MSTORE
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_ADD), 1U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE), 1U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 0U);
+  EXPECT_EQ(Builder.mstoreCount(), 1U);
+  EXPECT_EQ(Builder.lastMStore().Addr[0], 0x24U);
+  EXPECT_EQ(Builder.lastMStore().Value[0], 0xaaU);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesLinearMStoreNextMotifIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x20, // PUSH1 stride
+      0x60, 0x40, // PUSH1 current
+      0x80,       // DUP1
+      0x80,       // DUP1
+      0x52,       // MSTORE
+      0x81,       // DUP2
+      0x01,       // ADD
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_DUP1), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_DUP2), 1U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE), 1U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_ADD), 1U);
+  EXPECT_EQ(Builder.mstoreCount(), 1U);
+  EXPECT_EQ(Builder.lastMStore().Addr[0], 0x40U);
+  EXPECT_EQ(Builder.lastMStore().Value[0], 0x40U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
+  EXPECT_EQ(Builder.topStackValue()[0], 0x60U);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesCallerSlotKeccakIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x33,       // CALLER
+      0x60, 0x00, // PUSH1 base
+      0x52,       // MSTORE
+      0x60, 0x05, // PUSH1 slot
+      0x60, 0x20, // PUSH1 base + 0x20
+      0x52,       // MSTORE
+      0x60, 0x40, // PUSH1 0x40
+      0x60, 0x00, // PUSH1 base
+      0x20,       // KECCAK256
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_CALLER), 1U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_KECCAK256), 1U);
+  EXPECT_EQ(Builder.keccakCallerSlotCount(), 1U);
+  EXPECT_EQ(Builder.keccakCount(), 0U);
+  EXPECT_EQ(Builder.mstoreCount(), 0U);
+  EXPECT_EQ(Builder.lastKeccakCallerSlot().Offset[0], 0U);
+  EXPECT_EQ(Builder.lastKeccakCallerSlot().Slot[0], 5U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 1U);
+}
+
+TEST(EVMJITFrontendVisitorTest, FusesCallDataSlotKeccakIntoMeteredRange) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x04, // PUSH1 calldata offset
+      0x35,       // CALLDATALOAD
+      0x60, 0x00, // PUSH1 base
+      0x52,       // MSTORE
+      0x60, 0x07, // PUSH1 slot
+      0x60, 0x20, // PUSH1 base + 0x20
+      0x52,       // MSTORE
+      0x60, 0x40, // PUSH1 0x40
+      0x60, 0x00, // PUSH1 base
+      0x20,       // KECCAK256
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_PUSH1), 6U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_CALLDATALOAD), 1U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_KECCAK256), 1U);
+  EXPECT_EQ(Builder.keccakCallDataSlotCount(), 1U);
+  EXPECT_EQ(Builder.keccakCount(), 0U);
+  EXPECT_EQ(Builder.mstoreCount(), 0U);
+  EXPECT_EQ(Builder.lastKeccakCallDataSlot().Offset[0], 0U);
+  EXPECT_EQ(Builder.lastKeccakCallDataSlot().CallDataOffset[0], 4U);
+  EXPECT_EQ(Builder.lastKeccakCallDataSlot().Slot[0], 7U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 1U);
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     KeepsGenericKeccakPathWhenTwoWordLayoutDoesNotMatch) {
+  const std::vector<uint8_t> Bytecode = {
+      0x33,       // CALLER
+      0x60, 0x00, // PUSH1 base
+      0x52,       // MSTORE
+      0x60, 0x05, // PUSH1 slot
+      0x60, 0x21, // PUSH1 mismatched base + 0x21
+      0x52,       // MSTORE
+      0x60, 0x40, // PUSH1 0x40
+      0x60, 0x00, // PUSH1 base
+      0x20,       // KECCAK256
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.meteredRanges().empty());
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_CALLER), 1U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_KECCAK256), 1U);
+  EXPECT_EQ(Builder.keccakCallerSlotCount(), 0U);
+  EXPECT_EQ(Builder.keccakCallDataSlotCount(), 0U);
+  EXPECT_EQ(Builder.keccakCount(), 1U);
+  EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 1U);
 }
 
 TEST(EVMJITFrontendVisitorTest,

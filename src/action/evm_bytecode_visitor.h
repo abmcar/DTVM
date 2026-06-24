@@ -196,6 +196,19 @@ private:
             PC++;
             continue;
           }
+          if (tryHandleControlFlowMacroOp(Analyzer, Bytecode, BytecodeSize,
+                                          Opcode, Ip)) {
+            continue;
+          }
+          if (tryHandleKeccakMacroOp(Bytecode, BytecodeSize, Opcode, Ip)) {
+            continue;
+          }
+          if (tryHandleAddressMacroOp(Bytecode, BytecodeSize, Opcode, Ip)) {
+            continue;
+          }
+          if (tryHandleMemoryMacroOp(Bytecode, BytecodeSize, Opcode, Ip)) {
+            continue;
+          }
           Builder.meterOpcode(Opcode, PC);
         }
 
@@ -686,114 +699,14 @@ private:
         // Control flow operations
         case OP_JUMP: {
           Operand Dest = pop();
-          uint64_t SuccPC = 0;
-          bool HasLiftedSucc = tryAssignConstantJumpEntryState(Analyzer, Dest);
-          if (!HasLiftedSucc) {
-            if (CurrentBlockLifted) {
-              const bool HasKnownSucc =
-                  tryGetConstantJumpSuccessorPC(Analyzer, Dest, SuccPC);
-              const bool HasKnownLiftedSucc =
-                  HasKnownSucc && isLiftedBlock(SuccPC);
-              auto OutgoingStack = drainLogicalStack();
-              if (HasKnownLiftedSucc) {
-                assignLiftedEntryState(SuccPC, OutgoingStack);
-              }
-              if (!HasKnownSucc) {
-                assignCompatibleDynamicJumpRegionEntryStates(Analyzer,
-                                                             OutgoingStack);
-              }
-              const bool HasCompatibleDynamicTargets =
-                  !HasKnownSucc &&
-                  !Analyzer
-                       .getCompatibleDynamicJumpTargetBlocksForSourceBlock(
-                           CurrentBlockEntryPC)
-                       .empty();
-              const bool NeedsRuntimeMaterialization =
-                  (HasKnownSucc && !HasKnownLiftedSucc) ||
-                  (!HasKnownSucc && !HasCompatibleDynamicTargets);
-              finalizeBlockExit(std::move(OutgoingStack),
-                                NeedsRuntimeMaterialization);
-            } else {
-              handleEndBlock();
-              if (!tryGetConstantJumpSuccessorPC(Analyzer, Dest, SuccPC)) {
-                assignCompatibleDynamicJumpRegionEntryStatesFromRuntime(
-                    Analyzer);
-              }
-            }
-            if (tryGetConstantJumpSuccessorPC(Analyzer, Dest, SuccPC) &&
-                isLiftedBlock(SuccPC)) {
-              assignLiftedEntryStateFromRuntime(Analyzer, SuccPC);
-            }
-          }
-          Builder.handleJump(Dest);
+          handleJumpOpcode(Analyzer, Dest);
           break;
         }
 
         case OP_JUMPI: {
           Operand Dest = pop();
           Operand Cond = pop();
-          uint64_t JumpSuccPC = 0;
-          bool HasJumpSucc =
-              tryGetConstantJumpSuccessorPC(Analyzer, Dest, JumpSuccPC);
-          uint64_t FallthroughPC = PC + 1;
-          if (Analyzer.hasCanonicalJumpDest(FallthroughPC)) {
-            FallthroughPC = Analyzer.getCanonicalJumpDestPC(FallthroughPC);
-          }
-          bool CanLiftFallthrough =
-              CurrentBlockLifted && isLiftedBlock(FallthroughPC);
-          bool CanLiftJump =
-              HasJumpSucc && CurrentBlockLifted && isLiftedBlock(JumpSuccPC);
-          bool CanPreassignFallthrough =
-              CurrentBlockLifted && isLiftedBlock(FallthroughPC);
-          bool CanPreassignJump =
-              CurrentBlockLifted && HasJumpSucc && isLiftedBlock(JumpSuccPC);
-          bool CanTransferWithoutMaterialize =
-              CurrentBlockLifted && CanLiftFallthrough && CanLiftJump;
-
-          if (CanTransferWithoutMaterialize) {
-            auto OutgoingStack = drainLogicalStack();
-            assignLiftedEntryState(FallthroughPC, OutgoingStack);
-            assignLiftedEntryState(JumpSuccPC, OutgoingStack);
-            finalizeBlockExit(std::move(OutgoingStack), false);
-          } else {
-            if (CurrentBlockLifted) {
-              auto OutgoingStack = drainLogicalStack();
-              if (CanPreassignFallthrough) {
-                assignLiftedEntryState(FallthroughPC, OutgoingStack);
-              }
-              if (CanPreassignJump) {
-                assignLiftedEntryState(JumpSuccPC, OutgoingStack);
-              }
-              if (!HasJumpSucc) {
-                assignCompatibleDynamicJumpRegionEntryStates(Analyzer,
-                                                             OutgoingStack);
-              }
-              bool NeedsRuntimeMaterialization = !CanPreassignFallthrough;
-              if (!NeedsRuntimeMaterialization) {
-                if (HasJumpSucc) {
-                  NeedsRuntimeMaterialization = !CanPreassignJump;
-                }
-              }
-              finalizeBlockExit(std::move(OutgoingStack),
-                                NeedsRuntimeMaterialization);
-            } else {
-              handleEndBlock();
-              if (isLiftedBlock(FallthroughPC)) {
-                assignLiftedEntryStateFromRuntime(Analyzer, FallthroughPC);
-              }
-              if (HasJumpSucc) {
-                if (isLiftedBlock(JumpSuccPC)) {
-                  assignLiftedEntryStateFromRuntime(Analyzer, JumpSuccPC);
-                }
-              } else {
-                assignCompatibleDynamicJumpRegionEntryStatesFromRuntime(
-                    Analyzer);
-              }
-            }
-          }
-          Builder.handleJumpI(Dest, Cond);
-          PC = FallthroughPC;
-          handleBeginBlock(Analyzer);
+          handleJumpIOpcode(Analyzer, Dest, Cond);
           break;
         }
 
@@ -1719,6 +1632,107 @@ private:
     push(Result);
   }
 
+  void handleJumpOpcode(EVMAnalyzer &Analyzer, Operand Dest) {
+    uint64_t SuccPC = 0;
+    bool HasLiftedSucc = tryAssignConstantJumpEntryState(Analyzer, Dest);
+    if (!HasLiftedSucc) {
+      if (CurrentBlockLifted) {
+        const bool HasKnownSucc =
+            tryGetConstantJumpSuccessorPC(Analyzer, Dest, SuccPC);
+        const bool HasKnownLiftedSucc = HasKnownSucc && isLiftedBlock(SuccPC);
+        auto OutgoingStack = drainLogicalStack();
+        if (HasKnownLiftedSucc) {
+          assignLiftedEntryState(SuccPC, OutgoingStack);
+        }
+        if (!HasKnownSucc) {
+          assignCompatibleDynamicJumpRegionEntryStates(Analyzer, OutgoingStack);
+        }
+        const bool HasCompatibleDynamicTargets =
+            !HasKnownSucc &&
+            !Analyzer
+                 .getCompatibleDynamicJumpTargetBlocksForSourceBlock(
+                     CurrentBlockEntryPC)
+                 .empty();
+        const bool NeedsRuntimeMaterialization =
+            (HasKnownSucc && !HasKnownLiftedSucc) ||
+            (!HasKnownSucc && !HasCompatibleDynamicTargets);
+        finalizeBlockExit(std::move(OutgoingStack),
+                          NeedsRuntimeMaterialization);
+      } else {
+        handleEndBlock();
+        if (!tryGetConstantJumpSuccessorPC(Analyzer, Dest, SuccPC)) {
+          assignCompatibleDynamicJumpRegionEntryStatesFromRuntime(Analyzer);
+        }
+      }
+      if (tryGetConstantJumpSuccessorPC(Analyzer, Dest, SuccPC) &&
+          isLiftedBlock(SuccPC)) {
+        assignLiftedEntryStateFromRuntime(Analyzer, SuccPC);
+      }
+    }
+    Builder.handleJump(Dest);
+  }
+
+  void handleJumpIOpcode(EVMAnalyzer &Analyzer, Operand Dest, Operand Cond) {
+    uint64_t JumpSuccPC = 0;
+    bool HasJumpSucc =
+        tryGetConstantJumpSuccessorPC(Analyzer, Dest, JumpSuccPC);
+    uint64_t FallthroughPC = PC + 1;
+    if (Analyzer.hasCanonicalJumpDest(FallthroughPC)) {
+      FallthroughPC = Analyzer.getCanonicalJumpDestPC(FallthroughPC);
+    }
+    bool CanLiftFallthrough =
+        CurrentBlockLifted && isLiftedBlock(FallthroughPC);
+    bool CanLiftJump =
+        HasJumpSucc && CurrentBlockLifted && isLiftedBlock(JumpSuccPC);
+    bool CanPreassignFallthrough =
+        CurrentBlockLifted && isLiftedBlock(FallthroughPC);
+    bool CanPreassignJump =
+        CurrentBlockLifted && HasJumpSucc && isLiftedBlock(JumpSuccPC);
+    bool CanTransferWithoutMaterialize =
+        CurrentBlockLifted && CanLiftFallthrough && CanLiftJump;
+
+    if (CanTransferWithoutMaterialize) {
+      auto OutgoingStack = drainLogicalStack();
+      assignLiftedEntryState(FallthroughPC, OutgoingStack);
+      assignLiftedEntryState(JumpSuccPC, OutgoingStack);
+      finalizeBlockExit(std::move(OutgoingStack), false);
+    } else {
+      if (CurrentBlockLifted) {
+        auto OutgoingStack = drainLogicalStack();
+        if (CanPreassignFallthrough) {
+          assignLiftedEntryState(FallthroughPC, OutgoingStack);
+        }
+        if (CanPreassignJump) {
+          assignLiftedEntryState(JumpSuccPC, OutgoingStack);
+        }
+        if (!HasJumpSucc) {
+          assignCompatibleDynamicJumpRegionEntryStates(Analyzer, OutgoingStack);
+        }
+        bool NeedsRuntimeMaterialization = !CanPreassignFallthrough;
+        if (!NeedsRuntimeMaterialization && HasJumpSucc) {
+          NeedsRuntimeMaterialization = !CanPreassignJump;
+        }
+        finalizeBlockExit(std::move(OutgoingStack),
+                          NeedsRuntimeMaterialization);
+      } else {
+        handleEndBlock();
+        if (isLiftedBlock(FallthroughPC)) {
+          assignLiftedEntryStateFromRuntime(Analyzer, FallthroughPC);
+        }
+        if (HasJumpSucc) {
+          if (isLiftedBlock(JumpSuccPC)) {
+            assignLiftedEntryStateFromRuntime(Analyzer, JumpSuccPC);
+          }
+        } else {
+          assignCompatibleDynamicJumpRegionEntryStatesFromRuntime(Analyzer);
+        }
+      }
+    }
+    Builder.handleJumpI(Dest, Cond);
+    PC = FallthroughPC;
+    handleBeginBlock(Analyzer);
+  }
+
   template <CompareOperator Opr> void handleCompare() {
     Operand CmpLHS = pop();
     Operand CmpRHS = (Opr != CompareOperator::CO_EQZ) ? pop() : Operand();
@@ -1766,15 +1780,463 @@ private:
     push(Result);
   }
 
-  void handlePush(uint8_t NumBytes) {
-    Bytes Data = readBytes(NumBytes);
-    Operand Result = Builder.handlePush(Data);
+  void meterOpcodeSequence(const uint8_t *Bytecode, uint64_t StartPC,
+                           uint64_t EndPCExclusive) {
+    for (uint64_t OpPC = StartPC; OpPC < EndPCExclusive;) {
+      const evmc_opcode Op = static_cast<evmc_opcode>(Bytecode[OpPC]);
+      Builder.meterOpcode(Op, OpPC);
+      OpPC++;
+      if (Op >= OP_PUSH0 && Op <= OP_PUSH32) {
+        OpPC += static_cast<uint8_t>(Op) - static_cast<uint8_t>(OP_PUSH0);
+      }
+    }
+  }
+
+  bool tryHandleControlFlowMacroOp(EVMAnalyzer &Analyzer,
+                                   const uint8_t *Bytecode, size_t BytecodeSize,
+                                   evmc_opcode Opcode, const uint8_t *&Ip) {
+    if (Opcode >= OP_PUSH0 && Opcode <= OP_PUSH32) {
+      const uint8_t NumBytes =
+          static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+      const uint64_t JumpPC = PC + 1 + NumBytes;
+      if (JumpPC < BytecodeSize) {
+        const evmc_opcode NextOpcode =
+            static_cast<evmc_opcode>(Bytecode[JumpPC]);
+        if (NextOpcode == OP_JUMP || NextOpcode == OP_JUMPI) {
+          Builder.meterOpcode(Opcode, PC);
+          Builder.meterOpcode(NextOpcode, JumpPC);
+          Operand Dest = buildPushOperandAt(PC, NumBytes);
+          PC = JumpPC;
+          if (NextOpcode == OP_JUMP) {
+            handleJumpOpcode(Analyzer, Dest);
+          } else {
+            Operand Cond = pop();
+            handleJumpIOpcode(Analyzer, Dest, Cond);
+          }
+          Ip += static_cast<ptrdiff_t>(NumBytes) + 1;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    if (Opcode != OP_ISZERO) {
+      return false;
+    }
+
+    const uint64_t PushPC = PC + 1;
+    if (PushPC >= BytecodeSize) {
+      return false;
+    }
+
+    const evmc_opcode PushOpcode = static_cast<evmc_opcode>(Bytecode[PushPC]);
+    if (PushOpcode < OP_PUSH0 || PushOpcode > OP_PUSH32) {
+      return false;
+    }
+
+    const uint8_t NumBytes =
+        static_cast<uint8_t>(PushOpcode) - static_cast<uint8_t>(OP_PUSH0);
+    const uint64_t JumpPC = PushPC + 1 + NumBytes;
+    if (JumpPC >= BytecodeSize ||
+        static_cast<evmc_opcode>(Bytecode[JumpPC]) != OP_JUMPI) {
+      return false;
+    }
+
+    Builder.meterOpcode(Opcode, PC);
+    Builder.meterOpcode(PushOpcode, PushPC);
+    Builder.meterOpcode(OP_JUMPI, JumpPC);
+    Operand Value = pop();
+    Operand Dest = buildPushOperandAt(PushPC, NumBytes);
+    Operand Cond = Builder.template handleCompareOp<CompareOperator::CO_EQZ>(
+        Value, Operand());
+    PC = JumpPC;
+    handleJumpIOpcode(Analyzer, Dest, Cond);
+    Ip += static_cast<ptrdiff_t>(NumBytes) + 2;
+    return true;
+  }
+
+  bool tryHandleKeccakMacroOp(const uint8_t *Bytecode, size_t BytecodeSize,
+                              evmc_opcode Opcode, const uint8_t *&Ip) {
+    if (Opcode == OP_CALLER) {
+      return tryHandleCallerSlotKeccakMacroOp(Bytecode, BytecodeSize, Ip);
+    }
+
+    if (Opcode >= OP_PUSH0 && Opcode <= OP_PUSH32) {
+      return tryHandleCallDataSlotKeccakMacroOp(Bytecode, BytecodeSize, Opcode,
+                                                Ip);
+    }
+
+    return false;
+  }
+
+  struct TwoWordKeccakStagingTail {
+    uint64_t AddrPushPC = 0;
+    uint64_t SlotPushPC = 0;
+    uint64_t KeccakPC = 0;
+    uint8_t AddrNumBytes = 0;
+    uint8_t SlotNumBytes = 0;
+  };
+
+  bool parseTwoWordKeccakStagingTail(const uint8_t *Bytecode,
+                                     size_t BytecodeSize, uint64_t AddrPushPC,
+                                     TwoWordKeccakStagingTail &Tail) {
+    const Byte *RawBytecode = reinterpret_cast<const Byte *>(Bytecode);
+    if (AddrPushPC >= BytecodeSize) {
+      return false;
+    }
+
+    evmc_opcode AddrPushOpcode = static_cast<evmc_opcode>(Bytecode[AddrPushPC]);
+    if (AddrPushOpcode < OP_PUSH0 || AddrPushOpcode > OP_PUSH32) {
+      return false;
+    }
+
+    const uint8_t AddrNumBytes =
+        static_cast<uint8_t>(AddrPushOpcode) - static_cast<uint8_t>(OP_PUSH0);
+    uint64_t AddrValue = 0;
+    if (!parsePushConstU64(RawBytecode, BytecodeSize, AddrPushPC + 1,
+                           AddrNumBytes, AddrValue)) {
+      return false;
+    }
+
+    uint64_t ScanPC = AddrPushPC + 1 + AddrNumBytes;
+    if (!consumeExpectedOpcode(RawBytecode, BytecodeSize, ScanPC, OP_MSTORE) ||
+        ScanPC >= BytecodeSize) {
+      return false;
+    }
+
+    const uint64_t SlotPushPC = ScanPC;
+    evmc_opcode SlotPushOpcode = static_cast<evmc_opcode>(Bytecode[SlotPushPC]);
+    if (SlotPushOpcode < OP_PUSH0 || SlotPushOpcode > OP_PUSH32) {
+      return false;
+    }
+    const uint8_t SlotNumBytes =
+        static_cast<uint8_t>(SlotPushOpcode) - static_cast<uint8_t>(OP_PUSH0);
+    ScanPC += static_cast<uint64_t>(1 + SlotNumBytes);
+    if (ScanPC >= BytecodeSize) {
+      return false;
+    }
+
+    const uint64_t Addr2PushPC = ScanPC;
+    evmc_opcode Addr2PushOpcode =
+        static_cast<evmc_opcode>(Bytecode[Addr2PushPC]);
+    if (Addr2PushOpcode < OP_PUSH0 || Addr2PushOpcode > OP_PUSH32) {
+      return false;
+    }
+
+    const uint8_t Addr2NumBytes =
+        static_cast<uint8_t>(Addr2PushOpcode) - static_cast<uint8_t>(OP_PUSH0);
+    uint64_t Addr2Value = 0;
+    if (!parsePushConstU64(RawBytecode, BytecodeSize, Addr2PushPC + 1,
+                           Addr2NumBytes, Addr2Value)) {
+      return false;
+    }
+
+    uint64_t ExpectedAddr2 = 0;
+    if (!addConstU64(AddrValue, 32, ExpectedAddr2) ||
+        Addr2Value != ExpectedAddr2) {
+      return false;
+    }
+
+    ScanPC = Addr2PushPC + 1 + Addr2NumBytes;
+    if (!consumeExpectedOpcode(RawBytecode, BytecodeSize, ScanPC, OP_MSTORE) ||
+        ScanPC >= BytecodeSize) {
+      return false;
+    }
+
+    const uint64_t LengthPushPC = ScanPC;
+    evmc_opcode LengthPushOpcode =
+        static_cast<evmc_opcode>(Bytecode[LengthPushPC]);
+    if (LengthPushOpcode < OP_PUSH0 || LengthPushOpcode > OP_PUSH32) {
+      return false;
+    }
+    const uint8_t LengthNumBytes =
+        static_cast<uint8_t>(LengthPushOpcode) - static_cast<uint8_t>(OP_PUSH0);
+    uint64_t LengthValue = 0;
+    if (!parsePushConstU64(RawBytecode, BytecodeSize, LengthPushPC + 1,
+                           LengthNumBytes, LengthValue) ||
+        LengthValue != 64) {
+      return false;
+    }
+
+    ScanPC = LengthPushPC + 1 + LengthNumBytes;
+    if (ScanPC >= BytecodeSize) {
+      return false;
+    }
+
+    const uint64_t BasePushPC = ScanPC;
+    evmc_opcode BasePushOpcode = static_cast<evmc_opcode>(Bytecode[BasePushPC]);
+    if (BasePushOpcode < OP_PUSH0 || BasePushOpcode > OP_PUSH32) {
+      return false;
+    }
+    const uint8_t BaseNumBytes =
+        static_cast<uint8_t>(BasePushOpcode) - static_cast<uint8_t>(OP_PUSH0);
+    uint64_t BaseValue = 0;
+    if (!parsePushConstU64(RawBytecode, BytecodeSize, BasePushPC + 1,
+                           BaseNumBytes, BaseValue) ||
+        BaseValue != AddrValue) {
+      return false;
+    }
+
+    const uint64_t KeccakPC = BasePushPC + 1 + BaseNumBytes;
+    if (KeccakPC >= BytecodeSize ||
+        static_cast<evmc_opcode>(Bytecode[KeccakPC]) != OP_KECCAK256) {
+      return false;
+    }
+
+    Tail.AddrPushPC = AddrPushPC;
+    Tail.SlotPushPC = SlotPushPC;
+    Tail.KeccakPC = KeccakPC;
+    Tail.AddrNumBytes = AddrNumBytes;
+    Tail.SlotNumBytes = SlotNumBytes;
+    return true;
+  }
+
+  bool tryHandleCallerSlotKeccakMacroOp(const uint8_t *Bytecode,
+                                        size_t BytecodeSize,
+                                        const uint8_t *&Ip) {
+    const uint64_t AddrPushPC = PC + 1;
+    TwoWordKeccakStagingTail Tail;
+    if (!parseTwoWordKeccakStagingTail(Bytecode, BytecodeSize, AddrPushPC,
+                                       Tail)) {
+      return false;
+    }
+
+    meterOpcodeSequence(Bytecode, PC, Tail.KeccakPC + 1);
+    Builder.noteHelperOpcodeInBlock(OP_KECCAK256, Tail.KeccakPC);
+    Operand Offset = buildPushOperandAt(Tail.AddrPushPC, Tail.AddrNumBytes);
+    Operand SlotWord = buildPushOperandAt(Tail.SlotPushPC, Tail.SlotNumBytes);
+    Operand Result = Builder.handleKeccak256CallerConstSlot(Offset, SlotWord);
+    push(Result);
+    Ip += static_cast<ptrdiff_t>(Tail.KeccakPC - PC);
+    return true;
+  }
+
+  bool tryHandleCallDataSlotKeccakMacroOp(const uint8_t *Bytecode,
+                                          size_t BytecodeSize,
+                                          evmc_opcode Opcode,
+                                          const uint8_t *&Ip) {
+    const uint8_t CallDataOffsetNumBytes =
+        static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+    const uint64_t CallDataLoadPC = PC + 1 + CallDataOffsetNumBytes;
+    if (CallDataLoadPC >= BytecodeSize ||
+        static_cast<evmc_opcode>(Bytecode[CallDataLoadPC]) != OP_CALLDATALOAD) {
+      return false;
+    }
+
+    const uint64_t AddrPushPC = CallDataLoadPC + 1;
+    TwoWordKeccakStagingTail Tail;
+    if (!parseTwoWordKeccakStagingTail(Bytecode, BytecodeSize, AddrPushPC,
+                                       Tail)) {
+      return false;
+    }
+
+    meterOpcodeSequence(Bytecode, PC, Tail.KeccakPC + 1);
+    Builder.noteHelperOpcodeInBlock(OP_KECCAK256, Tail.KeccakPC);
+    Operand Offset = buildPushOperandAt(Tail.AddrPushPC, Tail.AddrNumBytes);
+    Operand CallDataOffset = buildPushOperandAt(PC, CallDataOffsetNumBytes);
+    Operand SlotWord = buildPushOperandAt(Tail.SlotPushPC, Tail.SlotNumBytes);
+    Operand Result = Builder.handleKeccak256CallDataConstSlot(
+        Offset, CallDataOffset, SlotWord);
+    push(Result);
+    Ip += static_cast<ptrdiff_t>(Tail.KeccakPC - PC);
+    return true;
+  }
+
+  bool tryHandleAddressMacroOp(const uint8_t *Bytecode, size_t BytecodeSize,
+                               evmc_opcode Opcode, const uint8_t *&Ip) {
+    if (Opcode >= OP_DUP1 && Opcode <= OP_DUP16) {
+      const uint8_t DupIndex =
+          static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_DUP1) + 1;
+      const uint64_t AddPC = PC + 1;
+      const uint64_t PostAddPC = AddPC + 1;
+      if (AddPC < BytecodeSize &&
+          static_cast<evmc_opcode>(Bytecode[AddPC]) == OP_ADD &&
+          (PostAddPC >= BytecodeSize ||
+           static_cast<evmc_opcode>(Bytecode[PostAddPC]) != OP_MSTORE)) {
+        meterOpcodeSequence(Bytecode, PC, AddPC + 1);
+        handleDupAddMacroOp(DupIndex);
+        Ip += 1;
+        return true;
+      }
+      return false;
+    }
+
+    if (Opcode < OP_PUSH0 || Opcode > OP_PUSH32) {
+      return false;
+    }
+
+    const uint8_t NumBytes =
+        static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+    const uint64_t NextPC = PC + 1 + NumBytes;
+    if (NextPC >= BytecodeSize) {
+      return false;
+    }
+
+    Operand ConstOp = buildPushOperandAt(PC, NumBytes);
+    evmc_opcode NextOpcode = static_cast<evmc_opcode>(Bytecode[NextPC]);
+    const uint64_t PostAddPC = NextPC + 1;
+    if (NextOpcode == OP_ADD &&
+        (PostAddPC >= BytecodeSize ||
+         static_cast<evmc_opcode>(Bytecode[PostAddPC]) != OP_MSTORE)) {
+      meterOpcodeSequence(Bytecode, PC, NextPC + 1);
+      handlePushConstAddMacroOp(ConstOp);
+      Ip += static_cast<ptrdiff_t>(NumBytes) + 1;
+      return true;
+    }
+
+    if (NextOpcode < OP_DUP1 || NextOpcode > OP_DUP16) {
+      return false;
+    }
+
+    const uint8_t DupIndex =
+        static_cast<uint8_t>(NextOpcode) - static_cast<uint8_t>(OP_DUP1) + 1;
+    const uint64_t AddPC = NextPC + 1;
+    const uint64_t PostAddPC2 = AddPC + 1;
+    if (AddPC >= BytecodeSize ||
+        static_cast<evmc_opcode>(Bytecode[AddPC]) != OP_ADD ||
+        (PostAddPC2 < BytecodeSize &&
+         static_cast<evmc_opcode>(Bytecode[PostAddPC2]) == OP_MSTORE)) {
+      return false;
+    }
+
+    meterOpcodeSequence(Bytecode, PC, AddPC + 1);
+    handlePushConstDupAddMacroOp(ConstOp, DupIndex);
+    Ip += static_cast<ptrdiff_t>(NumBytes) + 2;
+    return true;
+  }
+
+  bool tryHandleMemoryMacroOp(const uint8_t *Bytecode, size_t BytecodeSize,
+                              evmc_opcode Opcode, const uint8_t *&Ip) {
+    if (Opcode >= OP_PUSH0 && Opcode <= OP_PUSH32) {
+      const uint8_t NumBytes =
+          static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+      const uint64_t MStorePC = PC + 1 + NumBytes;
+      if (MStorePC < BytecodeSize &&
+          static_cast<evmc_opcode>(Bytecode[MStorePC]) == OP_MSTORE) {
+        meterOpcodeSequence(Bytecode, PC, MStorePC + 1);
+        handlePushConstMStoreMacroOp(buildPushOperandAt(PC, NumBytes),
+                                     MStorePC);
+        Ip += static_cast<ptrdiff_t>(NumBytes) + 1;
+        return true;
+      }
+      return false;
+    }
+
+    if (Opcode == OP_ADD) {
+      const uint64_t MStorePC = PC + 1;
+      if (MStorePC < BytecodeSize &&
+          static_cast<evmc_opcode>(Bytecode[MStorePC]) == OP_MSTORE) {
+        meterOpcodeSequence(Bytecode, PC, MStorePC + 1);
+        handleAddMStoreMacroOp(MStorePC);
+        Ip += 1;
+        return true;
+      }
+      return false;
+    }
+
+    if (Opcode != OP_DUP1) {
+      return false;
+    }
+
+    const uint64_t Dup1SecondPC = PC + 1;
+    const uint64_t MStorePC = PC + 2;
+    const uint64_t Dup2PC = PC + 3;
+    const uint64_t AddPC = PC + 4;
+    if (AddPC >= BytecodeSize) {
+      return false;
+    }
+    if (static_cast<evmc_opcode>(Bytecode[Dup1SecondPC]) != OP_DUP1 ||
+        static_cast<evmc_opcode>(Bytecode[MStorePC]) != OP_MSTORE ||
+        static_cast<evmc_opcode>(Bytecode[Dup2PC]) != OP_DUP2 ||
+        static_cast<evmc_opcode>(Bytecode[AddPC]) != OP_ADD) {
+      return false;
+    }
+
+    meterOpcodeSequence(Bytecode, PC, AddPC + 1);
+    handleLinearMStoreNextMacroOp(MStorePC);
+    Ip += 4;
+    return true;
+  }
+
+  void handleDupAddMacroOp(uint8_t DupIndex) {
+    requireLogicalStackDepth(DupIndex);
+    Operand DuplicatedValue = Stack.peek(DupIndex - 1);
+    Operand TopValue = pop();
+    Operand Result =
+        Builder.template handleBinaryArithmetic<BinaryOperator::BO_ADD>(
+            DuplicatedValue, TopValue);
     push(Result);
   }
 
-  Bytes readBytes(uint8_t Count) {
+  void handlePushConstAddMacroOp(const Operand &ConstOp) {
+    requireLogicalStackDepth(1);
+    Operand TopValue = pop();
+    Operand Result =
+        Builder.template handleBinaryArithmetic<BinaryOperator::BO_ADD>(
+            ConstOp, TopValue);
+    push(Result);
+  }
+
+  void handlePushConstDupAddMacroOp(const Operand &ConstOp, uint8_t DupIndex) {
+    if (DupIndex > 1) {
+      requireLogicalStackDepth(static_cast<uint32_t>(DupIndex) - 1u);
+    }
+    Operand SourceValue =
+        DupIndex == 1 ? ConstOp
+                      : Stack.peek(static_cast<uint32_t>(DupIndex) - 2u);
+    Operand Result =
+        Builder.template handleBinaryArithmetic<BinaryOperator::BO_ADD>(
+            SourceValue, ConstOp);
+    push(Result);
+  }
+
+  void handlePushConstMStoreMacroOp(const Operand &Addr, uint64_t MStorePC) {
+    Builder.noteMemoryOpcodeInBlock(OP_MSTORE, MStorePC);
+    maybePrepareLinearBlockMemoryPrecheck(OP_MSTORE);
+    Operand Value = pop();
+    Builder.handleMStore(Addr, Value);
+  }
+
+  void handleAddMStoreMacroOp(uint64_t MStorePC) {
+    Operand AddLHS = pop();
+    Operand AddRHS = pop();
+    Operand Addr =
+        Builder.template handleBinaryArithmetic<BinaryOperator::BO_ADD>(AddLHS,
+                                                                        AddRHS);
+    Builder.noteMemoryOpcodeInBlock(OP_MSTORE, MStorePC);
+    maybePrepareLinearBlockMemoryPrecheck(OP_MSTORE);
+    Operand Value = pop();
+    Builder.handleMStore(Addr, Value);
+  }
+
+  void handleLinearMStoreNextMacroOp(uint64_t MStorePC) {
+    requireLogicalStackDepth(2);
+    Operand Current = Stack.peek(0);
+    Operand Stride = Stack.peek(1);
+    Builder.noteMemoryOpcodeInBlock(OP_MSTORE, MStorePC);
+    maybePrepareLinearBlockMemoryPrecheck(OP_MSTORE);
+    Builder.handleMStore(Current, Current);
+    Operand Next =
+        Builder.template handleBinaryArithmetic<BinaryOperator::BO_ADD>(Current,
+                                                                        Stride);
+    pop();
+    push(Next);
+  }
+
+  void handlePush(uint8_t NumBytes) {
+    Operand Result = buildPushOperandAt(PC, NumBytes);
+    push(Result);
+    PC += NumBytes;
+  }
+
+  Operand buildPushOperandAt(uint64_t OpcodePC, uint8_t NumBytes) {
+    Bytes Data = readBytesAt(OpcodePC, NumBytes);
+    return Builder.handlePush(Data);
+  }
+
+  Bytes readBytesAt(uint64_t OpcodePC, uint8_t Count) {
     const Byte *Bytecode = Ctx->getBytecode();
-    uint64_t Start = PC + 1;
+    uint64_t Start = OpcodePC + 1;
     uint64_t BytecodeSize = Ctx->getBytecodeSize();
     uint64_t Available = (Start < BytecodeSize) ? (BytecodeSize - Start) : 0;
     uint64_t ReadCount = (Count < Available) ? Count : Available;
@@ -1789,7 +2251,6 @@ private:
       PushImmediateScratch[static_cast<size_t>(I)] = Bytecode[Start + I];
     }
 
-    PC += Count;
     return Bytes(PushImmediateScratch.data(), Count);
   }
 

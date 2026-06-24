@@ -403,6 +403,7 @@ public:
 
   bool hasUnresolvedNonLiftedDeepEntryRisk() const {
     for (const auto &[BlockPC, Info] : BlockInfos) {
+      (void)BlockPC;
       if (Info.CanLiftStack || Info.ResolvedEntryStackDepth >= 0) {
         continue;
       }

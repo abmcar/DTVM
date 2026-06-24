@@ -1,5 +1,6 @@
 // Copyright (C) 2025 the DTVM authors. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -143,6 +144,7 @@ ExpectedResult readExpectedResult(const std::string &FilePath) {
 struct EVMExecutionResult {
   evmc_status_code Status = EVMC_INTERNAL_ERROR;
   std::string OutputHex;
+  int64_t GasLeft = 0;
   bool JITCompiled = false;
 };
 
@@ -155,6 +157,7 @@ EVMExecutionResult executeEvmBytecode(const std::string &ModuleName,
 
   RuntimeConfig Config;
   Config.Mode = Mode;
+  Config.EnableEvmGasMetering = true;
 
   auto MockedHost = std::make_unique<zen::evm::ZenMockedEVMHost>();
   MockedHost->tx_context.tx_origin = zen::evm::DEFAULT_DEPLOYER_ADDRESS;
@@ -218,6 +221,7 @@ EVMExecutionResult executeEvmBytecode(const std::string &ModuleName,
   Exec.Status = RawResult.status_code;
   Exec.OutputHex =
       zen::utils::toHex(RawResult.output_data, RawResult.output_size);
+  Exec.GasLeft = RawResult.gas_left;
   return Exec;
 }
 
@@ -251,6 +255,62 @@ std::vector<uint8_t> makeUint256Calldata(uint64_t Value) {
     Value >>= 8;
   }
   return Data;
+}
+
+std::string computeTwoWordKeccakHex(const std::vector<uint8_t> &Word0,
+                                    const std::vector<uint8_t> &Word1) {
+  EXPECT_EQ(Word0.size(), 32U);
+  EXPECT_EQ(Word1.size(), 32U);
+  std::vector<uint8_t> Input;
+  Input.reserve(64);
+  Input.insert(Input.end(), Word0.begin(), Word0.end());
+  Input.insert(Input.end(), Word1.begin(), Word1.end());
+  const auto Hash = zen::host::evm::crypto::keccak256(Input);
+  return zen::utils::toHex(Hash.data(), Hash.size());
+}
+
+std::vector<uint8_t> makePaddedAddressWord(const evmc::address &Address) {
+  std::vector<uint8_t> Word(32, 0);
+  std::memcpy(Word.data() + 12, Address.bytes, sizeof(Address.bytes));
+  return Word;
+}
+
+void expectInterpMatchesMultipass(const std::string &ModuleName,
+                                  const std::vector<uint8_t> &Bytecode,
+                                  const std::vector<uint8_t> &CallData,
+                                  evmc_status_code ExpectedStatus,
+                                  const std::string &ExpectedOutputHex = "",
+                                  bool CheckGasLeft = true) {
+  auto InterpExec = executeEvmBytecode(ModuleName + "_interp", Bytecode,
+                                       common::RunMode::InterpMode, CallData);
+  auto MultipassExec =
+      executeEvmBytecode(ModuleName + "_multipass", Bytecode,
+                         common::RunMode::MultipassMode, CallData);
+
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(MultipassExec.JITCompiled)
+      << "Multipass JIT should compile " << ModuleName;
+#endif
+
+  EXPECT_EQ(InterpExec.Status, ExpectedStatus)
+      << "Interpreter status mismatch for " << ModuleName;
+  EXPECT_EQ(MultipassExec.Status, ExpectedStatus)
+      << "Multipass status mismatch for " << ModuleName;
+  EXPECT_EQ(MultipassExec.Status, InterpExec.Status)
+      << "Multipass status diverged from interpreter for " << ModuleName;
+  EXPECT_EQ(MultipassExec.OutputHex, InterpExec.OutputHex)
+      << "Multipass output diverged from interpreter for " << ModuleName;
+  if (CheckGasLeft) {
+    EXPECT_EQ(MultipassExec.GasLeft, InterpExec.GasLeft)
+        << "Multipass gas_left diverged from interpreter for " << ModuleName;
+  }
+
+  if (!ExpectedOutputHex.empty()) {
+    EXPECT_EQ(InterpExec.OutputHex, ExpectedOutputHex)
+        << "Interpreter output mismatch for " << ModuleName;
+    EXPECT_EQ(MultipassExec.OutputHex, ExpectedOutputHex)
+        << "Multipass output mismatch for " << ModuleName;
+  }
 }
 
 void expectMemoryLinearMstoreOverlapResult(uint64_t Stride,
@@ -511,6 +571,64 @@ TEST(EVMMultipassDisplacedBytes32Test,
   EXPECT_TRUE(Exec.JITCompiled);
 #endif
   EXPECT_EQ(Exec.Status, EVMC_OUT_OF_GAS);
+}
+
+TEST(EVMMultipassKeccakHelperTest,
+     CallerConstSlotHelperMatchesInterpreterAndExpectedDigest) {
+  auto BytecodeBuf =
+      zen::utils::fromHex("336000526005602052604060002060005260206000f3");
+  ASSERT_TRUE(BytecodeBuf) << "Failed to parse caller-slot helper bytecode";
+
+  const std::string ExpectedDigest = computeTwoWordKeccakHex(
+      makePaddedAddressWord(DEFAULT_DEPLOYER_ADDRESS), makeUint256Calldata(5));
+
+  expectInterpMatchesMultipass("keccak_caller_const_slot", *BytecodeBuf, {},
+                               EVMC_SUCCESS, ExpectedDigest);
+}
+
+TEST(EVMMultipassKeccakHelperTest,
+     CallDataConstSlotHelperMatchesInterpreterAndExpectedDigest) {
+  auto BytecodeBuf =
+      zen::utils::fromHex("6000356000526007602052604060002060005260206000f3");
+  ASSERT_TRUE(BytecodeBuf) << "Failed to parse calldata-slot helper bytecode";
+
+  const std::vector<uint8_t> CallData = makeUint256Calldata(0x1234);
+  const std::string ExpectedDigest =
+      computeTwoWordKeccakHex(CallData, makeUint256Calldata(7));
+
+  expectInterpMatchesMultipass("keccak_calldata_const_slot", *BytecodeBuf,
+                               CallData, EVMC_SUCCESS, ExpectedDigest);
+}
+
+TEST(EVMMultipassKeccakHelperTest,
+     CallerConstSlotHelperPreservesMemoryExpansionFailureSemantics) {
+  auto BytecodeBuf = zen::utils::fromHex(
+      "3362ffffe0526005630100000052604062ffffe02060005260206000f3");
+  ASSERT_TRUE(BytecodeBuf)
+      << "Failed to parse caller-slot memory edge bytecode";
+
+  expectInterpMatchesMultipass("keccak_caller_const_slot_mem_oog", *BytecodeBuf,
+                               {}, EVMC_OUT_OF_GAS);
+}
+
+TEST(EVMMultipassJumpRegressionTest, InvalidJumpDestStillMatchesInterpreter) {
+  const std::vector<uint8_t> Bytecode = {0x60, 0x04, 0x56, 0x00, 0x00};
+
+  expectInterpMatchesMultipass("invalid_jumpdest_regression", Bytecode, {},
+                               EVMC_BAD_JUMP_DESTINATION);
+}
+
+TEST(EVMMultipassJumpRegressionTest,
+     HighLimbNonZeroJumpTargetStillRejectsOtherwiseValidLowDest) {
+  std::vector<uint8_t> Bytecode = {0x7f, 0x01};
+  Bytecode.insert(Bytecode.end(), 30, 0x00);
+  Bytecode.push_back(0x22);
+  Bytecode.push_back(0x56);
+  Bytecode.push_back(0x5b);
+  Bytecode.push_back(0x00);
+
+  expectInterpMatchesMultipass("high_limb_jump_target_regression", Bytecode, {},
+                               EVMC_BAD_JUMP_DESTINATION);
 }
 
 // Regression test for issue #487: multipass JIT corrupted high limbs of U256

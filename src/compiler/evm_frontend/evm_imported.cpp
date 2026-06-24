@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <evmc/evmc.h>
+#include <evmc/instructions.h>
 #include <vector>
 
 namespace {
@@ -95,6 +96,42 @@ inline uint64_t calculateWordCopyGas(uint64_t Size) {
   }
   uint64_t Words = numWords(Size);
   return Words * static_cast<uint64_t>(zen::evm::WORD_COPY_COST);
+}
+
+const uint8_t *cacheKeccak256Result(zen::runtime::EVMInstance *Instance,
+                                    const uint8_t *InputData, uint64_t Length) {
+  auto &ExecCache = Instance->getMessageCache();
+
+  uint32_t Len32 = static_cast<uint32_t>(Length);
+  if (const evmc::bytes32 *Cached = TLKeccakCache.lookup(InputData, Len32)) {
+    ExecCache.Keccak256Results.push_back(*Cached);
+    return ExecCache.Keccak256Results.back().bytes;
+  }
+
+  evmc::bytes32 HashResult;
+  zen::host::evm::crypto::keccak256(InputData, Length, HashResult.bytes);
+  TLKeccakCache.insert(InputData, Len32, HashResult);
+  ExecCache.Keccak256Results.push_back(HashResult);
+  return ExecCache.Keccak256Results.back().bytes;
+}
+
+bool prepareKeccakMemoryRange(zen::runtime::EVMInstance *Instance,
+                              uint64_t Offset, uint64_t Length,
+                              uint8_t *&MemoryBase) {
+  MemoryBase = nullptr;
+  if (Length == 0) {
+    return true;
+  }
+  if (!Instance->expandMemoryChecked(Offset, Length)) {
+    return false;
+  }
+  MemoryBase = Instance->getMemoryBase();
+  return true;
+}
+
+void storeWordToMemory(uint8_t *Dst, const intx::uint256 &Word) {
+  const auto Bytes = intx::be::store<evmc::bytes32>(Word);
+  std::memcpy(Dst, Bytes.bytes, sizeof(Bytes.bytes));
 }
 
 inline void triggerStaticModeViolation(zen::runtime::EVMInstance *Instance) {
@@ -200,6 +237,9 @@ const RuntimeFunctions &getRuntimeFunctionTable() {
       .HandleUndefined = &evmHandleUndefined,
       .HandleSelfDestruct = &evmHandleSelfDestruct,
       .GetKeccak256 = &evmGetKeccak256,
+      .GetKeccak256TwoWord = &evmGetKeccak256TwoWord,
+      .GetKeccak256CallDataSlot = &evmGetKeccak256CallDataSlot,
+      .GetKeccak256CallerSlot = &evmGetKeccak256CallerSlot,
       .HandleFallback = &evmHandleFallback};
   return Table;
 }
@@ -1238,7 +1278,8 @@ const uint8_t *evmGetKeccak256(zen::runtime::EVMInstance *Instance,
                                uint64_t Offset, uint64_t Length) {
   const uint8_t *InputData = nullptr;
   if (Length > 0) {
-    if (!Instance->expandMemoryChecked(Offset, Length)) {
+    uint8_t *MemoryBase = nullptr;
+    if (!prepareKeccakMemoryRange(Instance, Offset, Length, MemoryBase)) {
       return nullptr;
     }
     const uint64_t ExtraGas =
@@ -1246,23 +1287,48 @@ const uint8_t *evmGetKeccak256(zen::runtime::EVMInstance *Instance,
     if (!Instance->chargeGas(ExtraGas)) {
       return nullptr;
     }
-    uint8_t *MemoryBase = Instance->getMemoryBase();
     InputData = MemoryBase + Offset;
   }
 
-  auto &ExecCache = Instance->getMessageCache();
+  return cacheKeccak256Result(Instance, InputData, Length);
+}
 
-  uint32_t Len32 = static_cast<uint32_t>(Length);
-  if (const evmc::bytes32 *Cached = TLKeccakCache.lookup(InputData, Len32)) {
-    ExecCache.Keccak256Results.push_back(*Cached);
-    return ExecCache.Keccak256Results.back().bytes;
+const uint8_t *evmGetKeccak256TwoWord(zen::runtime::EVMInstance *Instance,
+                                      uint64_t Offset,
+                                      const intx::uint256 &Word0,
+                                      const intx::uint256 &Word1) {
+  uint8_t *MemoryBase = nullptr;
+  if (!prepareKeccakMemoryRange(Instance, Offset, 64, MemoryBase)) {
+    return nullptr;
   }
 
-  evmc::bytes32 HashResult;
-  zen::host::evm::crypto::keccak256(InputData, Length, HashResult.bytes);
-  TLKeccakCache.insert(InputData, Len32, HashResult);
-  ExecCache.Keccak256Results.push_back(HashResult);
-  return ExecCache.Keccak256Results.back().bytes;
+  storeWordToMemory(MemoryBase + Offset, Word0);
+  storeWordToMemory(MemoryBase + Offset + 32, Word1);
+  return evmGetKeccak256(Instance, Offset, 64);
+}
+
+const uint8_t *evmGetKeccak256CallDataSlot(zen::runtime::EVMInstance *Instance,
+                                           uint64_t Offset,
+                                           uint64_t CallDataOffset,
+                                           const intx::uint256 &Slot) {
+  evmc::bytes32 CallDataWordBytes{};
+  std::memcpy(CallDataWordBytes.bytes,
+              evmGetCallDataLoad(Instance, CallDataOffset),
+              sizeof(CallDataWordBytes.bytes));
+  const intx::uint256 CallDataWord =
+      intx::be::load<intx::uint256>(CallDataWordBytes);
+  return evmGetKeccak256TwoWord(Instance, Offset, CallDataWord, Slot);
+}
+
+const uint8_t *evmGetKeccak256CallerSlot(zen::runtime::EVMInstance *Instance,
+                                         uint64_t Offset,
+                                         const intx::uint256 &Slot) {
+  evmc::bytes32 CallerWordBytes{};
+  std::memcpy(CallerWordBytes.bytes, evmGetCaller(Instance),
+              sizeof(CallerWordBytes.bytes));
+  const intx::uint256 CallerWord =
+      intx::be::load<intx::uint256>(CallerWordBytes);
+  return evmGetKeccak256TwoWord(Instance, Offset, CallerWord, Slot);
 }
 void evmHandleFallback(zen::runtime::EVMInstance *Instance, uint64_t PC) {
   // Phase 3 implementation: Complete JIT-to-interpreter fallback

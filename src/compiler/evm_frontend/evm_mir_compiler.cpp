@@ -637,14 +637,22 @@ void EVMMirBuilder::meterOpcodeRange(uint64_t StartPC,
   EndPCExclusive = std::min(EndPCExclusive, CodeSize);
 
   uint64_t TotalCost = 0;
-  for (uint64_t PC = StartPC; PC < EndPCExclusive; ++PC) {
+  for (uint64_t PC = StartPC; PC < EndPCExclusive;) {
+    uint64_t NextPC = PC + 1;
     uint64_t Cost = 0;
     if (GasChunkEnd && GasChunkCost && PC < GasChunkSize &&
-        GasChunkEnd[PC] > PC) {
-      Cost = GasChunkCostSPP ? GasChunkCostSPP[PC] : GasChunkCost[PC];
+        GasChunkEnd[PC] > PC && GasChunkEnd[PC] <= EndPCExclusive) {
+      // Macro-op ranges need the unshifted opcode sum for exactly this byte
+      // range; SPP-shifted costs may include or exclude neighboring opcodes.
+      Cost = GasChunkCost[PC];
+      NextPC = GasChunkEnd[PC];
     } else {
       const uint8_t Opcode = static_cast<uint8_t>(Bytecode[PC]);
       Cost = static_cast<uint64_t>(InstructionMetrics[Opcode].gas_cost);
+      if (Opcode >= static_cast<uint8_t>(OP_PUSH0) &&
+          Opcode <= static_cast<uint8_t>(OP_PUSH32)) {
+        NextPC += static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+      }
     }
 
     if (UINT64_MAX - TotalCost < Cost) {
@@ -652,6 +660,7 @@ void EVMMirBuilder::meterOpcodeRange(uint64_t StartPC,
       break;
     }
     TotalCost += Cost;
+    PC = std::min(NextPC, EndPCExclusive);
   }
 
   meterGas(TotalCost);
@@ -1554,28 +1563,45 @@ void EVMMirBuilder::handleJump(Operand Dest) {
   implementIndirectJump(JumpTarget, InvalidJumpBB);
 }
 
+MInstruction *EVMMirBuilder::createJumpCondition(const Operand &Cond) {
+  MType *MirI64Type =
+      EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  MInstruction *Zero = createIntConstInstruction(MirI64Type, 0);
+
+  // BrIfInstruction tests whether its condition operand is non-zero, so the
+  // compare result can be consumed directly without materializing an i64 0/1.
+  auto BuildNonZeroOr = [this, MirI64Type](const U256Inst &Parts) {
+    MInstruction *OrResult = Parts[0];
+    for (size_t I = 1; I < EVM_ELEMENTS_COUNT; ++I) {
+      OrResult = createInstruction<BinaryInstruction>(false, OP_or, MirI64Type,
+                                                      OrResult, Parts[I]);
+    }
+    return OrResult;
+  };
+
+  if (Cond.isDeferredZeroTest()) {
+    MInstruction *OrResult = BuildNonZeroOr(Cond.getDeferredBaseComponents());
+    auto Predicate = Cond.isDeferredZeroTestNegated()
+                         ? CmpInstruction::Predicate::ICMP_NE
+                         : CmpInstruction::Predicate::ICMP_EQ;
+    return createInstruction<CmpInstruction>(false, Predicate, &Ctx.I64Type,
+                                             OrResult, Zero);
+  }
+
+  U256Inst CondComponents = extractU256Operand(Cond);
+  MInstruction *OrResult = BuildNonZeroOr(CondComponents);
+  return createInstruction<CmpInstruction>(
+      false, CmpInstruction::Predicate::ICMP_NE, &Ctx.I64Type, OrResult, Zero);
+}
+
 void EVMMirBuilder::handleJumpI(Operand Dest, Operand Cond) {
   U256Inst DestComponents = extractU256Operand(Dest);
-  U256Inst CondComponents = extractU256Operand(Cond);
   MInstruction *JumpTarget = DestComponents[0];
 
   MType *MirI64Type =
       EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
   MInstruction *Zero = createIntConstInstruction(MirI64Type, 0);
-  MInstruction *One = createIntConstInstruction(MirI64Type, 1);
-
-  // Condition is true if any component is non-zero
-  MInstruction *OrResult = createInstruction<BinaryInstruction>(
-      false, OP_or, MirI64Type, CondComponents[0], CondComponents[1]);
-  OrResult = createInstruction<BinaryInstruction>(false, OP_or, MirI64Type,
-                                                  OrResult, CondComponents[2]);
-  OrResult = createInstruction<BinaryInstruction>(false, OP_or, MirI64Type,
-                                                  OrResult, CondComponents[3]);
-
-  MInstruction *IsNonZero = createInstruction<CmpInstruction>(
-      false, CmpInstruction::Predicate::ICMP_NE, &Ctx.I64Type, OrResult, Zero);
-  IsNonZero = createInstruction<SelectInstruction>(false, MirI64Type, IsNonZero,
-                                                   One, Zero);
+  MInstruction *IsNonZero = createJumpCondition(Cond);
 
   MBasicBlock *FallThroughBB = createBasicBlock();
   FallThroughBB->setJumpDestBB(true);
@@ -5230,6 +5256,65 @@ EVMMirBuilder::handleKeccak256(Operand OffsetComponents,
   return Result;
 }
 
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleKeccak256TwoWord(Operand OffsetComponents, Operand Word0,
+                                      Operand Word1) {
+  const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  Operand SizeComponents = createU256ConstOperand(intx::uint256{64});
+  normalizeOffsetWithSize(OffsetComponents, SizeComponents);
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+  syncGasToMemory();
+#endif
+  auto Result = callRuntimeForWithErrorCheck<
+      const uint8_t *, uint64_t, const intx::uint256 &, const intx::uint256 &>(
+      RuntimeFunctions.GetKeccak256TwoWord, OffsetComponents, Word0, Word1);
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+  reloadGasFromMemory();
+#endif
+  reloadMemorySizeFromInstance();
+  return Result;
+}
+
+typename EVMMirBuilder::Operand EVMMirBuilder::handleKeccak256CallDataConstSlot(
+    Operand OffsetComponents, Operand CallDataOffset, Operand SlotWord) {
+  const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  Operand SizeComponents = createU256ConstOperand(intx::uint256{64});
+  normalizeOffsetWithSize(OffsetComponents, SizeComponents);
+  uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
+  normalizeOperandU64(CallDataOffset, &Non64Value);
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+  syncGasToMemory();
+#endif
+  auto Result = callRuntimeForWithErrorCheck<const uint8_t *, uint64_t,
+                                             uint64_t, const intx::uint256 &>(
+      RuntimeFunctions.GetKeccak256CallDataSlot, OffsetComponents,
+      CallDataOffset, SlotWord);
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+  reloadGasFromMemory();
+#endif
+  reloadMemorySizeFromInstance();
+  return Result;
+}
+
+typename EVMMirBuilder::Operand
+EVMMirBuilder::handleKeccak256CallerConstSlot(Operand OffsetComponents,
+                                              Operand SlotWord) {
+  const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  Operand SizeComponents = createU256ConstOperand(intx::uint256{64});
+  normalizeOffsetWithSize(OffsetComponents, SizeComponents);
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+  syncGasToMemory();
+#endif
+  auto Result = callRuntimeForWithErrorCheck<const uint8_t *, uint64_t,
+                                             const intx::uint256 &>(
+      RuntimeFunctions.GetKeccak256CallerSlot, OffsetComponents, SlotWord);
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+  reloadGasFromMemory();
+#endif
+  reloadMemorySizeFromInstance();
+  return Result;
+}
+
 // ==================== Private Helper Methods ====================
 
 typename EVMMirBuilder::Operand
@@ -6037,6 +6122,13 @@ typename EVMMirBuilder::Operand EVMMirBuilder::callRuntimeForWithErrorCheck(
   MInstruction *CallInstr = createInstruction<ICallInstruction>(
       IsStmt, ReturnType, FuncAddrInst,
       llvm::ArrayRef<MInstruction *>(InstancePtr));
+  if constexpr (std::is_same_v<RetType, const uint8_t *>) {
+    Variable *RetVar = storeInstructionInTemp(CallInstr, CallInstr->getType());
+    emitRuntimeSoftErrorCheck(InstancePtr);
+    MInstruction *RetValue = loadVariable(RetVar);
+    emitRuntimeNullPointerCheck(RetValue);
+    return Operand(RetValue, EVMType::BYTES32);
+  }
   emitRuntimeSoftErrorCheck(InstancePtr);
   return convertCallResult<RetType>(CallInstr);
 }
@@ -6294,6 +6386,13 @@ EVMMirBuilder::Operand EVMMirBuilder::callRuntimeForWithErrorCheck(
   const bool IsStmt = std::is_same_v<RetType, void>;
   MInstruction *CallInstr = createInstruction<ICallInstruction>(
       IsStmt, ReturnType, FuncAddrInst, llvm::ArrayRef<MInstruction *>{Args});
+  if constexpr (std::is_same_v<RetType, const uint8_t *>) {
+    Variable *RetVar = storeInstructionInTemp(CallInstr, CallInstr->getType());
+    emitRuntimeSoftErrorCheck(InstancePtr);
+    MInstruction *RetValue = loadVariable(RetVar);
+    emitRuntimeNullPointerCheck(RetValue);
+    return Operand(RetValue, EVMType::BYTES32);
+  }
   emitRuntimeSoftErrorCheck(InstancePtr);
   return convertCallResult<RetType>(CallInstr);
 }
@@ -6353,6 +6452,20 @@ void EVMMirBuilder::emitRuntimeSoftErrorCheck(MInstruction *InstancePtr) {
 #else
   (void)InstancePtr;
 #endif
+}
+
+void EVMMirBuilder::emitRuntimeNullPointerCheck(MInstruction *PtrValue) {
+  MType *U64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+  MInstruction *Zero = createIntConstInstruction(U64Type, 0);
+  MInstruction *IsNull = createInstruction<CmpInstruction>(
+      false, CmpInstruction::Predicate::ICMP_EQ, U64Type, PtrValue, Zero);
+
+  MBasicBlock *TrapBB = getOrCreateExceptionSetBB(ErrorCode::GasLimitExceeded);
+  MBasicBlock *ContinueBB = createBasicBlock();
+  createInstruction<BrIfInstruction>(true, Ctx, IsNull, TrapBB, ContinueBB);
+  addUniqueSuccessor(TrapBB);
+  addSuccessor(ContinueBB);
+  setInsertBlock(ContinueBB);
 }
 
 MInstruction *EVMMirBuilder::getCurrentInstancePointer() {

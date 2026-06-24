@@ -39,6 +39,15 @@ using VoidWithBytes32UInt64UInt64UInt64Fn = void (*)(
     zen::runtime::EVMInstance *, const uint8_t *, uint64_t, uint64_t, uint64_t);
 using Bytes32WithUInt64UInt64Fn =
     const uint8_t *(*)(zen::runtime::EVMInstance *, uint64_t, uint64_t);
+using Bytes32WithUInt64U256Fn = const uint8_t *(*)(zen::runtime::EVMInstance *,
+                                                   uint64_t,
+                                                   const intx::uint256 &);
+using Bytes32WithUInt64U256U256Fn =
+    const uint8_t *(*)(zen::runtime::EVMInstance *, uint64_t,
+                       const intx::uint256 &, const intx::uint256 &);
+using Bytes32WithUInt64UInt64U256Fn =
+    const uint8_t *(*)(zen::runtime::EVMInstance *, uint64_t, uint64_t,
+                       const intx::uint256 &);
 using VoidFn = void (*)(zen::runtime::EVMInstance *);
 using U256WithU256Fn = const intx::uint256 *(*)(zen::runtime::EVMInstance *,
                                                 const intx::uint256 &);
@@ -139,6 +148,9 @@ struct RuntimeFunctions {
   VoidFn HandleUndefined;
   VoidWithBytes32Fn HandleSelfDestruct;
   Bytes32WithUInt64UInt64Fn GetKeccak256;
+  Bytes32WithUInt64U256U256Fn GetKeccak256TwoWord;
+  Bytes32WithUInt64UInt64U256Fn GetKeccak256CallDataSlot;
+  Bytes32WithUInt64U256Fn GetKeccak256CallerSlot;
   FallbackFn HandleFallback;
 };
 
@@ -257,6 +269,17 @@ void evmHandleInvalid(zen::runtime::EVMInstance *Instance);
 void evmHandleUndefined(zen::runtime::EVMInstance *Instance);
 const uint8_t *evmGetKeccak256(zen::runtime::EVMInstance *Instance,
                                uint64_t Offset, uint64_t Length);
+const uint8_t *evmGetKeccak256TwoWord(zen::runtime::EVMInstance *Instance,
+                                      uint64_t Offset,
+                                      const intx::uint256 &Word0,
+                                      const intx::uint256 &Word1);
+const uint8_t *evmGetKeccak256CallDataSlot(zen::runtime::EVMInstance *Instance,
+                                           uint64_t Offset,
+                                           uint64_t CallDataOffset,
+                                           const intx::uint256 &Slot);
+const uint8_t *evmGetKeccak256CallerSlot(zen::runtime::EVMInstance *Instance,
+                                         uint64_t Offset,
+                                         const intx::uint256 &Slot);
 void evmHandleFallback(zen::runtime::EVMInstance *Instance, uint64_t PC);
 const intx::uint256 *evmGetSLoad(zen::runtime::EVMInstance *Instance,
                                  const intx::uint256 &Index);

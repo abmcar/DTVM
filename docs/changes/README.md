@@ -51,6 +51,7 @@ Typical triggers:
 | 2026-04-11 | [evm-shared-jump-resolution](2026-04-11-evm-shared-jump-resolution/README.md) | Implemented | Light | Extract shared jump target resolution pass into bytecode cache |
 | 2026-04-14 | [handlecompare-bounds-check](2026-04-14-handlecompare-bounds-check/README.md) | Implemented | Light | Add bounds check before macro-fusion read in handleCompare |
 | 2026-04-14 | [from-raw-pointer-safety-checks](2026-04-14-from-raw-pointer-safety-checks/README.md) | Accepted | Light | Add null/alignment safety checks to `from_raw_pointer` in Rust bindings |
+| 2026-05-13 | [evm-ngram-macro-ops](2026-05-13-evm-ngram-macro-ops/README.md) | Implemented | Full | Initial EVM n-gram macro-op lowering and specialized keccak helpers for multipass JIT |
 
 Each active proposal lives in its own subdirectory. Browse `docs/changes/*/README.md`
 to see all current proposals, or use:
