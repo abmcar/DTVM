@@ -549,90 +549,145 @@ void BaseInterpreter::interpret() {
     DISPATCH_NEXT;                                                             \
   } while (0)
 
+// Inline a pure stack op (no host call, no frame change) directly on the
+// loop-local sp, skipping HANDLER_CALL's EVMResource TLS write and the
+// Frame->Sp/Pc memory round-trip. Gas is already charged per chunk and these
+// opcodes never touch the host or change the frame, so no setExecutionContext
+// is needed. The result value is computed by the opcode's <Name>OP functor from
+// opcode_handlers.h, so the arithmetic semantics are single-sourced with the
+// handler / fallback paths; <Name>OP{} is stateless and inlines to the same
+// code as the raw expression. The surrounding stack discipline (the sp<N
+// underflow / overflow checks, the read/write slots, and the sp/Pc advance) is
+// still hand-mirrored from the handlers and the executeXxxNoGas helpers and
+// must be kept in sync with them by hand. The underflow path matches
+// cgoto_error's contract (it flushes sp/Pc from the locals). Under
+// arith-profiling builds fall back to the handler so the Stream A limb tap
+// still fires.
+#ifdef ZEN_ENABLE_EVM_ARITH_PROFILE
+#define DISPATCH_BINARY(Name) HANDLER_CALL(Name##Handler::doExecute())
+#define DISPATCH_UNARY(Name) HANDLER_CALL(Name##Handler::doExecute())
+#define DISPATCH_TERNARY(Name) HANDLER_CALL(Name##Handler::doExecute())
+#else
+#define DISPATCH_BINARY(Name)                                                  \
+  do {                                                                         \
+    if (INTX_UNLIKELY(sp < 2)) {                                               \
+      Context.setStatus(EVMC_STACK_UNDERFLOW);                                 \
+      goto cgoto_error;                                                        \
+    }                                                                          \
+    Frame->Stack[sp - 2] =                                                     \
+        Name##OP{}(Frame->Stack[sp - 1], Frame->Stack[sp - 2]);                \
+    --sp;                                                                      \
+    ++Pc;                                                                      \
+    DISPATCH_NEXT;                                                             \
+  } while (0)
+#define DISPATCH_UNARY(Name)                                                   \
+  do {                                                                         \
+    if (INTX_UNLIKELY(sp < 1)) {                                               \
+      Context.setStatus(EVMC_STACK_UNDERFLOW);                                 \
+      goto cgoto_error;                                                        \
+    }                                                                          \
+    Frame->Stack[sp - 1] = Name##OP{}(Frame->Stack[sp - 1]);                   \
+    ++Pc;                                                                      \
+    DISPATCH_NEXT;                                                             \
+  } while (0)
+#define DISPATCH_TERNARY(Name)                                                 \
+  do {                                                                         \
+    if (INTX_UNLIKELY(sp < 3)) {                                               \
+      Context.setStatus(EVMC_STACK_UNDERFLOW);                                 \
+      goto cgoto_error;                                                        \
+    }                                                                          \
+    Frame->Stack[sp - 3] = Name##OP{}(                                         \
+        Frame->Stack[sp - 1], Frame->Stack[sp - 2], Frame->Stack[sp - 3]);     \
+    sp -= 2;                                                                   \
+    ++Pc;                                                                      \
+    DISPATCH_NEXT;                                                             \
+  } while (0)
+#endif
+
         // Initial dispatch
         goto *cgoto_table[static_cast<uint8_t>(Code[Pc])];
 
-      // ---- Binary arithmetic/logic ops (delegate to doExecute) ----
+      // ---- Binary arithmetic/logic ops (inlined on local sp) ----
       TARGET_ADD:
-        HANDLER_CALL(AddHandler::doExecute());
+        DISPATCH_BINARY(Add);
       TARGET_MUL:
-        HANDLER_CALL(MulHandler::doExecute());
+        DISPATCH_BINARY(Mul);
       TARGET_SUB:
-        HANDLER_CALL(SubHandler::doExecute());
+        DISPATCH_BINARY(Sub);
       TARGET_DIV:
-        HANDLER_CALL(DivHandler::doExecute());
+        DISPATCH_BINARY(Div);
       TARGET_SDIV:
-        HANDLER_CALL(SDivHandler::doExecute());
+        DISPATCH_BINARY(SDiv);
       TARGET_MOD:
-        HANDLER_CALL(ModHandler::doExecute());
+        DISPATCH_BINARY(Mod);
       TARGET_SMOD:
-        HANDLER_CALL(SModHandler::doExecute());
+        DISPATCH_BINARY(SMod);
       TARGET_LT:
-        HANDLER_CALL(LtHandler::doExecute());
+        DISPATCH_BINARY(Lt);
       TARGET_GT:
-        HANDLER_CALL(GtHandler::doExecute());
+        DISPATCH_BINARY(Gt);
       TARGET_SLT:
-        HANDLER_CALL(SltHandler::doExecute());
+        DISPATCH_BINARY(Slt);
       TARGET_SGT:
-        HANDLER_CALL(SgtHandler::doExecute());
+        DISPATCH_BINARY(Sgt);
       TARGET_EQ:
-        HANDLER_CALL(EqHandler::doExecute());
+        DISPATCH_BINARY(Eq);
       TARGET_AND:
-        HANDLER_CALL(AndHandler::doExecute());
+        DISPATCH_BINARY(And);
       TARGET_OR:
-        HANDLER_CALL(OrHandler::doExecute());
+        DISPATCH_BINARY(Or);
       TARGET_XOR:
-        HANDLER_CALL(XorHandler::doExecute());
+        DISPATCH_BINARY(Xor);
       TARGET_SHL:
-        HANDLER_CALL(ShlHandler::doExecute());
+        DISPATCH_BINARY(Shl);
       TARGET_SHR:
-        HANDLER_CALL(ShrHandler::doExecute());
+        DISPATCH_BINARY(Shr);
 
-      // ---- Ternary ops (delegate to doExecute) ----
+      // ---- Ternary ops (inlined on local sp) ----
       TARGET_ADDMOD:
-        HANDLER_CALL(AddmodHandler::doExecute());
+        DISPATCH_TERNARY(Addmod);
       TARGET_MULMOD:
-        HANDLER_CALL(MulmodHandler::doExecute());
+        DISPATCH_TERNARY(Mulmod);
 
-      // ---- Unary ops (delegate to doExecute) ----
+      // ---- Unary ops (inlined on local sp) ----
       TARGET_ISZERO:
-        HANDLER_CALL(IsZeroHandler::doExecute());
+        DISPATCH_UNARY(IsZero);
       TARGET_NOT:
-        HANDLER_CALL(NotHandler::doExecute());
+        DISPATCH_UNARY(Not);
       TARGET_CLZ:
         // Revision gating is already enforced by cgoto_table (opcodes
         // missing from evmc_get_instruction_names_table() map to
         // TARGET_UNDEFINED), so no extra runtime Revision check is needed.
-        HANDLER_CALL(ClzHandler::doExecute());
+        DISPATCH_UNARY(Clz);
 
-      // ---- Stack ops (delegate to NoGas helpers) ----
-      // Pc is only advanced on success so that on error the recorded
-      // Frame->Pc points at the faulting opcode, consistent with the
-      // non-computed-goto interpreter loops.
+      // ---- Stack ops: POP/PUSH0/DUP/SWAP inlined on local sp (logic mirrors
+      // the *NoGas helpers); PUSHX kept on its helper. Pc is only advanced on
+      // success so that on error the Frame->Pc flushed by cgoto_error points at
+      // the faulting opcode.
       TARGET_POP : {
-        Frame->Sp = sp;
-        Frame->Pc = Pc;
-        executePopOpcodeNoGas(Frame, Context);
-        sp = Frame->Sp;
-        if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS))
+        if (INTX_UNLIKELY(sp < 1)) {
+          Context.setStatus(EVMC_STACK_UNDERFLOW);
           goto cgoto_error;
+        }
+        --sp;
         ++Pc;
         DISPATCH_NEXT;
       }
       TARGET_PUSH0 : {
-        if (INTX_UNLIKELY(Revision < EVMC_SHANGHAI)) {
-          Context.setStatus(EVMC_UNDEFINED_INSTRUCTION);
+        // Revision gating is already enforced by cgoto_table (pre-Shanghai
+        // PUSH0 maps to TARGET_UNDEFINED), so no extra runtime Revision check
+        // is needed here, matching TARGET_CLZ.
+        if (INTX_UNLIKELY(sp >= MAXSTACK)) {
+          Context.setStatus(EVMC_STACK_OVERFLOW);
           goto cgoto_error;
         }
-        Frame->Sp = sp;
-        Frame->Pc = Pc;
-        executePush0OpcodeNoGas(Frame, Context);
-        sp = Frame->Sp;
-        if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS))
-          goto cgoto_error;
+        Frame->Stack[sp++] = 0;
         ++Pc;
         DISPATCH_NEXT;
       }
+      // PUSHX stays on the helper: inlining its immediate decode + Pc math
+      // grows interpret() enough to regress jump-heavy code (PUSH->JUMP loops)
+      // via worse code layout, with no offsetting gain measured.
       TARGET_PUSHX : {
         Frame->Sp = sp;
         Frame->Pc = Pc;
@@ -645,24 +700,33 @@ void BaseInterpreter::interpret() {
         DISPATCH_NEXT;
       }
       TARGET_DUPX : {
-        Frame->Sp = sp;
-        Frame->Pc = Pc;
-        const uint8_t OpcodeU8 = static_cast<uint8_t>(Code[Pc]);
-        executeDupOpcodeNoGas(Frame, Context, OpcodeU8);
-        sp = Frame->Sp;
-        if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS))
+        const uint32_t N = static_cast<uint8_t>(Code[Pc]) -
+                           static_cast<uint8_t>(evmc_opcode::OP_DUP1) + 1;
+        if (INTX_UNLIKELY(sp < N)) {
+          Context.setStatus(EVMC_STACK_UNDERFLOW);
           goto cgoto_error;
+        }
+        if (INTX_UNLIKELY(sp >= MAXSTACK)) {
+          Context.setStatus(EVMC_STACK_OVERFLOW);
+          goto cgoto_error;
+        }
+        Frame->Stack[sp] = Frame->Stack[sp - N];
+        ++sp;
         ++Pc;
         DISPATCH_NEXT;
       }
       TARGET_SWAPX : {
-        Frame->Sp = sp;
-        Frame->Pc = Pc;
-        const uint8_t OpcodeU8 = static_cast<uint8_t>(Code[Pc]);
-        executeSwapOpcodeNoGas(Frame, Context, OpcodeU8);
-        sp = Frame->Sp;
-        if (INTX_UNLIKELY(Context.getStatus() != EVMC_SUCCESS))
+        const uint32_t N = static_cast<uint8_t>(Code[Pc]) -
+                           static_cast<uint8_t>(evmc_opcode::OP_SWAP1) + 1;
+        if (INTX_UNLIKELY(sp < N + 1)) {
+          Context.setStatus(EVMC_STACK_UNDERFLOW);
           goto cgoto_error;
+        }
+        intx::uint256 &Top = Frame->Stack[sp - 1];
+        intx::uint256 &Nth = Frame->Stack[sp - 1 - N];
+        const intx::uint256 Tmp = Top;
+        Top = Nth;
+        Nth = Tmp;
         ++Pc;
         DISPATCH_NEXT;
       }
@@ -972,6 +1036,9 @@ void BaseInterpreter::interpret() {
 
 #undef DISPATCH_NEXT
 #undef HANDLER_CALL
+#undef DISPATCH_BINARY
+#undef DISPATCH_UNARY
+#undef DISPATCH_TERNARY
       }
     cgoto_continue_outer:
       continue;
