@@ -22,29 +22,6 @@
 
 namespace zen::runtime {
 
-namespace {
-
-bool hasUnresolvedCompatibleDynamicReturnTrampoline(
-    const COMPILER::EVMAnalyzer &Analyzer) {
-  for (const auto &[EntryPC, Info] : Analyzer.getBlockInfos()) {
-    if (!Info.HasDynamicJump) {
-      continue;
-    }
-    if (Analyzer.getOutgoingCompatibleDynamicJumpShapeClassForBlock(EntryPC) ==
-        0) {
-      continue;
-    }
-    if (!Analyzer
-             .canTransferCompatibleDynamicJumpTargetsWithoutRuntimeMaterialization(
-                 EntryPC)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-} // namespace
-
 EVMModule::EVMModule(Runtime *RT)
     : BaseModule(RT, ModuleType::EVM), Code(nullptr), CodeSize(0) {
   // do nothing
@@ -106,10 +83,14 @@ EVMModule::newEVMModule(Runtime &RT, CodeHolderUniquePtr CodeHolder,
     COMPILER::EVMAnalyzer Analyzer(Rev);
     Analyzer.analyze(reinterpret_cast<const uint8_t *>(Mod->Code),
                      Mod->CodeSize);
-    Mod->ShouldFallbackToInterp =
-        Analyzer.getJITSuitability().ShouldFallback ||
-        hasUnresolvedCompatibleDynamicReturnTrampoline(Analyzer) ||
-        Analyzer.hasUnresolvedNonLiftedDeepEntryRisk();
+    // The two structural whole-module guards that used to sit here
+    // (compatible-dynamic-return trampoline and non-lifted deep-entry risk)
+    // protected an SSA stack-lifting optimization that skipped runtime-stack
+    // materialization at some lifted-block exits. That dynamic-boundary hazard
+    // is now closed at the source (spill-depth fix, forced dynamic-exit
+    // materialization, and lift gating), so only the size/complexity threshold
+    // remains -- it bounds compile cost and is orthogonal to lifting.
+    Mod->ShouldFallbackToInterp = Analyzer.getJITSuitability().ShouldFallback;
 
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
     if (RT.getConfig().EnableProfileGuidedJIT) {

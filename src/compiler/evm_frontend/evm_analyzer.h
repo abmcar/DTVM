@@ -406,56 +406,7 @@ public:
            It->second.HasDeferredEntryMerge;
   }
 
-  bool canTransferLiftedEntryStateWithoutRuntimeMaterialization(
-      uint64_t BlockPC) const {
-    auto It = BlockInfos.find(BlockPC);
-    return It != BlockInfos.end() && It->second.CanLiftStack;
-  }
-
-  bool canTransferCompatibleDynamicJumpTargetsWithoutRuntimeMaterialization(
-      uint64_t BlockPC) const {
-    const std::vector<uint64_t> TargetBlockPCs =
-        getCompatibleDynamicJumpTargetBlocksForSourceBlock(BlockPC);
-    return !TargetBlockPCs.empty() &&
-           std::all_of(
-               TargetBlockPCs.begin(), TargetBlockPCs.end(),
-               [this](uint64_t TargetBlockPC) {
-                 return canTransferLiftedEntryStateWithoutRuntimeMaterialization(
-                     TargetBlockPC);
-               });
-  }
-
   const JITSuitabilityResult &getJITSuitability() const { return JITResult; }
-
-  bool hasUnresolvedNonLiftedDeepEntryRisk() const {
-    for (const auto &[BlockPC, Info] : BlockInfos) {
-      (void)BlockPC;
-      if (Info.CanLiftStack || Info.ResolvedEntryStackDepth >= 0) {
-        continue;
-      }
-
-      const int32_t RequiredEntryDepth = -Info.MinStackHeight;
-      if (RequiredEntryDepth <= 1) {
-        continue;
-      }
-
-      for (uint64_t PredBlockPC : Info.Predecessors) {
-        auto PredIt = BlockInfos.find(PredBlockPC);
-        if (PredIt == BlockInfos.end()) {
-          continue;
-        }
-
-        const BlockInfo &PredInfo = PredIt->second;
-        if (PredInfo.CanLiftStack || PredInfo.ResolvedEntryStackDepth >= 0) {
-          continue;
-        }
-
-        return true;
-      }
-    }
-
-    return false;
-  }
 
   bool hasCanonicalJumpDest(uint64_t PC) const {
     return JumpDestCanonicalPCs.count(PC) != 0;

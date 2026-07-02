@@ -504,4 +504,71 @@ TEST(EVMLiftedStackDepth, HiddenPrefixMaterializingExitMatchesInterp) {
   EXPECT_EQ(Multi.OutputHex, Interp.OutputHex) << "output diverged";
 }
 
+// Deep-entry reproducer (recovered by dropping the whole-module fallback
+// guards). This is a minimal internal-function-call shape: block PC33 is a
+// shared "increment-and-return" subroutine that returns via a stack-passed
+// return PC (SWAP1 then dynamic JUMP), so its return continuations cannot be
+// resolved by any per-block abstract-stack pass; their ResolvedEntryStackDepth
+// stays < 0 and the invalidation cascades along the static CFG.
+//
+// One continuation (PC18) falls through to PC22, whose ADD reads two stack
+// slots -- a static successor of an unresolved-depth block that reads 2 slots.
+// Before this change the analyzer's non-lifted deep-entry predicate fired on
+// exactly this pattern and set ShouldFallbackToInterp=1, routing the whole
+// module to the interpreter. After the dynamic-boundary fix and guard removal
+// the module must JIT-compile and stay byte-identical to the interpreter.
+//
+// Execution: two calls into PC33 turn the initial 0x05 into 0x08 (0x05+1 in the
+// outer frame, 0x07+1 in the inner frame), which is MSTOREd and RETURNed as a
+// single 32-byte word.
+TEST(EVMDeepEntryFallback, InternalCallContinuationJITsAndMatchesInterp) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x08, // PC0  PUSH1 0x08
+      0x60, 0x05, // PC2  PUSH1 0x05  (value threaded through the subroutine)
+      0x60, 0x21, // PC4  PUSH1 0x21  (return PC = 33)
+      0x56,       // PC6  JUMP        (call subroutine at PC33)
+      0xfe,       // PC7  INVALID
+      0x5b,       // PC8  JUMPDEST    (outer return continuation)
+      0x60, 0x00, // PC9  PUSH1 0x00
+      0x60, 0x12, // PC11 PUSH1 0x12  (return PC = 18)
+      0x60, 0x07, // PC13 PUSH1 0x07
+      0x60, 0x21, // PC15 PUSH1 0x21  (call subroutine at PC33)
+      0x56,       // PC17 JUMP
+      0x5b,       // PC18 JUMPDEST    (inner return continuation)
+      0x60, 0x00, // PC19 PUSH1 0x00
+      0x50,       // PC21 POP
+      0x5b,       // PC22 JUMPDEST    (static successor: ADD reads 2 slots)
+      0x01,       // PC23 ADD
+      0x60, 0x00, // PC24 PUSH1 0x00
+      0x52,       // PC26 MSTORE
+      0x60, 0x20, // PC27 PUSH1 0x20
+      0x60, 0x00, // PC29 PUSH1 0x00
+      0xf3,       // PC31 RETURN
+      0xfe,       // PC32 INVALID
+      0x5b,       // PC33 JUMPDEST    (increment-and-return subroutine)
+      0x60, 0x01, // PC34 PUSH1 0x01
+      0x01,       // PC36 ADD
+      0x90,       // PC37 SWAP1
+      0x56,       // PC38 JUMP        (dynamic return via stack PC)
+  };
+  const std::vector<uint8_t> CallData;
+  auto Interp = runEvmBytecode("deep_entry_interp", Bytecode,
+                               common::RunMode::InterpMode, CallData);
+  auto Multi = runEvmBytecode("deep_entry_multipass", Bytecode,
+                              common::RunMode::MultipassMode, CallData);
+#ifdef ZEN_ENABLE_JIT
+  // The whole point of this test: the guards are gone, so this module must now
+  // JIT-compile instead of falling back to the interpreter.
+  EXPECT_TRUE(Multi.JITCompiled)
+      << "deep-entry module did not JIT-compile (guard not removed?)";
+#endif
+  EXPECT_EQ(Interp.Status, EVMC_SUCCESS) << "interpreter did not succeed";
+  EXPECT_EQ(Multi.Status, Interp.Status) << "status diverged";
+  EXPECT_EQ(Multi.OutputHex, Interp.OutputHex) << "output diverged";
+  // Ground truth: 32-byte word holding 0x08, guarding against both engines
+  // agreeing on a wrong value.
+  EXPECT_EQ(Interp.OutputHex,
+            "0000000000000000000000000000000000000000000000000000000000000008");
+}
+
 #endif
