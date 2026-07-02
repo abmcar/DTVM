@@ -1077,6 +1077,27 @@ private:
       CurrentBlockLifted = true;
       materializeLiftedBlockMergeRequests(PC, BlockInfo);
       restoreLiftedBlockLogicalEntryState(PC);
+#ifndef NDEBUG
+      // Debug invariant: a lifted block's logical entry state must be fully
+      // materialized before its body is compiled. StackLifter.hasCompleteEntry-
+      // State() cannot be a hard assertion here: on a single linear pass a
+      // lifted loop header is begun before its back-edge predecessor is
+      // visited, and a lifted JUMPDEST reached only from dead code is never
+      // assigned, so ExpectedIncomingCount legitimately exceeds the arrived
+      // edges. The sound begin-time property is that the entry stack the body
+      // consumes has the resolved full depth with every slot defined.
+      {
+        const std::vector<Operand> LogicalEntry =
+            StackLifter.getLogicalEntryState(PC);
+        ZEN_ASSERT(static_cast<int32_t>(LogicalEntry.size()) ==
+                       std::max(BlockInfo.FullEntryStateDepth, 0) &&
+                   "lifted block entry-state depth mismatch at block begin");
+        for (const Operand &Slot : LogicalEntry) {
+          ZEN_ASSERT(!Slot.isEmpty() && "lifted block entry-state slot is "
+                                        "undefined at block begin");
+        }
+      }
+#endif
       return;
     }
 
@@ -1659,6 +1680,27 @@ private:
     push(Result);
   }
 
+  // Analyzer/codegen dispatch-consistency guard. Codegen emits the all-JUMPDEST
+  // indirect switch exactly when the JUMP/JUMPI dest operand is non-constant
+  // (evm_mir_compiler.cpp handleJump/handleJumpI else-branch). Soundness of
+  // Stage 2 lifting relies on that direction implying the analyzer marked this
+  // block dynamic (HasDynamicJump), which forces every JUMPDEST out of lifting.
+  // If the visitor hands a non-constant dest while the analyzer resolved the
+  // jump statically, the exclusion would not have fired and lifted JUMPDESTs
+  // could be miscompiled: fail the compile loudly instead. This is a hard
+  // check in every build configuration, not a debug-only assertion.
+  void assertDynamicJumpConsistency(const EVMAnalyzer &Analyzer,
+                                    const Operand &Dest) const {
+    if (Dest.isConstant()) {
+      return;
+    }
+    const auto &BlockInfos = Analyzer.getBlockInfos();
+    auto It = BlockInfos.find(CurrentBlockEntryPC);
+    ZEN_ASSERT(It != BlockInfos.end() && It->second.HasDynamicJump &&
+               "codegen emits indirect dispatch for a jump the analyzer did "
+               "not mark dynamic; lifted JUMPDESTs would be unsound");
+  }
+
   void handleJumpOpcode(EVMAnalyzer &Analyzer, Operand Dest) {
     uint64_t SuccPC = 0;
     bool HasLiftedSucc = tryAssignConstantJumpEntryState(Analyzer, Dest);
@@ -1696,6 +1738,7 @@ private:
         assignLiftedEntryStateFromRuntime(Analyzer, SuccPC);
       }
     }
+    assertDynamicJumpConsistency(Analyzer, Dest);
     Builder.handleJump(Dest);
   }
 
@@ -1761,6 +1804,7 @@ private:
         }
       }
     }
+    assertDynamicJumpConsistency(Analyzer, Dest);
     Builder.handleJumpI(Dest, Cond);
     PC = FallthroughPC;
     handleBeginBlock(Analyzer);

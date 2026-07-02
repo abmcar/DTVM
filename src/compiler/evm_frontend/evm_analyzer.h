@@ -1436,7 +1436,104 @@ private:
                                    EntryPC, DispatchSources)) {
         Info.CanLiftStack = false;
       }
+      // A JUMPDEST reachable through the runtime jump table must never lift.
+      // markDynamicJumpTargetCandidates() forces every JUMPDEST to
+      // IsDynamicJumpTargetCandidate whenever the module contains any dynamic
+      // jump (HasDynamicJump is only ever set together with
+      // HasUnknownDynamicJump), so this exclusion equals codegen's indirect
+      // switch-emission reachability: the dispatch wires an edge from every
+      // dynamic jump to every JUMPDEST, and the runtime stack such an edge
+      // carries is not modeled by lifted SSA entry state. This unconditional
+      // rule supersedes the partial dispatch-coverage revocations above.
+      if (Info.IsDynamicJumpTargetCandidate) {
+        Info.CanLiftStack = false;
+      }
+      // Never lift a block any of whose static predecessors has an unresolved
+      // exit depth. Such an edge's runtime-entry assignment is silently skipped
+      // (canAssignLiftedEntryStateFromRuntime bails when ResolvedExitStackDepth
+      // < 0), which would leave the lifted successor with an undefined entry
+      // slot.
+      if (Info.CanLiftStack) {
+        for (uint64_t PredBlockPC : Info.Predecessors) {
+          auto PredIt = BlockInfos.find(PredBlockPC);
+          if (PredIt == BlockInfos.end() ||
+              PredIt->second.ResolvedExitStackDepth < 0) {
+            Info.CanLiftStack = false;
+            break;
+          }
+        }
+      }
     }
+
+    // A block with a hidden live-in prefix (absolute entry depth exceeds the
+    // block's local entry depth) can only be lifted soundly when it never
+    // reconciles its hidden prefix slots with the runtime stack. The lifter
+    // mishandles that reconciliation at a lifted/non-lifted materialization
+    // boundary: a hidden-prefix block that is entered from, or exits to, the
+    // runtime stack miscompiles its stack depth. Such a block is therefore
+    // unlifted when any static predecessor or successor is not lifted, or when
+    // it exits via a dynamic jump (which materializes at runtime). Unlifting a
+    // block turns a hidden-prefix neighbor into a boundary as well, so iterate
+    // to a fixpoint. A hidden-prefix block whose whole static neighborhood
+    // stays lifted keeps its zero-reload SSA entry (pure-SSA island). This is
+    // sound because unlifting only forces additive runtime materialization,
+    // which is always valid, at the cost of cross-boundary SSA residency.
+    bool HiddenBoundaryChanged = true;
+    while (HiddenBoundaryChanged) {
+      HiddenBoundaryChanged = false;
+      for (auto &[BlockPC, Info] : BlockInfos) {
+        (void)BlockPC;
+        if (!Info.CanLiftStack || Info.HiddenLiveInPrefixDepth <= 0) {
+          continue;
+        }
+        bool TouchesRuntime = Info.HasDynamicJump;
+        if (!TouchesRuntime) {
+          for (uint64_t PredBlockPC : Info.Predecessors) {
+            auto It = BlockInfos.find(PredBlockPC);
+            if (It == BlockInfos.end() || !It->second.CanLiftStack) {
+              TouchesRuntime = true;
+              break;
+            }
+          }
+        }
+        if (!TouchesRuntime) {
+          for (uint64_t SuccBlockPC : Info.Successors) {
+            auto It = BlockInfos.find(SuccBlockPC);
+            if (It == BlockInfos.end() || !It->second.CanLiftStack) {
+              TouchesRuntime = true;
+              break;
+            }
+          }
+        }
+        if (TouchesRuntime) {
+          Info.CanLiftStack = false;
+          HiddenBoundaryChanged = true;
+        }
+      }
+    }
+
+#ifndef NDEBUG
+    // Structural invariants over every compiled module (debug builds only; no
+    // release side effects). (a) A lifted block is never an indirect-dispatch
+    // landing. (b) Every static predecessor of a lifted block has a resolved
+    // exit depth equal to the successor's full entry-state depth.
+    for (const auto &Entry : BlockInfos) {
+      const BlockInfo &Info = Entry.second;
+      if (!Info.CanLiftStack) {
+        continue;
+      }
+      ZEN_ASSERT(!Info.IsDynamicJumpTargetCandidate &&
+                 "lifted block is a dynamic-jump target candidate");
+      for (uint64_t PredBlockPC : Info.Predecessors) {
+        auto PredIt = BlockInfos.find(PredBlockPC);
+        ZEN_ASSERT(PredIt != BlockInfos.end() &&
+                   PredIt->second.ResolvedExitStackDepth >= 0 &&
+                   PredIt->second.ResolvedExitStackDepth ==
+                       Info.FullEntryStateDepth &&
+                   "lifted block static predecessor exit depth mismatch");
+      }
+    }
+#endif
   }
 
   void finalizeEntryShapeMetadata() {
