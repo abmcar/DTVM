@@ -874,8 +874,13 @@ private:
     CurBlockLinearPrecheckPlan = BlockLinearPrecheckPlan();
     if (Materialize) {
       if (CurrentBlockLifted) {
-        spillTrackedStackPreservingPrefix(Values,
-                                          CurrentBlockHiddenLiveInPrefixDepth);
+        // The lifted logical stack spans the full absolute entry depth
+        // (FullEntryStateDepth), including any hidden live-in prefix slots, so
+        // the spill base is the stack bottom: prefix 0. Spilling at Hidden*32
+        // would write the stack above its bottom and inflate the recorded
+        // StackSize by the prefix depth, causing spurious overflow traps and
+        // missed underflow traps in later blocks.
+        spillTrackedStackPreservingPrefix(Values, /*PrefixDepth=*/0);
       } else {
         for (const Operand &Opnd : Values) {
           Builder.stackPush(Opnd);
@@ -884,7 +889,6 @@ private:
     }
     InDeadCode = true;
     CurrentBlockLifted = false;
-    CurrentBlockHiddenLiveInPrefixDepth = 0;
   }
 
   bool tryGetConstantJumpSuccessorPC(const EVMAnalyzer &Analyzer,
@@ -1045,7 +1049,6 @@ private:
     }
     const auto &BlockInfo = BlockInfos.at(PC);
     CurrentBlockEntryPC = PC;
-    CurrentBlockHiddenLiveInPrefixDepth = 0;
     registerCurrentBlockPC(PC);
     bool LiftedBlock = isLiftedBlock(PC);
     if (LiftedBlock && !validateLiftedBlockStackBounds(BlockInfo)) {
@@ -1072,8 +1075,6 @@ private:
 
     if (LiftedBlock) {
       CurrentBlockLifted = true;
-      CurrentBlockHiddenLiveInPrefixDepth =
-          static_cast<uint32_t>(std::max(BlockInfo.HiddenLiveInPrefixDepth, 0));
       materializeLiftedBlockMergeRequests(PC, BlockInfo);
       restoreLiftedBlockLogicalEntryState(PC);
       return;
@@ -2409,7 +2410,6 @@ private:
   uint64_t PC = 0;
   uint64_t CurrentBlockEntryPC = 0;
   bool CurrentBlockLifted = false;
-  uint32_t CurrentBlockHiddenLiveInPrefixDepth = 0;
 };
 
 } // namespace COMPILER

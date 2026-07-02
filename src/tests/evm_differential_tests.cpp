@@ -456,4 +456,52 @@ TEST(EVMRangeDifferential, AndU64MaskThenNarrowAddMatchesInterpreter) {
   }
 }
 
+// Regression: a lifted block with a hidden live-in prefix (HiddenLiveInPrefix
+// Depth > 0) that takes a materializing exit must spill its logical stack from
+// the stack bottom, not from byte offset Hidden*32. The lifted logical stack
+// already spans the full absolute entry depth, so an offset spill writes the
+// stack Hidden slots too high and inflates the recorded StackSize by Hidden.
+// The inflated depth suppresses a runtime underflow check in a later block,
+// diverging from the interpreter.
+//
+// Shape (confirmed by analysis): block S at PC12 is lifted with Hidden=1 and
+// exits via a constant JUMP to the non-lifted block T at PC16, which pops two
+// slots while only the single prefix slot is live. The interpreter underflows
+// at the second POP; before the fix the JIT's inflated StackSize lets the
+// underflow check pass and the block runs to STOP, so status diverges.
+TEST(EVMLiftedStackDepth, HiddenPrefixMaterializingExitMatchesInterp) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xAA, // PC0  PUSH1 0xAA  (live-in prefix)
+      0x60, 0x01, // PC2  PUSH1 0x01  (cond = 1, jump taken)
+      0x60, 0x0C, // PC4  PUSH1 0x0C  (S entry = 12)
+      0x57,       // PC6  JUMPI
+      0x60, 0xBB, // PC7  PUSH1 0xBB  (F: second, depth-2 predecessor of T)
+      0x60, 0x10, // PC9  PUSH1 0x10  (T = 16)
+      0x56,       // PC11 JUMP        (F -> T at depth 2)
+      0x5b,       // PC12 JUMPDEST    (S: lifted, Hidden = 1)
+      0x60, 0x10, // PC13 PUSH1 0x10  (T = 16)
+      0x56,       // PC15 JUMP        (S -> T at depth 1, materializing)
+      0x5b,       // PC16 JUMPDEST    (T: non-lifted, pops 2)
+      0x50,       // PC17 POP
+      0x50,       // PC18 POP         (underflow: only 1 slot present)
+      0x00,       // PC19 STOP
+  };
+  const std::vector<uint8_t> CallData;
+  auto Interp = runEvmBytecode("hidden_prefix_interp", Bytecode,
+                               common::RunMode::InterpMode, CallData);
+  auto Multi = runEvmBytecode("hidden_prefix_multipass", Bytecode,
+                              common::RunMode::MultipassMode, CallData);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Multi.JITCompiled) << "multipass did not JIT-compile";
+#endif
+  // The interpreter is the reference: the second POP underflows, so the run
+  // must not report success. If this ever succeeds the test has stopped
+  // exercising the underflow boundary and must be revisited.
+  EXPECT_NE(Interp.Status, EVMC_SUCCESS)
+      << "interpreter unexpectedly succeeded; test no longer exercises the "
+         "underflow boundary";
+  EXPECT_EQ(Multi.Status, Interp.Status) << "status diverged";
+  EXPECT_EQ(Multi.OutputHex, Interp.OutputHex) << "output diverged";
+}
+
 #endif
