@@ -1366,6 +1366,23 @@ private:
       Info.CanLiftStack = EntryKnown && !Info.HasUndefinedInstr &&
                           !Info.HasInconsistentEntryDepth &&
                           !DynamicJumpDestConflict && !NonLiftableDynamicSource;
+      // Never lift a block whose resolved entry depth cannot cover its own
+      // stack pops (ResolvedEntryStackDepth + MinStackHeight < 0). Such a depth
+      // is provably under-resolved: a real block cannot pop below the true
+      // stack bottom. It arises when a static successor inherits its entry
+      // depth from an internal-function return continuation, whose absolute
+      // depth the region uniform-entry heuristic under-counts by the caller's
+      // hidden frame (propagateEntryDepths only propagates along static edges,
+      // so the shortfall carries into every static successor). Lifting such a
+      // block sizes its logical entry state to the too-shallow depth and trips
+      // a spurious EVMStackUnderflow in validateLiftedBlockStackBounds; the
+      // non-lifted path is sound because its runtime stack-depth check reads
+      // the real (deeper) runtime stack. A genuinely underflowing block stays
+      // correct either way -- the runtime check still traps.
+      if (Info.CanLiftStack &&
+          Info.ResolvedEntryStackDepth + Info.MinStackHeight < 0) {
+        Info.CanLiftStack = false;
+      }
       if (Info.CanLiftStack && Info.IsDynamicJumpTargetCandidate &&
           Info.HasDeferredEntryMerge && Info.HiddenLiveInPrefixDepth > 0 &&
           getDynamicJumpSourceBlocksForBlock(EntryPC).empty()) {

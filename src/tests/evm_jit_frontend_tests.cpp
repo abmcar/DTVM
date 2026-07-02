@@ -672,10 +672,16 @@ TEST(EVMJITFrontendAnalyzerTest,
 
 TEST(EVMJITFrontendAnalyzerTest,
      DynamicJumpForcesReachableJumpDestsToFallback) {
+  // The dynamic-jump source block pushes the CALLDATALOAD offset itself so it
+  // does not underflow its resolved entry depth: an underflowing block (whose
+  // ResolvedEntryStackDepth + MinStackHeight < 0) is never lifted, which would
+  // otherwise mask the property under test -- that a *reachable JUMPDEST* is
+  // forced to fall back because it is a dynamic-jump target candidate.
   const std::vector<uint8_t> Bytecode = {
       0x60, 0x01, // PUSH1 0x01
-      0x60, 0x07, // PUSH1 0x07
+      0x60, 0x09, // PUSH1 0x09
       0x57,       // JUMPI
+      0x60, 0x00, // PUSH1 0x00 (CALLDATALOAD offset)
       0x35,       // CALLDATALOAD
       0x56,       // JUMP
       0x5b,       // JUMPDEST
@@ -686,7 +692,7 @@ TEST(EVMJITFrontendAnalyzerTest,
 
   const auto *EntryBlock = findBlock(Analyzer, 0);
   const auto *DynamicJumpBlock = findBlock(Analyzer, 5);
-  const auto *JumpDestBlock = findBlock(Analyzer, 7);
+  const auto *JumpDestBlock = findBlock(Analyzer, 9);
   ASSERT_NE(EntryBlock, nullptr);
   ASSERT_NE(DynamicJumpBlock, nullptr);
   ASSERT_NE(JumpDestBlock, nullptr);
@@ -699,6 +705,36 @@ TEST(EVMJITFrontendAnalyzerTest,
   EXPECT_TRUE(JumpDestBlock->IsJumpDest);
   EXPECT_EQ(JumpDestBlock->ResolvedEntryStackDepth, 0);
   EXPECT_FALSE(JumpDestBlock->CanLiftStack);
+}
+
+TEST(EVMJITFrontendAnalyzerTest, UnderResolvedEntryDepthBlockIsNotLifted) {
+  // A block whose resolved entry depth cannot cover its own stack pops
+  // (ResolvedEntryStackDepth + MinStackHeight < 0) must never be lifted. Here
+  // the JUMPI fallthrough block enters at depth 0 and its ADD pops two slots,
+  // so MinStackHeight is -2. Lifting it would size the logical entry state to
+  // the too-shallow depth and trip a spurious EVMStackUnderflow in
+  // validateLiftedBlockStackBounds. This is the local signature of an
+  // internal-function return continuation whose absolute entry depth the region
+  // uniform-entry heuristic under-counts by the caller's hidden frame; the
+  // non-lifted path stays correct because its runtime stack-depth check reads
+  // the real (deeper) runtime stack.
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01, // PC0 PUSH1 0x01 (cond)
+      0x60, 0x07, // PC2 PUSH1 0x07 (jumpi dest)
+      0x57,       // PC4 JUMPI
+      0x01,       // PC5 ADD (fallthrough block pops two slots at entry depth 0)
+      0x00,       // PC6 STOP
+      0x5b,       // PC7 JUMPDEST
+      0x00        // PC8 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *UnderflowBlock = findBlock(Analyzer, 5);
+  ASSERT_NE(UnderflowBlock, nullptr);
+
+  EXPECT_EQ(UnderflowBlock->ResolvedEntryStackDepth, 0);
+  EXPECT_EQ(UnderflowBlock->MinStackHeight, -2);
+  EXPECT_FALSE(UnderflowBlock->CanLiftStack);
 }
 
 TEST(EVMJITFrontendAnalyzerTest, HiddenEntryPrefixKeepsStaticMergesLiftable) {

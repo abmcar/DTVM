@@ -105,6 +105,44 @@ structural fallback disappears; every such contract JIT-compiles.
    codegen analyzer does (`evm_compiler.cpp:100`), so the guards certify a
    different region model than the one driving the skips. Deleting the
    guards (Stage 3) removes the mismatch.
+7. **Under-resolved entry depth at return-continuation successors (root cause
+   of the recovered lift-ON wallet miscompile).** `propagateEntryDepths`
+   (`evm_analyzer.h:962-991`) flows entry depths only along static edges from
+   the function entry. An internal-function return continuation — a JUMPDEST
+   reached solely by a dynamic return JUMP — receives its entry depth from the
+   dynamic-jump region uniform-entry heuristic, which counts only the slots
+   visible at the return and under-counts the caller's frame. The shortfall
+   carries into every static successor. A successor can then hold
+   `ResolvedEntryStackDepth + MinStackHeight < 0`: it pops below its own
+   resolved bottom, which is impossible for a correctly resolved depth. When
+   such a block is lifted its logical entry state is sized to the too-shallow
+   depth and `validateLiftedBlockStackBounds`
+   (`evm_bytecode_visitor.h:1016-1041`) emits a spurious `EVMStackUnderflow`,
+   reverting the call. Observed on stWalletTest setDailyLimit: continuation
+   JUMPDEST PC1791 (`ResolvedEntryStackDepth=2, HiddenLiveInPrefixDepth=1`)
+   feeds its lifted fallthrough PC1797 (`ResolvedEntryStackDepth=1,
+   MinStackHeight=-3`); four fork_Cancun wallet tests diverged (empty
+   `logs_hash`, wrong `state_root`) once the guards were removed. The existing
+   liftability clauses miss it: PC1797 is not a dynamic-jump target candidate,
+   its predecessor's `ResolvedExitStackDepth` is `>= 0` (consistently wrong,
+   not unresolved), and its `HiddenLiveInPrefixDepth` is 0, so the
+   hidden-prefix fixpoint never inspects it. The non-lifted path is unaffected:
+   it reads the real (deeper) runtime stack via the `-MinStackHeight` stack
+   check (`evm_bytecode_visitor.h:1072-1074`).
+8. **Residual channel (a) surfaces as a verifier fallback, not a miscompile.**
+   After guard removal, modules that hit the null-phi-incoming class of
+   Finding 4 (a lifted merge whose `ExpectedIncomingCount` exceeds its actual
+   MIR predecessor edges, leaving `<pending>` phi slots;
+   `evm_lifted_stack_lifter.h:158-180` `hasCompleteEntryState` still has zero
+   callers) do not miscompile: the always-on `MVerifier`
+   (`compiler.cpp:66-69`) runs before code generation, rejects the invalid MIR
+   ("The number of phi incoming values must match predecessor count",
+   `verifier.cpp:182-184`), and the EVM compile path catches the throw and
+   falls back to the interpreter, so results stay byte-identical (full EEST
+   passes). This class is orthogonal to Finding 7, pre-exists the depth fix
+   (identical verify-fallback counts with and without it), and is fallback-safe
+   rather than unsound. Making these modules actually JIT-compile is the
+   documented follow-up (runtime depth-check + reload machinery).
 
 ## Design
 
@@ -161,6 +199,14 @@ forfeited (see Risks).
 - Add a liftability clause: a block is not lifted if any static predecessor
   has unresolved exit depth (closes the silently-dropped-assignment hole,
   `evm_bytecode_visitor.h:940-948`).
+- Add a liftability clause: a block is not lifted when
+  `ResolvedEntryStackDepth + MinStackHeight < 0` (`finalizeLiftability`,
+  `evm_analyzer.h`). This closes Finding 7: the sum is the local proof that
+  the resolved entry depth is under-resolved (or the block genuinely
+  underflows). In both cases the lifted logical entry state cannot cover the
+  block's pops, and the non-lifted runtime stack check handles the real depth,
+  so unlifting is behaviorally neutral (a genuine underflow still traps via
+  the runtime check).
 - Resurrect `hasCompleteEntryState` as a debug assertion at lifted block
   begin.
 
