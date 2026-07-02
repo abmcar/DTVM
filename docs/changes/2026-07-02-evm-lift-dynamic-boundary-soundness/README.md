@@ -266,6 +266,30 @@ unresolved-entry blocks keep U256 entry ranges (seeding skipped at
 `evm_bytecode_visitor.h:1090-1098`) — extending that is follow-up work, not
 part of this change.
 
+## Stage 5 results (measured 2026-07-03, branch 2c7a135 vs base 5d64911)
+
+Protocol: byte-identical CMake flags (cache-line diff empty), lift-OFF
+production configuration, back-to-back runs in one shell session with
+recorded timestamps, 12 repetitions, median and IQR reported, JIT compile
+time excluded (evmone-bench times only the post-warmup steady state). Raw
+JSON under `bench-results/` in this worktree (untracked).
+
+- evmone main suite, 14 cases: geometric-mean execution time **−65.1%**.
+  Six of the seven recovered kernels improve: sha1_divs −93%, sha1_shifts
+  −91%, structarray_alloc −75%, blake2b_shifts −69%, swap_math −49% to
+  −54%, snailtracer −38%.
+- **weierstrudel regresses +19% to +22%** (both inputs, both configs; delta
+  is 40-50x either side's IQR — real, not noise). JIT-compiled execution of
+  this internal-return-heavy EC contract is slower than the baseline
+  interpreter, matching the Risk-section prediction for return-trampoline
+  code. Follow-up: profile before claiming a universal win; a per-module
+  adaptive policy is possible future work.
+- Micro suite (no fallback population): geomean +0.31%, null within noise.
+- Control blake2b_huff (JIT on both sides): within ±0.4% everywhere — no
+  systematic bias, no unintended codegen change.
+- Fallback rate after the change: 0/36 modules (was 33/36) in both
+  configurations.
+
 ## Impact
 
 ### Affected Modules
