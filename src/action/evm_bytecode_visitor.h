@@ -1672,17 +1672,17 @@ private:
           assignLiftedEntryState(SuccPC, OutgoingStack);
         }
         if (!HasKnownSucc) {
+          // SSA entry-state assignment is additive to materialization: lifted
+          // compatible targets keep their zero-reload SSA entry, while the
+          // materialized runtime stack backs non-lifted and out-of-model
+          // targets.
           assignCompatibleDynamicJumpRegionEntryStates(Analyzer, OutgoingStack);
         }
-        const bool HasCompatibleDynamicTargets =
-            !HasKnownSucc &&
-            !Analyzer
-                 .getCompatibleDynamicJumpTargetBlocksForSourceBlock(
-                     CurrentBlockEntryPC)
-                 .empty();
+        // A dynamic dispatch can land on any JUMPDEST via the jump table, so
+        // the runtime stack must be valid at every dynamic exit; a dynamic dest
+        // (!HasKnownSucc) therefore always materializes.
         const bool NeedsRuntimeMaterialization =
-            (HasKnownSucc && !HasKnownLiftedSucc) ||
-            (!HasKnownSucc && !HasCompatibleDynamicTargets);
+            (HasKnownSucc && !HasKnownLiftedSucc) || !HasKnownSucc;
         finalizeBlockExit(std::move(OutgoingStack),
                           NeedsRuntimeMaterialization);
       } else {
@@ -1736,7 +1736,13 @@ private:
           assignCompatibleDynamicJumpRegionEntryStates(Analyzer, OutgoingStack);
         }
         bool NeedsRuntimeMaterialization = !CanPreassignFallthrough;
-        if (!NeedsRuntimeMaterialization && HasJumpSucc) {
+        if (!HasJumpSucc) {
+          // A dynamic dispatch can land on any JUMPDEST via the jump table, so
+          // the runtime stack must be valid at every dynamic exit. The taken
+          // edge of a dynamic-dest JUMPI forces materialization regardless of
+          // fallthrough liftability; SSA assignment above stays additive.
+          NeedsRuntimeMaterialization = true;
+        } else if (!NeedsRuntimeMaterialization) {
           NeedsRuntimeMaterialization = !CanPreassignJump;
         }
         finalizeBlockExit(std::move(OutgoingStack),
