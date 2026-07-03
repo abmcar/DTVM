@@ -8,6 +8,8 @@
 #include "compiler/mir/instructions.h"
 #include "compiler/mir/module.h"
 
+#include <unordered_set>
+
 namespace COMPILER {
 
 class MVisitor {
@@ -15,6 +17,7 @@ public:
   MVisitor(MModule &M, MFunction &F) : Module(M), CurFunc(&F) {}
 
   virtual void visit() {
+    VisitedExprs.clear();
     for (MBasicBlock *BB : *CurFunc) {
       visitBasicBlock(*BB);
     }
@@ -28,6 +31,24 @@ public:
   }
 
   virtual void visitInstruction(MInstruction &I) {
+    // The MIR expression graph is a DAG: a value produced once can be an
+    // operand of many later instructions (e.g. the shared divide-by-zero
+    // guard / SafeB0 / select limbs emitted per unsigned DIV/MOD, or the
+    // cascading-division intermediates reused across chained divisions).
+    // The operand walk below recurses into every operand, so without
+    // memoisation a reconvergent node is re-walked once per path reaching
+    // it -- exponential in the depth of a data-dependent chain. Visiting
+    // each node at most once per visit() makes the walk linear in the
+    // number of distinct instructions while preserving every check (node
+    // verification is idempotent). See DTVM issue: super-linear JIT compile
+    // time on chained unsigned 256-bit UDIV/UREM.
+    // NOTE: the once-per-node dispatch is baked into this base walk. A future
+    // MVisitor subclass whose semantics require one visit per USE of a shared
+    // node must not rely on this walk as-is (move the memoisation into the
+    // subclass that needs it, currently only MVerifier exists).
+    if (!VisitedExprs.insert(&I).second) {
+      return;
+    }
     switch (I.getKind()) {
     case MInstruction::DREAD:
       visitDreadInstruction(static_cast<DreadInstruction &>(I));
@@ -223,6 +244,11 @@ protected:
   MModule &Module;
   MFunction *CurFunc = nullptr;
   MBasicBlock *CurBB = nullptr;
+
+private:
+  // Set of instructions already dispatched during the current visit() to
+  // dedupe the DAG operand walk (see visitInstruction). Cleared per visit().
+  std::unordered_set<const MInstruction *> VisitedExprs;
 };
 
 } // namespace COMPILER
