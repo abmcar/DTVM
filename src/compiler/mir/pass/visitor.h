@@ -8,7 +8,7 @@
 #include "compiler/mir/instructions.h"
 #include "compiler/mir/module.h"
 
-#include <unordered_set>
+#include "llvm/ADT/DenseSet.h"
 
 namespace COMPILER {
 
@@ -248,7 +248,7 @@ protected:
 private:
   // Set of instructions already dispatched during the current visit() to
   // dedupe the DAG operand walk (see visitInstruction). Cleared per visit().
-  std::unordered_set<const MInstruction *> VisitedExprs;
+  llvm::DenseSet<const MInstruction *> VisitedExprs;
 };
 
 } // namespace COMPILER
