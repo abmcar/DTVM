@@ -737,6 +737,64 @@ TEST(EVMJITFrontendAnalyzerTest, UnderResolvedEntryDepthBlockIsNotLifted) {
   EXPECT_FALSE(UnderflowBlock->CanLiftStack);
 }
 
+TEST(EVMJITFrontendAnalyzerTest,
+     RegionHeuristicDepthTaintPropagatesAndBlocksLifting) {
+  // A block whose resolved entry depth was produced by the dynamic-jump region
+  // uniform-entry heuristic -- rather than by static propagation from the
+  // function entry -- must never be lifted, and the taint must follow the depth
+  // along static edges. Here the entry block ends in a dynamic JUMP, so the
+  // JUMPDEST region behind it (PC4) is not statically reachable and receives
+  // its entry depth from the heuristic. PC4 then flows statically into a plain
+  // continuation block (PC10) that inherits the heuristic depth by propagation.
+  // Both must be tainted and unlifted; PC10 -- a non-JUMPDEST block with a
+  // clean depth-0 entry that would otherwise lift -- is the observable proof
+  // that the taint propagated. Without the taint rule PC10 (entry depth 0,
+  // MinStackHeight 0) would satisfy the >= 0 sanity check and lift with a
+  // heuristic-derived absolute depth.
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x00, // PC0  PUSH1 0x00 (CALLDATALOAD offset)
+      0x35,       // PC2  CALLDATALOAD (dynamic jump value)
+      0x56,       // PC3  JUMP (dynamic; region entry = PC4)
+      0x5b,       // PC4  JUMPDEST (region target, reached only dynamically)
+      0x60, 0x01, // PC5  PUSH1 0x01 (cond)
+      0x60, 0x0b, // PC7  PUSH1 0x0b (jumpi dest = PC11)
+      0x57,       // PC9  JUMPI (fallthrough = PC10, taken = PC11)
+      0x00,       // PC10 STOP (static continuation, inherits heuristic depth)
+      0x5b,       // PC11 JUMPDEST
+      0x00        // PC12 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *RegionJumpDest = findBlock(Analyzer, 4);
+  const auto *Continuation = findBlock(Analyzer, 10);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(RegionJumpDest, nullptr);
+  ASSERT_NE(Continuation, nullptr);
+
+  EXPECT_TRUE(Analyzer.hasUnknownDynamicJumpTargets());
+
+  // The entry block resolves purely from the function entry (seed depth 0), so
+  // it is trusted -- never tainted -- even though it carries the dynamic jump.
+  EXPECT_TRUE(EntryBlock->HasDynamicJump);
+  EXPECT_FALSE(EntryBlock->EntryDepthFromRegionHeuristic);
+
+  // The region JUMPDEST's depth is the heuristic's guess: tainted and unlifted.
+  EXPECT_EQ(RegionJumpDest->ResolvedEntryStackDepth, 0);
+  EXPECT_TRUE(RegionJumpDest->EntryDepthFromRegionHeuristic);
+  EXPECT_FALSE(RegionJumpDest->CanLiftStack);
+
+  // The static successor inherits the tainted depth by propagation. It is not a
+  // JUMPDEST (not a dynamic-jump candidate) and enters at a clean depth 0, so
+  // only the taint keeps it out of lifting.
+  EXPECT_EQ(Continuation->ResolvedEntryStackDepth, 0);
+  EXPECT_EQ(Continuation->MinStackHeight, 0);
+  EXPECT_FALSE(Continuation->IsDynamicJumpTargetCandidate);
+  EXPECT_TRUE(Continuation->EntryDepthFromRegionHeuristic);
+  EXPECT_FALSE(Continuation->CanLiftStack);
+}
+
 TEST(EVMJITFrontendAnalyzerTest, HiddenEntryPrefixKeepsStaticMergesLiftable) {
   const std::vector<uint8_t> Bytecode = {
       0x60, 0xaa, // PUSH1 preserved prefix

@@ -1688,7 +1688,12 @@ private:
   // If the visitor hands a non-constant dest while the analyzer resolved the
   // jump statically, the exclusion would not have fired and lifted JUMPDESTs
   // could be miscompiled: fail the compile loudly instead. This is a hard
-  // check in every build configuration, not a debug-only assertion.
+  // check in every build configuration, not a debug-only assertion. It throws
+  // a Compilation-phase Error rather than aborting: evm_compiler.cpp's compile
+  // path catches std::exception and degrades to interpreter fallback, so a
+  // constant-tracking mismatch logs and falls back instead of killing the
+  // loading process. The invariant is config-independent and the check is
+  // cheap, so it stays active in every build.
   void assertDynamicJumpConsistency(const EVMAnalyzer &Analyzer,
                                     const Operand &Dest) const {
     if (Dest.isConstant()) {
@@ -1696,9 +1701,10 @@ private:
     }
     const auto &BlockInfos = Analyzer.getBlockInfos();
     auto It = BlockInfos.find(CurrentBlockEntryPC);
-    ZEN_ASSERT(It != BlockInfos.end() && It->second.HasDynamicJump &&
-               "codegen emits indirect dispatch for a jump the analyzer did "
-               "not mark dynamic; lifted JUMPDESTs would be unsound");
+    if (It == BlockInfos.end() || !It->second.HasDynamicJump) {
+      throw common::getError(
+          common::ErrorCode::EVMDynamicJumpConsistencyFailed);
+    }
   }
 
   void handleJumpOpcode(EVMAnalyzer &Analyzer, Operand Dest) {
@@ -1722,9 +1728,12 @@ private:
         }
         // A dynamic dispatch can land on any JUMPDEST via the jump table, so
         // the runtime stack must be valid at every dynamic exit; a dynamic dest
-        // (!HasKnownSucc) therefore always materializes.
-        const bool NeedsRuntimeMaterialization =
-            (HasKnownSucc && !HasKnownLiftedSucc) || !HasKnownSucc;
+        // (!HasKnownSucc) therefore always materializes. Since
+        // HasKnownLiftedSucc == HasKnownSucc && isLiftedBlock(SuccPC), the
+        // condition (HasKnownSucc && !HasKnownLiftedSucc) || !HasKnownSucc
+        // reduces to !HasKnownLiftedSucc: materialize unless the dest is a
+        // known lifted successor.
+        const bool NeedsRuntimeMaterialization = !HasKnownLiftedSucc;
         finalizeBlockExit(std::move(OutgoingStack),
                           NeedsRuntimeMaterialization);
       } else {

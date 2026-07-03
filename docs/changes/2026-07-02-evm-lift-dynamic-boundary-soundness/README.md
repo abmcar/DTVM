@@ -143,6 +143,51 @@ structural fallback disappears; every such contract JIT-compiles.
    (identical verify-fallback counts with and without it), and is fallback-safe
    rather than unsound. Making these modules actually JIT-compile is the
    documented follow-up (runtime depth-check + reload machinery).
+9. **`== 0` hole in the under-resolved-depth revocation (correctness).** The
+   Stage 0 rule revoked lifting only when
+   `ResolvedEntryStackDepth + MinStackHeight < 0` (`evm_analyzer.h:1440`). A
+   block whose heuristic depth was under-counted so that
+   `Resolved + MinStackHeight == 0` (and `HiddenLiveInPrefixDepth == 0`) still
+   lifted: its top-relative entry loads read correct values, but a
+   materializing exit `spillTrackedStackPreservingPrefix(Values, 0)`
+   (`evm_mir_compiler.cpp:1221-1255`) sets `StackSize` absolutely to the
+   modeled (too-shallow) depth, truncating the caller's deeper frame slots —
+   e.g. an outer return PC — for a silent JIT/interpreter divergence. The
+   `< 0` bound is a symptom threshold, not the mechanism: any heuristic depth
+   is unproven regardless of sign.
+   **Fix — taint-track heuristic-derived depths.** `BlockInfo` carries
+   `EntryDepthFromRegionHeuristic` (`evm_analyzer.h:168`), set where the region
+   uniform-entry machinery seeds a depth
+   (`resolveDynamicJumpTargetEntryDepths`, `evm_analyzer.h:1281`) and inherited
+   along every static edge during depth propagation
+   (`propagateEntryDepths`, `evm_analyzer.h:1001`). `finalizeLiftability`
+   never lifts a tainted block (`evm_analyzer.h:1426`); only depths propagated
+   purely from the function entry (seed depth 0) stay trusted. Lifting bakes
+   the absolute depth into the exit spill, so a depth with no correctness proof
+   may not back a lifted block; the non-lifted path is depth-free and correct
+   (this branch's own gates). The `< 0` rule is kept as a subsumed sanity net
+   (`evm_analyzer.h:1440`) — the taint rule already excludes every
+   heuristic-derived depth, the sole known source of under-counting.
+10. **Hidden-prefix fixpoint missed the constant-invalid JUMPI exit
+    (robustness).** The hidden-prefix materialization fixpoint keyed its
+    runtime-touch test on `HasDynamicJump`, but the visitor materializes more
+    broadly: a JUMPI whose constant destination is not a valid JUMPDEST leaves
+    `HasDynamicJump` unset (the `OP_JUMPI` handler's implicit else,
+    `evm_analyzer.h:786-789`) yet codegen forces materialization
+    (`tryGetConstantJumpSuccessorPC` returns false → `NeedsRuntimeMaterialization`,
+    `evm_bytecode_visitor.h:1796`). The fixpoint now uses
+    `blockExitMaterializesRuntimeStack` (`evm_analyzer.h:1392, 1514`), true for
+    `HasDynamicJump || (HasConditionalJump && !HasConstantJump)`, matching
+    codegen's materialization truth for a block's jump exit independent of
+    successor liftability.
+11. **Dynamic-jump dispatch-consistency guard aborted in release.**
+    `assertDynamicJumpConsistency` used `ZEN_ASSERT` (`abort()` in release), so
+    an analyzer/visitor constant-tracking mismatch would kill the loading
+    process. It now throws a Compilation-phase Error
+    (`EVMDynamicJumpConsistencyFailed`, `evm_bytecode_visitor.h:1705`); the EVM
+    compile path already catches `std::exception` (`evm_compiler.cpp:150-154`)
+    and degrades to interpreter fallback with a logged error. The check stays
+    active in every build (cheap, config-independent invariant).
 
 ## Design
 

@@ -158,6 +158,14 @@ public:
     int32_t ResolvedEntryStackDepth = -1;
     int32_t ResolvedExitStackDepth = -1;
     int32_t FullEntryStateDepth = -1;
+    // True when ResolvedEntryStackDepth was derived from the dynamic-jump
+    // region uniform-entry heuristic -- either seeded directly by
+    // resolveDynamicJumpTargetEntryDepths or inherited through static
+    // propagation from such a seed. A heuristic depth has no correctness proof
+    // (it can under-count a caller's hidden frame), so tainted blocks are never
+    // lifted; only depths propagated purely from the function entry (seed depth
+    // 0) stay trusted. See finalizeLiftability.
+    bool EntryDepthFromRegionHeuristic = false;
     int32_t HiddenLiveInPrefixDepth = 0;
     bool HasInconsistentEntryDepth = false;
     bool IsEntryStateCompatible = false;
@@ -939,6 +947,7 @@ private:
       InvalidInfo.HasInconsistentEntryDepth = true;
       InvalidInfo.ResolvedEntryStackDepth = -1;
       InvalidInfo.ResolvedExitStackDepth = -1;
+      InvalidInfo.EntryDepthFromRegionHeuristic = false;
       for (uint64_t NextSucc : InvalidInfo.Successors) {
         if (InvalidateVisited.emplace(NextSucc, true).second) {
           InvalidateWorkList.push(NextSucc);
@@ -982,6 +991,15 @@ private:
         }
         if (SuccInfo.ResolvedEntryStackDepth < 0) {
           SuccInfo.ResolvedEntryStackDepth = ExitDepth;
+          // A successor's depth comes entirely from this predecessor's exit
+          // depth, so it is trusted iff the predecessor is. Propagate the
+          // region-heuristic taint along the static edge. A successor first
+          // resolved from a trusted (entry-seeded) predecessor keeps that depth
+          // and is never re-tainted here (the consistency branch below only
+          // checks equality), matching the rule that static-from-entry depths
+          // stay trusted.
+          SuccInfo.EntryDepthFromRegionHeuristic =
+              Info.EntryDepthFromRegionHeuristic;
           WorkList.push(Succ);
         } else if (SuccInfo.ResolvedEntryStackDepth != ExitDepth) {
           invalidateReachableEntryDepths(Succ);
@@ -1256,6 +1274,11 @@ private:
         }
         if (Info.ResolvedEntryStackDepth < 0) {
           Info.ResolvedEntryStackDepth = DynamicJumpEntryDepth;
+          // Taint origin: this depth is the region uniform-entry heuristic's
+          // guess, not a static propagation from the function entry. Mark it so
+          // finalizeLiftability keeps this block (and every static successor
+          // that inherits the depth) out of lifting.
+          Info.EntryDepthFromRegionHeuristic = true;
           WorkList.push(Info.EntryPC);
           continue;
         }
@@ -1349,6 +1372,28 @@ private:
     return false;
   }
 
+  // Mirrors the visitor's runtime-stack materialization decision at a block's
+  // jump exit (evm_bytecode_visitor.h handleJumpOpcode / handleJumpIOpcode).
+  // Codegen writes the runtime stack whenever the taken jump edge is not a
+  // statically known constant JUMPDEST successor:
+  //   - HasDynamicJump: an unresolved dynamic jump dispatches through the
+  //     runtime jump table (JUMP and JUMPI alike).
+  //   - HasConditionalJump && !HasConstantJump: a JUMPI whose constant
+  //     destination is not a valid JUMPDEST. The analyzer records no taken
+  //     successor for it (see the OP_JUMPI handler's implicit else), so the
+  //     static successor loop cannot observe the exit, yet the visitor still
+  //     forces materialization (tryGetConstantJumpSuccessorPC returns false ->
+  //     NeedsRuntimeMaterialization). HasDynamicJump alone misses this shape.
+  // Invariant: blockExitMaterializesRuntimeStack(Info) is true exactly when
+  // codegen emits a runtime stack write at Info's terminator independent of
+  // successor liftability. A hidden-prefix block with such an exit reconciles
+  // its hidden prefix slots against the runtime stack and must be treated as a
+  // materialization boundary in the hidden-prefix fixpoint below.
+  static bool blockExitMaterializesRuntimeStack(const BlockInfo &Info) {
+    return Info.HasDynamicJump ||
+           (Info.HasConditionalJump && !Info.HasConstantJump);
+  }
+
   void finalizeLiftability() {
     // Computed once and reused across blocks; independent of the per-block
     // loop.
@@ -1366,19 +1411,31 @@ private:
       Info.CanLiftStack = EntryKnown && !Info.HasUndefinedInstr &&
                           !Info.HasInconsistentEntryDepth &&
                           !DynamicJumpDestConflict && !NonLiftableDynamicSource;
-      // Never lift a block whose resolved entry depth cannot cover its own
-      // stack pops (ResolvedEntryStackDepth + MinStackHeight < 0). Such a depth
-      // is provably under-resolved: a real block cannot pop below the true
-      // stack bottom. It arises when a static successor inherits its entry
-      // depth from an internal-function return continuation, whose absolute
-      // depth the region uniform-entry heuristic under-counts by the caller's
-      // hidden frame (propagateEntryDepths only propagates along static edges,
-      // so the shortfall carries into every static successor). Lifting such a
-      // block sizes its logical entry state to the too-shallow depth and trips
-      // a spurious EVMStackUnderflow in validateLiftedBlockStackBounds; the
-      // non-lifted path is sound because its runtime stack-depth check reads
-      // the real (deeper) runtime stack. A genuinely underflowing block stays
-      // correct either way -- the runtime check still traps.
+      // Never lift a block whose resolved entry depth came from the dynamic-
+      // jump region uniform-entry heuristic (directly seeded or inherited by
+      // static propagation from such a seed). Lifting bakes the block's
+      // absolute entry depth into its materializing exit spill
+      // (spillTrackedStackPreservingPrefix sets StackSize absolutely to the
+      // modeled depth), so a heuristic depth that under-counts a caller's
+      // hidden frame -- e.g. an internal-function return continuation -- would
+      // truncate the caller's deeper frame slots and silently diverge from the
+      // interpreter. Only depths propagated purely from the function entry
+      // (seed depth 0) carry a correctness proof, so only they may lift; the
+      // non-lifted path is depth-free and correct (established by this branch's
+      // materialization gates).
+      if (Info.CanLiftStack && Info.EntryDepthFromRegionHeuristic) {
+        Info.CanLiftStack = false;
+      }
+      // Subsumed sanity check: a block whose resolved entry depth cannot cover
+      // its own stack pops (ResolvedEntryStackDepth + MinStackHeight < 0) is
+      // provably under-resolved -- a real block cannot pop below the true stack
+      // bottom. The taint rule above already excludes every heuristic-derived
+      // depth (the sole known source of such under-counting), so this now fires
+      // only for a hypothetical residual static under-resolution. Kept as a
+      // defensive net: lifting an under-resolved block would trip a spurious
+      // EVMStackUnderflow in validateLiftedBlockStackBounds, while the
+      // non-lifted path stays correct because its runtime stack-depth check
+      // reads the real (deeper) runtime stack.
       if (Info.CanLiftStack &&
           Info.ResolvedEntryStackDepth + Info.MinStackHeight < 0) {
         Info.CanLiftStack = false;
@@ -1454,7 +1511,7 @@ private:
         if (!Info.CanLiftStack || Info.HiddenLiveInPrefixDepth <= 0) {
           continue;
         }
-        bool TouchesRuntime = Info.HasDynamicJump;
+        bool TouchesRuntime = blockExitMaterializesRuntimeStack(Info);
         if (!TouchesRuntime) {
           for (uint64_t PredBlockPC : Info.Predecessors) {
             auto It = BlockInfos.find(PredBlockPC);
