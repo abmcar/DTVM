@@ -1,6 +1,7 @@
 # Change: Remove the EVM multipass whole-module interpreter fallback by making SSA-lift dynamic boundaries sound
 
-- **Status**: Proposed (design approved in review session 2026-07-02)
+- **Status**: Implemented (all stages landed and gated 2026-07-03; both build
+  configurations green on the full suite matrix)
 - **Date**: 2026-07-02
 - **Tier**: Full
 - **Baseline**: main HEAD `5d64911`
