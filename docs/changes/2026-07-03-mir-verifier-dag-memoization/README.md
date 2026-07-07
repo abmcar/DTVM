@@ -34,6 +34,17 @@ median of 3 fresh-VM runs, x86-64 Linux, 2026-07-03):
 | 20 | not practical (multi-second) | 6.5 ms | — | — | — |
 | 32 | not practical | 10.0 ms | — | — | — |
 
+![MIR-verifier compile time vs dependent-chain depth: before super-linear, after linear](figures/compile-scaling.svg)
+
+*Figure: MIR-verifier compile time vs dependent-chain depth (lower is better,
+log-y). Before the fix, DIV compile time grows super-linearly (3.3 → 17.7 →
+791.6 ms, then multi-second at depth 20 and impractical at depth 32 — no finite
+value recorded, shown as an off-scale break). Memoizing the walk makes it linear
+(3.2 → 10.0 ms across depths 8–32), tracking the already-linear SDIV control.
+Because a straight line on a log-y axis would mean exponential growth, the
+after-curve's linearity is shown in the linear-axes inset. Median of 3 fresh-VM
+runs; gas byte-identical, steady-state throughput unchanged.*
+
 Signed SDIV/SMOD lower to a straight-line runtime call with no reconvergent
 DAG, which is why they stay linear on the unfixed baseline; after the fix,
 DIV/MOD track the SDIV curve.
