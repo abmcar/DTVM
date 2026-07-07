@@ -601,6 +601,7 @@ private:
 
         case OP_MSTORE8: {
           Builder.noteMemoryOpcodeInBlock(Opcode, PC);
+          maybePrepareLinearBlockMemoryPrecheck(Opcode);
           Operand Addr = pop();
           Operand Value = pop();
           Builder.handleMStore8(Addr, Value);
@@ -1337,6 +1338,47 @@ private:
     return Plan;
   }
 
+  BlockLinearPrecheckPlan analyzeLinearMstore8DirectMemoryBlockPrecheck(
+      const Byte *Bytecode, size_t BytecodeSize, uint64_t EntryPC) {
+    uint64_t ScanPC = 0;
+    if (!consumeLinearRecurrencePrefix(Bytecode, BytecodeSize, EntryPC,
+                                       ScanPC)) {
+      return {};
+    }
+
+    uint64_t CoveredDirectOps = 0;
+    while (ScanPC < BytecodeSize) {
+      evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[ScanPC]);
+      if (Opcode == OP_JUMPDEST || isBlockTerminatorOpcode(Opcode)) {
+        break;
+      }
+
+      uint64_t MotifPC = ScanPC;
+      if (!consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP1) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP1) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_MSTORE8) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP2) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_ADD)) {
+        return {};
+      }
+
+      ++CoveredDirectOps;
+      ScanPC = MotifPC;
+    }
+
+    if (CoveredDirectOps < 2) {
+      return {};
+    }
+
+    BlockLinearPrecheckPlan Plan;
+    Plan.Eligible = true;
+    Plan.CoveredOpcode = OP_MSTORE8;
+    Plan.AccessWidth = 1;
+    Plan.CoveredDirectOps = CoveredDirectOps;
+    Plan.StrideStackIndex = 3;
+    return Plan;
+  }
+
   BlockLinearPrecheckPlan analyzeLinearDirectMemoryBlockPrecheck(
       const Byte *Bytecode, size_t BytecodeSize, uint64_t EntryPC) {
     BlockLinearPrecheckPlan Plan = analyzeLinearMloadDirectMemoryBlockPrecheck(
@@ -1344,8 +1386,13 @@ private:
     if (Plan.Eligible) {
       return Plan;
     }
-    return analyzeLinearMstoreDirectMemoryBlockPrecheck(Bytecode, BytecodeSize,
+    Plan = analyzeLinearMstoreDirectMemoryBlockPrecheck(Bytecode, BytecodeSize,
                                                         EntryPC);
+    if (Plan.Eligible) {
+      return Plan;
+    }
+    return analyzeLinearMstore8DirectMemoryBlockPrecheck(Bytecode, BytecodeSize,
+                                                         EntryPC);
   }
 
   void maybePrepareLinearBlockMemoryPrecheck(evmc_opcode Opcode) {

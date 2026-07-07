@@ -386,8 +386,17 @@ public:
 
   void beginMemoryCompileBlock(uint64_t) {}
   void setMemoryCompileBlockConstPrecheckPlan(uint64_t, uint64_t) {}
-  void setMemoryCompileBlockLinearPrecheckPlan(uint64_t, uint64_t, bool) {}
-  void prepareLinearBlockMemoryPrecheck(Operand) {}
+  void setMemoryCompileBlockLinearPrecheckPlan(uint64_t AccessWidth,
+                                               uint64_t CoveredDirectOps,
+                                               bool ValueEqualsFirstAddr) {
+    LinearPrecheckPlanCount++;
+    LastLinearPrecheckAccessWidth = AccessWidth;
+    LastLinearPrecheckCoveredDirectOps = CoveredDirectOps;
+    LastLinearPrecheckValueEqualsFirstAddr = ValueEqualsFirstAddr;
+  }
+  void prepareLinearBlockMemoryPrecheck(Operand) {
+    LinearPrecheckPrepareCount++;
+  }
   void noteMemoryOpcodeInBlock(evmc_opcode, uint64_t) {}
   void noteHelperOpcodeInBlock(evmc_opcode, uint64_t) {}
   void endMemoryCompileBlock() {}
@@ -455,6 +464,24 @@ public:
     return RuntimeStack.back().resolvedValue();
   }
 
+  uint32_t linearPrecheckPlanCount() const { return LinearPrecheckPlanCount; }
+
+  uint64_t lastLinearPrecheckAccessWidth() const {
+    return LastLinearPrecheckAccessWidth;
+  }
+
+  uint64_t lastLinearPrecheckCoveredDirectOps() const {
+    return LastLinearPrecheckCoveredDirectOps;
+  }
+
+  bool lastLinearPrecheckValueEqualsFirstAddr() const {
+    return LastLinearPrecheckValueEqualsFirstAddr;
+  }
+
+  uint32_t linearPrecheckPrepareCount() const {
+    return LinearPrecheckPrepareCount;
+  }
+
   bool Trapped = false;
   bool Undefined = false;
 
@@ -478,6 +505,11 @@ private:
   std::vector<Operand> RuntimeStack;
   MockOperand::U256Value LastPushValue = {0, 0, 0, 0};
   bool HasLastPushValue = false;
+  uint32_t LinearPrecheckPlanCount = 0;
+  uint64_t LastLinearPrecheckAccessWidth = 0;
+  uint64_t LastLinearPrecheckCoveredDirectOps = 0;
+  bool LastLinearPrecheckValueEqualsFirstAddr = false;
+  uint32_t LinearPrecheckPrepareCount = 0;
 
 #undef MOCK_OPERAND_STUB
 #undef MOCK_VOID_STUB
@@ -1138,6 +1170,44 @@ TEST(EVMJITFrontendVisitorTest, FusesLinearMStoreNextMotifIntoMeteredRange) {
   EXPECT_EQ(Builder.lastMStore().Value[0], 0x40U);
   EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
   EXPECT_EQ(Builder.topStackValue()[0], 0x60U);
+}
+
+TEST(EVMJITFrontendVisitorTest, PlansLinearMStore8NextMotifMemoryPrecheck) {
+  const std::vector<uint8_t> Bytecode = {
+      0x5f, // PUSH0 calldata offset for stride
+      0x35, // CALLDATALOAD
+      0x5f, // PUSH0 current
+      0x80, // DUP1
+      0x80, // DUP1
+      0x53, // MSTORE8
+      0x81, // DUP2
+      0x01, // ADD
+      0x80, // DUP1
+      0x80, // DUP1
+      0x53, // MSTORE8
+      0x81, // DUP2
+      0x01, // ADD
+      0x00  // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.linearPrecheckPlanCount(), 1U);
+  EXPECT_EQ(Builder.lastLinearPrecheckAccessWidth(), 1U);
+  EXPECT_EQ(Builder.lastLinearPrecheckCoveredDirectOps(), 2U);
+  EXPECT_FALSE(Builder.lastLinearPrecheckValueEqualsFirstAddr());
+  EXPECT_EQ(Builder.linearPrecheckPrepareCount(), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE8), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
 }
 
 TEST(EVMJITFrontendVisitorTest, FusesCallerSlotKeccakIntoMeteredRange) {

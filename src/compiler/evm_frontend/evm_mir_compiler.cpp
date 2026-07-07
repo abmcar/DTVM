@@ -4967,18 +4967,29 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
   const bool OffsetWasConst = AddrComponents.isConstU64();
   const uint64_t OriginalConstOffset =
       OffsetWasConst ? AddrComponents.getConstValue()[0] : 0;
-  const bool OffsetKnownU64 = OffsetWasConst;
+  bool OffsetKnownU64 = OffsetWasConst;
   const bool CanUseConstBaseDispPath =
       OffsetWasConst &&
       (ConstAddr = OriginalConstOffset) <= static_cast<uint64_t>(INT32_MAX);
-  normalizeOperandU64(AddrComponents);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemory();
 #endif
   MType *I64Type = &Ctx.I64Type;
 
-  U256Inst AddrParts = extractU256Operand(AddrComponents);
-  MInstruction *Offset = AddrParts[0];
+  const bool CanUseLinearU64AddrFastPath =
+      CurBlockLinearPrecheckPlan.Active &&
+      CurBlockLinearPrecheckPlan.CoveredDirectOpsRemaining != 0;
+  MInstruction *Offset = nullptr;
+  bool UsedLinearPrecheck = false;
+  if (CanUseLinearU64AddrFastPath) {
+    Offset = extractKnownU64LowOperand(AddrComponents);
+    UsedLinearPrecheck = tryConsumeLinearBlockMemoryPrecheck(Offset, nullptr);
+    OffsetKnownU64 = OffsetKnownU64 || UsedLinearPrecheck;
+  }
+  if (!UsedLinearPrecheck) {
+    normalizeOperandU64(AddrComponents);
+    Offset = extractKnownU64LowOperand(AddrComponents);
+  }
   U256Inst ValueParts = extractU256Operand(ValueComponents);
 
   MInstruction *SizeConst = createIntConstInstruction(I64Type, 1);
@@ -4993,7 +5004,8 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
   MInstruction *Overflow = createInstruction<CmpInstruction>(
       false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
       Offset);
-  bool UsedSharedPrecheck = tryConsumeConstBlockMemoryPrecheck();
+  bool UsedSharedPrecheck =
+      UsedLinearPrecheck || tryConsumeConstBlockMemoryPrecheck();
   noteSmallFrameMemoryOp(SmallFrameMemoryOp::MStore8, OffsetWasConst,
                          OriginalConstOffset, OffsetKnownU64, 1,
                          UsedSharedPrecheck);
