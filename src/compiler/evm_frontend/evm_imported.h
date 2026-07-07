@@ -127,6 +127,7 @@ struct RuntimeFunctions {
   U256WithU256Fn GetTLoad;
   VoidWithU256U256Fn SetTStore;
   VoidWithUInt64UInt64UInt64Fn SetCallDataCopy;
+  VoidWithBytes32Fn TouchExtCodeCopyAccount;
   VoidWithBytes32UInt64UInt64UInt64Fn SetExtCodeCopy;
   UInt64WithUInt64UInt64UInt64Fn SetReturnDataCopy;
   VoidWithUInt64Fn ExpandMemoryNoGas;
@@ -218,6 +219,8 @@ const uint8_t *evmGetBlobHash(zen::runtime::EVMInstance *Instance,
 const intx::uint256 *evmGetBlobBaseFee(zen::runtime::EVMInstance *Instance);
 void evmSetCallDataCopy(zen::runtime::EVMInstance *Instance,
                         uint64_t DestOffset, uint64_t Offset, uint64_t Size);
+void evmTouchExtCodeCopyAccount(zen::runtime::EVMInstance *Instance,
+                                const uint8_t *Address);
 void evmSetExtCodeCopy(zen::runtime::EVMInstance *Instance,
                        const uint8_t *Address, uint64_t DestOffset,
                        uint64_t Offset, uint64_t Size);

@@ -5047,6 +5047,11 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
 void EVMMirBuilder::handleMCopy(Operand DestAddrComponents,
                                 Operand SrcAddrComponents,
                                 Operand LengthComponents) {
+  if (LengthComponents.isConstU64() &&
+      LengthComponents.getConstValue()[0] == 0) {
+    return;
+  }
+
   MType *I64Type = &Ctx.I64Type;
   MInstruction *Zero = createIntConstInstruction(I64Type, 0);
 
@@ -6749,6 +6754,18 @@ void EVMMirBuilder::handleExtCodeCopy(Operand AddressComponents,
                                       Operand OffsetComponents,
                                       Operand SizeComponents) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  if (SizeComponents.isConstU64() && SizeComponents.getConstValue()[0] == 0) {
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+    syncGasToMemory();
+#endif
+    callRuntimeForWithErrorCheck<void, const uint8_t *>(
+        RuntimeFunctions.TouchExtCodeCopyAccount, AddressComponents);
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+    reloadGasFromMemory();
+#endif
+    return;
+  }
+
   // Use max uint64_t value if the offset/size is not 64-bit, because the
   // extcodecopy will fill zeros when offset is beyond code size or handle large
   // size properly.

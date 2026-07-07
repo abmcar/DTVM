@@ -216,6 +216,7 @@ const RuntimeFunctions &getRuntimeFunctionTable() {
       .GetTLoad = &evmGetTLoad,
       .SetTStore = &evmSetTStore,
       .SetCallDataCopy = &evmSetCallDataCopy,
+      .TouchExtCodeCopyAccount = &evmTouchExtCodeCopyAccount,
       .SetExtCodeCopy = &evmSetExtCodeCopy,
       .SetReturnDataCopy = &evmSetReturnDataCopy,
       .ExpandMemoryNoGas = &evmExpandMemoryNoGas,
@@ -671,6 +672,21 @@ void evmSetCallDataCopy(zen::runtime::EVMInstance *Instance,
   // Fill remaining bytes with zeros if needed
   if (Size > CopySize) {
     std::memset(MemoryBase + DestOffset + CopySize, 0, Size - CopySize);
+  }
+}
+
+void evmTouchExtCodeCopyAccount(zen::runtime::EVMInstance *Instance,
+                                const uint8_t *Address) {
+  const zen::runtime::EVMModule *Module = Instance->getModule();
+  ZEN_ASSERT(Module && Module->Host);
+  evmc::address Addr = loadAddressFromLE(Address);
+
+  evmc_revision Rev = Instance->getRevision();
+  if (Rev >= EVMC_BERLIN &&
+      Module->Host->access_account(Addr) == EVMC_ACCESS_COLD) {
+    if (!Instance->chargeGas(zen::evm::ADDITIONAL_COLD_ACCOUNT_ACCESS_COST)) {
+      return;
+    }
   }
 }
 
