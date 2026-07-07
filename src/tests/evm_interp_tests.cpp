@@ -651,6 +651,22 @@ TEST(EVMMultipassKeccakHelperTest,
 }
 
 TEST(EVMMultipassKeccakHelperTest,
+     CallDataConstSlotHelperMatchesInterpreterWithNonZeroStagingBase) {
+  auto BytecodeBuf =
+      zen::utils::fromHex("6000356040526007606052604060402060005260206000f3");
+  ASSERT_TRUE(BytecodeBuf)
+      << "Failed to parse calldata-slot nonzero-base bytecode";
+
+  const std::vector<uint8_t> CallData = makeUint256Calldata(0x1234);
+  const std::string ExpectedDigest =
+      computeTwoWordKeccakHex(CallData, makeUint256Calldata(7));
+
+  expectInterpMatchesMultipass("keccak_calldata_const_slot_nonzero_base",
+                               *BytecodeBuf, CallData, EVMC_SUCCESS,
+                               ExpectedDigest);
+}
+
+TEST(EVMMultipassKeccakHelperTest,
      CallerConstSlotHelperPreservesMemoryExpansionFailureSemantics) {
   auto BytecodeBuf = zen::utils::fromHex(
       "3362ffffe0526005630100000052604062ffffe02060005260206000f3");
@@ -659,6 +675,18 @@ TEST(EVMMultipassKeccakHelperTest,
 
   expectInterpMatchesMultipass("keccak_caller_const_slot_mem_oog", *BytecodeBuf,
                                {}, EVMC_OUT_OF_GAS);
+}
+
+TEST(EVMMultipassKeccakHelperTest,
+     CallDataConstSlotHelperPreservesMemoryExpansionFailureSemantics) {
+  auto BytecodeBuf = zen::utils::fromHex(
+      "60003562ffffe0526005630100000052604062ffffe02060005260206000f3");
+  ASSERT_TRUE(BytecodeBuf)
+      << "Failed to parse calldata-slot memory edge bytecode";
+
+  expectInterpMatchesMultipass("keccak_calldata_const_slot_mem_oog",
+                               *BytecodeBuf, makeUint256Calldata(0x1234),
+                               EVMC_OUT_OF_GAS);
 }
 
 TEST(EVMMultipassJumpRegressionTest, InvalidJumpDestStillMatchesInterpreter) {

@@ -1646,6 +1646,7 @@ private:
   MInstruction *getMemorySize();
   void reloadMemorySizeFromInstance();
   void expandMemoryIR(MInstruction *RequiredSize, MInstruction *Overflow);
+  void preExpandKeccakTwoWordMemory(Operand &OffsetComponents);
   void chargeDynamicGasIR(MInstruction *GasCost);
   void chargeMemoryExpansionGasIR(MInstruction *CurrentSize,
                                   MInstruction *NewSize);

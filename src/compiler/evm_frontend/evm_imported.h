@@ -150,8 +150,11 @@ struct RuntimeFunctions {
   VoidWithBytes32Fn HandleSelfDestruct;
   Bytes32WithUInt64UInt64Fn GetKeccak256;
   Bytes32WithUInt64U256U256Fn GetKeccak256TwoWord;
+  Bytes32WithUInt64U256U256Fn GetKeccak256TwoWordNoExpand;
   Bytes32WithUInt64UInt64U256Fn GetKeccak256CallDataSlot;
+  Bytes32WithUInt64UInt64U256Fn GetKeccak256CallDataSlotNoExpand;
   Bytes32WithUInt64U256Fn GetKeccak256CallerSlot;
+  Bytes32WithUInt64U256Fn GetKeccak256CallerSlotNoExpand;
   FallbackFn HandleFallback;
 };
 
@@ -276,13 +279,24 @@ const uint8_t *evmGetKeccak256TwoWord(zen::runtime::EVMInstance *Instance,
                                       uint64_t Offset,
                                       const intx::uint256 &Word0,
                                       const intx::uint256 &Word1);
+const uint8_t *
+evmGetKeccak256TwoWordNoExpand(zen::runtime::EVMInstance *Instance,
+                               uint64_t Offset, const intx::uint256 &Word0,
+                               const intx::uint256 &Word1);
 const uint8_t *evmGetKeccak256CallDataSlot(zen::runtime::EVMInstance *Instance,
                                            uint64_t Offset,
                                            uint64_t CallDataOffset,
                                            const intx::uint256 &Slot);
+const uint8_t *
+evmGetKeccak256CallDataSlotNoExpand(zen::runtime::EVMInstance *Instance,
+                                    uint64_t Offset, uint64_t CallDataOffset,
+                                    const intx::uint256 &Slot);
 const uint8_t *evmGetKeccak256CallerSlot(zen::runtime::EVMInstance *Instance,
                                          uint64_t Offset,
                                          const intx::uint256 &Slot);
+const uint8_t *
+evmGetKeccak256CallerSlotNoExpand(zen::runtime::EVMInstance *Instance,
+                                  uint64_t Offset, const intx::uint256 &Slot);
 void evmHandleFallback(zen::runtime::EVMInstance *Instance, uint64_t PC);
 const intx::uint256 *evmGetSLoad(zen::runtime::EVMInstance *Instance,
                                  const intx::uint256 &Index);

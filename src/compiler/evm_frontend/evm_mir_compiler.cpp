@@ -5513,26 +5513,24 @@ typename EVMMirBuilder::Operand
 EVMMirBuilder::handleKeccak256TwoWord(Operand OffsetComponents, Operand Word0,
                                       Operand Word1) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  Operand SizeComponents = createU256ConstOperand(intx::uint256{64});
-  normalizeOffsetWithSize(OffsetComponents, SizeComponents);
+  preExpandKeccakTwoWordMemory(OffsetComponents);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemory();
 #endif
   auto Result = callRuntimeForWithErrorCheck<
       const uint8_t *, uint64_t, const intx::uint256 &, const intx::uint256 &>(
-      RuntimeFunctions.GetKeccak256TwoWord, OffsetComponents, Word0, Word1);
+      RuntimeFunctions.GetKeccak256TwoWordNoExpand, OffsetComponents, Word0,
+      Word1);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
   return Result;
 }
 
 typename EVMMirBuilder::Operand EVMMirBuilder::handleKeccak256CallDataConstSlot(
     Operand OffsetComponents, Operand CallDataOffset, Operand SlotWord) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  Operand SizeComponents = createU256ConstOperand(intx::uint256{64});
-  normalizeOffsetWithSize(OffsetComponents, SizeComponents);
+  preExpandKeccakTwoWordMemory(OffsetComponents);
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
   normalizeOperandU64(CallDataOffset, &Non64Value);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
@@ -5540,12 +5538,11 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleKeccak256CallDataConstSlot(
 #endif
   auto Result = callRuntimeForWithErrorCheck<const uint8_t *, uint64_t,
                                              uint64_t, const intx::uint256 &>(
-      RuntimeFunctions.GetKeccak256CallDataSlot, OffsetComponents,
+      RuntimeFunctions.GetKeccak256CallDataSlotNoExpand, OffsetComponents,
       CallDataOffset, SlotWord);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
   return Result;
 }
 
@@ -5553,18 +5550,17 @@ typename EVMMirBuilder::Operand
 EVMMirBuilder::handleKeccak256CallerConstSlot(Operand OffsetComponents,
                                               Operand SlotWord) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  Operand SizeComponents = createU256ConstOperand(intx::uint256{64});
-  normalizeOffsetWithSize(OffsetComponents, SizeComponents);
+  preExpandKeccakTwoWordMemory(OffsetComponents);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemory();
 #endif
   auto Result = callRuntimeForWithErrorCheck<const uint8_t *, uint64_t,
                                              const intx::uint256 &>(
-      RuntimeFunctions.GetKeccak256CallerSlot, OffsetComponents, SlotWord);
+      RuntimeFunctions.GetKeccak256CallerSlotNoExpand, OffsetComponents,
+      SlotWord);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
   return Result;
 }
 
@@ -6342,6 +6338,37 @@ void EVMMirBuilder::normalizeOffsetWithSize(Operand &Offset, Operand &Size) {
       false, I64Type, IsSizeZero, Zero, OffsetParts[0]);
   U256Inst NewVal = {SelectedLow, Zero, Zero, Zero};
   Offset = Operand(NewVal, EVMType::UINT256);
+}
+
+void EVMMirBuilder::preExpandKeccakTwoWordMemory(Operand &OffsetComponents) {
+  const bool OffsetWasConstU64 = OffsetComponents.isConstU64();
+  const uint64_t ConstOffset =
+      OffsetWasConstU64 ? OffsetComponents.getConstValue()[0] : 0;
+
+  MType *I64Type = &Ctx.I64Type;
+  if (OffsetWasConstU64) {
+    constexpr uint64_t KeccakTwoWordLength = 64;
+    const bool Overflowed = ConstOffset > std::numeric_limits<uint64_t>::max() -
+                                              KeccakTwoWordLength;
+    MInstruction *RequiredSize = createIntConstInstruction(
+        I64Type, Overflowed ? 0 : ConstOffset + KeccakTwoWordLength);
+    MInstruction *Overflow =
+        createIntConstInstruction(I64Type, Overflowed ? 1 : 0);
+    expandMemoryIR(RequiredSize, Overflow);
+    return;
+  }
+
+  Operand SizeComponents = createU256ConstOperand(intx::uint256{64});
+  normalizeOffsetWithSize(OffsetComponents, SizeComponents);
+
+  MInstruction *Offset = extractKnownU64LowOperand(OffsetComponents);
+  MInstruction *Length = createIntConstInstruction(I64Type, 64);
+  MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
+      false, OP_add, I64Type, Offset, Length);
+  MInstruction *Overflow = createInstruction<CmpInstruction>(
+      false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
+      Offset);
+  expandMemoryIR(RequiredSize, Overflow);
 }
 
 // Template function for no-argument runtime calls
