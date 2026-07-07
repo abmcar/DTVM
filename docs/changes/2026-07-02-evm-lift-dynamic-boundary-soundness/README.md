@@ -336,6 +336,17 @@ JSON under `bench-results/` in this worktree (untracked).
 - Fallback rate after the change: 0/36 modules (was 33/36) in both
   configurations.
 
+![Per-kernel steady-state execution-time change after removing the interpreter fallback; six recovered kernels speed up, weierstrudel regresses](figures/per-kernel.svg)
+
+*Figure: per-kernel steady-state execution-time change vs base (negative =
+faster). Six of the seven kernels recovered from the interpreter fallback speed
+up (−38% to −93%); weierstrudel, an internal-return-heavy EC contract, regresses
++19% to +22% (40–50× either side's IQR — real, not noise). blake2b_huff (JIT on
+both sides) stays within ±0.4%. Ranges span both inputs × both configs, drawn as
+capped intervals, not error bars. The plotted recovered kernels alone geomean
+≈ −71%; the −65.1% figure is the full 14-case main-suite aggregate. Median of 12
+reps; JIT compile time excluded (steady-state only).*
+
 ## Impact
 
 ### Affected Modules
