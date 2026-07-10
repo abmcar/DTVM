@@ -1313,6 +1313,7 @@ private:
   MInstruction *anchorDirectMemoryPointer(MInstruction *Ptr);
   MInstruction *extractKnownU64LowOperand(const Operand &Opnd);
   void normalizeOffsetWithSize(Operand &Offset, Operand &Size);
+  void preExpandMemoryRange(Operand &Offset, Operand &Size);
 
   Operand convertSingleInstrToU256Operand(MInstruction *SingleInstr);
   Operand convertU256InstrToU256Operand(MInstruction *U256Instr);
@@ -1740,6 +1741,7 @@ private:
                            Operand &SizeComponents);
   void chargeWordCopyGasIR(MInstruction *Size);
   void chargeDynamicGasIR(MInstruction *GasCost);
+  void chargeKeccakWordGasIR(MInstruction *Length);
   void chargeMemoryExpansionGasIR(MInstruction *CurrentSize,
                                   MInstruction *NewSize);
   MInstruction *calculateMemoryGasCostIR(MInstruction *SizeInBytes);

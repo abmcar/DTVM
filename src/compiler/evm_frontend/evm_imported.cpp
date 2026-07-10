@@ -98,6 +98,11 @@ inline uint64_t calculateWordCopyGas(uint64_t Size) {
   return Words * static_cast<uint64_t>(zen::evm::WORD_COPY_COST);
 }
 
+bool chargeKeccakWordGas(zen::runtime::EVMInstance *Instance, uint64_t Length) {
+  const uint64_t ExtraGas = static_cast<uint64_t>(numWords(Length)) * 6;
+  return Instance->chargeGas(ExtraGas);
+}
+
 const uint8_t *cacheKeccak256Result(zen::runtime::EVMInstance *Instance,
                                     const uint8_t *InputData, uint64_t Length) {
   auto &ExecCache = Instance->getMessageCache();
@@ -257,6 +262,7 @@ const RuntimeFunctions &getRuntimeFunctionTable() {
       .HandleUndefined = &evmHandleUndefined,
       .HandleSelfDestruct = &evmHandleSelfDestruct,
       .GetKeccak256 = &evmGetKeccak256,
+      .GetKeccak256NoExpand = &evmGetKeccak256NoExpand,
       .GetKeccak256TwoWord = &evmGetKeccak256TwoWord,
       .GetKeccak256TwoWordNoExpand = &evmGetKeccak256TwoWordNoExpand,
       .GetKeccak256CallDataSlot = &evmGetKeccak256CallDataSlot,
@@ -1334,17 +1340,25 @@ void evmSetCodeCopyNoExpand(zen::runtime::EVMInstance *Instance,
 
 const uint8_t *evmGetKeccak256(zen::runtime::EVMInstance *Instance,
                                uint64_t Offset, uint64_t Length) {
-  const uint8_t *InputData = nullptr;
   if (Length > 0) {
     uint8_t *MemoryBase = nullptr;
     if (!prepareKeccakMemoryRange(Instance, Offset, Length, MemoryBase)) {
       return nullptr;
     }
-    const uint64_t ExtraGas =
-        static_cast<uint64_t>(numWords(static_cast<uint64_t>(Length))) * 6;
-    if (!Instance->chargeGas(ExtraGas)) {
+    if (!chargeKeccakWordGas(Instance, Length)) {
       return nullptr;
     }
+  }
+
+  return evmGetKeccak256NoExpand(Instance, Offset, Length);
+}
+
+const uint8_t *evmGetKeccak256NoExpand(zen::runtime::EVMInstance *Instance,
+                                       uint64_t Offset, uint64_t Length) {
+  const uint8_t *InputData = nullptr;
+  if (Length > 0) {
+    uint8_t *MemoryBase = Instance->getMemoryBase();
+    ZEN_ASSERT(MemoryBase);
     InputData = MemoryBase + Offset;
   }
 

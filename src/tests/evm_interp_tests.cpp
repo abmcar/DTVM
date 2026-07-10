@@ -269,6 +269,11 @@ std::string computeTwoWordKeccakHex(const std::vector<uint8_t> &Word0,
   return zen::utils::toHex(Hash.data(), Hash.size());
 }
 
+std::string computeKeccakHex(const std::vector<uint8_t> &Input) {
+  const auto Hash = zen::host::evm::crypto::keccak256(Input);
+  return zen::utils::toHex(Hash.data(), Hash.size());
+}
+
 std::vector<uint8_t> makePaddedAddressWord(const evmc::address &Address) {
   std::vector<uint8_t> Word(32, 0);
   std::memcpy(Word.data() + 12, Address.bytes, sizeof(Address.bytes));
@@ -762,6 +767,57 @@ TEST(EVMMultipassKeccakHelperTest,
 
   expectInterpMatchesMultipass("keccak_calldata_const_slot_mem_oog",
                                *BytecodeBuf, makeUint256Calldata(0x1234),
+                               EVMC_OUT_OF_GAS);
+}
+
+TEST(EVMMultipassKeccakHelperTest,
+     GenericKeccakPreExpandMatchesInterpreterAndExpectedDigest) {
+  std::vector<uint8_t> Word(32);
+  for (size_t I = 0; I < Word.size(); ++I) {
+    Word[I] = static_cast<uint8_t>(I);
+  }
+
+  std::vector<uint8_t> Bytecode = {0x7f};
+  Bytecode.insert(Bytecode.end(), Word.begin(), Word.end());
+  const std::vector<uint8_t> Suffix = {
+      0x60, 0x00, 0x52,       // MSTORE word at memory offset 0.
+      0x60, 0x30, 0x60, 0x00, // KECCAK256 memory[0:48].
+      0x20, 0x60, 0x00, 0x52, // Store digest at memory offset 0.
+      0x60, 0x20, 0x60, 0x00, 0xf3};
+  Bytecode.insert(Bytecode.end(), Suffix.begin(), Suffix.end());
+
+  std::vector<uint8_t> KeccakInput = Word;
+  KeccakInput.insert(KeccakInput.end(), 16, 0);
+  const std::string ExpectedDigest = computeKeccakHex(KeccakInput);
+
+  expectInterpMatchesMultipass("keccak_generic_preexpand_48", Bytecode, {},
+                               EVMC_SUCCESS, ExpectedDigest);
+}
+
+TEST(EVMMultipassKeccakHelperTest,
+     GenericKeccakZeroLengthAllowsOversizedOffset) {
+  std::vector<uint8_t> Bytecode = {0x60, 0x00, 0x7f, 0x01};
+  Bytecode.insert(Bytecode.end(), 31, 0x00);
+  const std::vector<uint8_t> Suffix = {0x20, 0x60, 0x00, 0x52,
+                                       0x60, 0x20, 0x60, 0x00};
+  Bytecode.insert(Bytecode.end(), Suffix.begin(), Suffix.end());
+  Bytecode.push_back(0xf3);
+
+  const std::vector<uint8_t> EmptyInput;
+  const std::string ExpectedDigest = computeKeccakHex(EmptyInput);
+
+  expectInterpMatchesMultipass("keccak_zero_size_oversized_offset", Bytecode,
+                               {}, EVMC_SUCCESS, ExpectedDigest);
+}
+
+TEST(EVMMultipassKeccakHelperTest,
+     GenericKeccakNonZeroLengthRejectsOversizedOffset) {
+  std::vector<uint8_t> Bytecode = {0x60, 0x01, 0x7f, 0x01};
+  Bytecode.insert(Bytecode.end(), 31, 0x00);
+  Bytecode.push_back(0x20);
+  Bytecode.push_back(0x00);
+
+  expectInterpMatchesMultipass("keccak_nonzero_oversized_offset", Bytecode, {},
                                EVMC_OUT_OF_GAS);
 }
 

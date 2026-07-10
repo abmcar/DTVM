@@ -5553,19 +5553,25 @@ EVMMirBuilder::handleKeccak256(Operand OffsetComponents,
   const bool LengthWasConstU64 = LengthComponents.isConstU64();
   const uint64_t ConstLength =
       LengthWasConstU64 ? LengthComponents.getConstValue()[0] : 0;
-  normalizeOffsetWithSize(OffsetComponents, LengthComponents);
+  if (LengthWasConstU64 && ConstLength == 0) {
+    normalizeOffsetWithSize(OffsetComponents, LengthComponents);
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+    syncGasToMemory();
+#endif
+  } else {
+    preExpandMemoryRange(OffsetComponents, LengthComponents);
+    MInstruction *Length = extractKnownU64LowOperand(LengthComponents);
+    chargeKeccakWordGasIR(Length);
+  }
   noteKeccak256MemoryAccess(OffsetWasConstU64, ConstOffset, LengthWasConstU64,
                             ConstLength);
-#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
-  syncGasToMemory();
-#endif
   auto Result =
       callRuntimeForWithErrorCheck<const uint8_t *, uint64_t, uint64_t>(
-          RuntimeFunctions.GetKeccak256, OffsetComponents, LengthComponents);
+          RuntimeFunctions.GetKeccak256NoExpand, OffsetComponents,
+          LengthComponents);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
   return Result;
 }
 
@@ -6398,6 +6404,20 @@ void EVMMirBuilder::normalizeOffsetWithSize(Operand &Offset, Operand &Size) {
       false, I64Type, IsSizeZero, Zero, OffsetParts[0]);
   U256Inst NewVal = {SelectedLow, Zero, Zero, Zero};
   Offset = Operand(NewVal, EVMType::UINT256);
+}
+
+void EVMMirBuilder::preExpandMemoryRange(Operand &Offset, Operand &Size) {
+  normalizeOffsetWithSize(Offset, Size);
+
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *OffsetLow = extractKnownU64LowOperand(Offset);
+  MInstruction *SizeLow = extractKnownU64LowOperand(Size);
+  MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
+      false, OP_add, I64Type, OffsetLow, SizeLow);
+  MInstruction *Overflow = createInstruction<CmpInstruction>(
+      false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
+      OffsetLow);
+  expandMemoryIR(RequiredSize, Overflow);
 }
 
 void EVMMirBuilder::preExpandKeccakTwoWordMemory(Operand &OffsetComponents) {
@@ -8523,6 +8543,21 @@ void EVMMirBuilder::chargeDynamicGasIR(MInstruction *GasCost) {
   createInstruction<BrInstruction>(true, Ctx, MsgSkipBB);
   addSuccessor(MsgSkipBB);
   setInsertBlock(MsgSkipBB);
+}
+
+void EVMMirBuilder::chargeKeccakWordGasIR(MInstruction *Length) {
+  MType *I64Type = &Ctx.I64Type;
+
+  MInstruction *Const31 = createIntConstInstruction(I64Type, 31);
+  MInstruction *Shift5 = createIntConstInstruction(I64Type, 5);
+  MInstruction *LenPlus31 = createInstruction<BinaryInstruction>(
+      false, OP_add, I64Type, Length, Const31);
+  MInstruction *Words = createInstruction<BinaryInstruction>(
+      false, OP_ushr, I64Type, LenPlus31, Shift5);
+  MInstruction *WordGas = createIntConstInstruction(I64Type, 6);
+  MInstruction *KeccakGas = createInstruction<BinaryInstruction>(
+      false, OP_mul, I64Type, Words, WordGas);
+  chargeDynamicGasIR(KeccakGas);
 }
 
 void EVMMirBuilder::chargeMemoryExpansionGasIR(MInstruction *OldSize,

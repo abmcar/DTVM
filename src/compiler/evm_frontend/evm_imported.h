@@ -151,6 +151,7 @@ struct RuntimeFunctions {
   VoidFn HandleUndefined;
   VoidWithBytes32Fn HandleSelfDestruct;
   Bytes32WithUInt64UInt64Fn GetKeccak256;
+  Bytes32WithUInt64UInt64Fn GetKeccak256NoExpand;
   Bytes32WithUInt64U256U256Fn GetKeccak256TwoWord;
   Bytes32WithUInt64U256U256Fn GetKeccak256TwoWordNoExpand;
   Bytes32WithUInt64UInt64U256Fn GetKeccak256CallDataSlot;
@@ -283,6 +284,8 @@ void evmHandleInvalid(zen::runtime::EVMInstance *Instance);
 void evmHandleUndefined(zen::runtime::EVMInstance *Instance);
 const uint8_t *evmGetKeccak256(zen::runtime::EVMInstance *Instance,
                                uint64_t Offset, uint64_t Length);
+const uint8_t *evmGetKeccak256NoExpand(zen::runtime::EVMInstance *Instance,
+                                       uint64_t Offset, uint64_t Length);
 const uint8_t *evmGetKeccak256TwoWord(zen::runtime::EVMInstance *Instance,
                                       uint64_t Offset,
                                       const intx::uint256 &Word0,
