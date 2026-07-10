@@ -59,16 +59,29 @@ re-verify after each further edit — page 12 bottom has <1 line slack.
       grouped stu/dase emails; `\authorrunning{Y. Wei et al.}`; pdfauthor set.
       Single shared affiliation, so no `\inst` markers.
 
-## Still open
+## Packaging (done 2026-07-10)
 
-- [ ] Credits block (commented in `main.tex`): funding/acknowledgements text
-      and disclosure-of-interests wording — needs author decision.
-- [ ] ORCID iDs (optional; `\orcidID{}` after each author name if provided).
-- [ ] Paper ID for the email subject.
-- [ ] Check the conference "Camera-Ready" page for the exact material list
-      (LaTeX source, final PDF, copyright form) and registration steps.
-- [ ] Decide whether to publish the dMIR rule/Z3 artifact publicly or keep
-      "available upon request" in §6.
+Paper ID **P00317**. No acknowledgements/funding (author decision); ORCID
+skipped (optional, none provided). Package assembled at `~/WISA_P00317/`:
+`P00317.pdf` (final 12-page PDF), `contact.txt` (contact author Yihao Wei;
+mailing address assumed DASE, 3663 North Zhongshan Rd — confirm), and
+`source/` (main.tex + sections + tables + TikZ figures + references.bib +
+llncs.cls + splncs04.bst + main.bbl; verified to compile standalone at
+12 pages). License-to-Publish form came pre-filled (title, five authors in
+paper order, corresponding author Chunyan Zhao + DASE address/email on the
+signature page); print copy at
+`~/WISA_P00317_print/P00317_cr_UNSIGNED_print-me.pdf`.
+
+## Remaining human steps
+
+- [ ] Confirm the mailing address in `contact.txt`.
+- [ ] Print the form, Chunyan Zhao signs by hand (no e-signature), scan to
+      PDF, save as `~/WISA_P00317/P00317_cr.pdf`.
+- [ ] `cd ~ && zip -r WISA_P00317.zip WISA_P00317` and email to
+      `wisa2026@126.com`, subject `Camera-ready: P00317`, before
+      **2026-07-16 23:59**.
+- [ ] At least one author completes Regular registration.
+- [ ] (Deferred) publish the dMIR rule/Z3 artifact or keep "upon request".
 
 ## Build
 
