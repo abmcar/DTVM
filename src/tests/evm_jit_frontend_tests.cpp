@@ -384,13 +384,14 @@ public:
   MOCK_VOID_STUB(handleCallDataCopy);
   MOCK_VOID_STUB(handleCodeCopy);
   MOCK_VOID_STUB(handleExtCodeCopy);
-  MOCK_VOID_STUB(handleMCopy);
   MOCK_VOID_STUB(handleMStore8);
 
   void handleMStore(Operand Addr, Operand Value) {
     LastMStore = {Addr.resolvedValue(), Value.resolvedValue()};
     MStoreCount++;
   }
+
+  void handleMCopy(Operand, Operand, Operand) { MCopyCount++; }
 
   Operand handleKeccak256(Operand, Operand) {
     KeccakCount++;
@@ -429,7 +430,12 @@ public:
   MOCK_VOID_STUB(handleTStore);
 
   void beginMemoryCompileBlock(uint64_t) {}
-  void setMemoryCompileBlockConstPrecheckPlan(uint64_t, uint64_t) {}
+  void setMemoryCompileBlockConstPrecheckPlan(uint64_t MaxRequiredSize,
+                                              uint64_t CoveredDirectOps) {
+    ConstPrecheckPlanCount++;
+    ConstPrecheckMaxRequiredSize = MaxRequiredSize;
+    ConstPrecheckCoveredDirectOps = CoveredDirectOps;
+  }
   void setMemoryCompileBlockLinearPrecheckPlan(uint64_t AccessWidth,
                                                uint64_t CoveredDirectOps,
                                                bool ValueEqualsFirstAddr) {
@@ -504,6 +510,18 @@ public:
   }
 
   uint32_t mstoreCount() const { return MStoreCount; }
+
+  uint32_t mcopyCount() const { return MCopyCount; }
+
+  uint32_t constPrecheckPlanCount() const { return ConstPrecheckPlanCount; }
+
+  uint64_t constPrecheckMaxRequiredSize() const {
+    return ConstPrecheckMaxRequiredSize;
+  }
+
+  uint64_t constPrecheckCoveredDirectOps() const {
+    return ConstPrecheckCoveredDirectOps;
+  }
 
   uint32_t keccakCount() const { return KeccakCount; }
 
@@ -594,6 +612,10 @@ private:
   std::vector<MockMeterOpcodeRangeRecord> MeteredRanges;
   MockMStoreRecord LastMStore = {};
   uint32_t MStoreCount = 0;
+  uint32_t MCopyCount = 0;
+  uint32_t ConstPrecheckPlanCount = 0;
+  uint64_t ConstPrecheckMaxRequiredSize = 0;
+  uint64_t ConstPrecheckCoveredDirectOps = 0;
   MockOperand::U256Value KeccakTwoWordLastOffset = {0, 0, 0, 0};
   MockOperand::U256Value KeccakTwoWordLastWord0 = {0, 0, 0, 0};
   MockOperand::U256Value KeccakTwoWordLastWord1 = {0, 0, 0, 0};
@@ -1365,6 +1387,106 @@ TEST(EVMJITFrontendVisitorTest, PlansLinearMStore8NextMotifMemoryPrecheck) {
   EXPECT_EQ(Builder.linearPrecheckPrepareCount(), 2U);
   EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE8), 2U);
   EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
+}
+
+TEST(EVMJITFrontendVisitorTest, ConstMcopyRangesUseBlockMemoryPrecheck) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x20, // PUSH1 length 32
+      0x60, 0x00, // PUSH1 src 0
+      0x60, 0x40, // PUSH1 dest 64
+      0x5e,       // MCOPY
+      0x60, 0x10, // PUSH1 length 16
+      0x60, 0x20, // PUSH1 src 32
+      0x60, 0x60, // PUSH1 dest 96
+      0x5e,       // MCOPY
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.constPrecheckPlanCount(), 1U);
+  EXPECT_EQ(Builder.constPrecheckCoveredDirectOps(), 2U);
+  EXPECT_EQ(Builder.constPrecheckMaxRequiredSize(), 0x70U);
+  EXPECT_EQ(Builder.mcopyCount(), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 0U);
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     ZeroLengthMcopyDoesNotEnterBlockMemoryPrecheckPlan) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x00, // PUSH1 length 0
+      0x60, 0xff, // PUSH1 src
+      0x60, 0xff, // PUSH1 dest
+      0x5e,       // MCOPY
+      0x60, 0x01, // PUSH1 value
+      0x60, 0x00, // PUSH1 addr
+      0x52,       // MSTORE
+      0x60, 0x02, // PUSH1 value
+      0x60, 0x20, // PUSH1 addr
+      0x52,       // MSTORE
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.constPrecheckPlanCount(), 1U);
+  EXPECT_EQ(Builder.constPrecheckCoveredDirectOps(), 2U);
+  EXPECT_EQ(Builder.constPrecheckMaxRequiredSize(), 0x40U);
+  EXPECT_EQ(Builder.mcopyCount(), 1U);
+  EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 0U);
+}
+
+TEST(EVMJITFrontendVisitorTest, MSizeStopsConstMemoryPrecheckBeforeMcopy) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01, // PUSH1 value
+      0x60, 0x00, // PUSH1 addr
+      0x52,       // MSTORE
+      0x59,       // MSIZE
+      0x50,       // POP
+      0x60, 0x20, // PUSH1 length
+      0x60, 0x00, // PUSH1 src
+      0x60, 0x40, // PUSH1 dest
+      0x5e,       // MCOPY
+      0x60, 0x02, // PUSH1 value
+      0x60, 0x80, // PUSH1 addr
+      0x52,       // MSTORE
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.constPrecheckPlanCount(), 0U);
+  EXPECT_EQ(Builder.mcopyCount(), 1U);
+  EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 0U);
 }
 
 TEST(EVMJITFrontendVisitorTest, FusesCallerSlotKeccakIntoMeteredRange) {

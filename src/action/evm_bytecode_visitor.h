@@ -2158,7 +2158,42 @@ private:
         SawDirectMemory = true;
         break;
       }
+      case OP_MCOPY: {
+        if (SimStack.size() < 3) {
+          return {};
+        }
+        AbstractConstU64 DestAddr = SimStack.back();
+        SimStack.pop_back();
+        AbstractConstU64 SrcAddr = SimStack.back();
+        SimStack.pop_back();
+        AbstractConstU64 Length = SimStack.back();
+        SimStack.pop_back();
+        if (!Length.Known) {
+          return {};
+        }
+        if (Length.Value == 0) {
+          break;
+        }
+        if (!DestAddr.Known || !SrcAddr.Known) {
+          return {};
+        }
+        uint64_t DestRequiredSize = 0;
+        uint64_t SrcRequiredSize = 0;
+        if (!addConstU64(DestAddr.Value, Length.Value, DestRequiredSize) ||
+            !addConstU64(SrcAddr.Value, Length.Value, SrcRequiredSize)) {
+          return {};
+        }
+        Plan.MaxRequiredSize = std::max(
+            Plan.MaxRequiredSize, std::max(DestRequiredSize, SrcRequiredSize));
+        Plan.CoveredDirectOps++;
+        SawDirectMemory = true;
+        break;
+      }
       case OP_MSIZE:
+        if (SawDirectMemory) {
+          Plan.Eligible = Plan.CoveredDirectOps >= 2;
+          return Plan;
+        }
         SimStack.push_back(makeUnknownConstU64());
         break;
       default:

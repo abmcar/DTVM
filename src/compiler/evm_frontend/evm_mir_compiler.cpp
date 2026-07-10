@@ -5096,25 +5096,32 @@ void EVMMirBuilder::handleMCopy(Operand DestAddrComponents,
   }
 
   MType *I64Type = &Ctx.I64Type;
-  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+  const bool LengthWasConst = LengthComponents.isConstU64();
+  const uint64_t ConstLength =
+      LengthWasConst ? LengthComponents.getConstValue()[0] : 0;
+  const bool LengthIsKnownNonZero = LengthWasConst && ConstLength != 0;
 
-  U256Inst LenParts = extractU256Operand(LengthComponents);
-  MInstruction *LenOr = createInstruction<BinaryInstruction>(
-      false, OP_or, I64Type, LenParts[0], LenParts[1]);
-  LenOr = createInstruction<BinaryInstruction>(false, OP_or, I64Type, LenOr,
-                                               LenParts[2]);
-  LenOr = createInstruction<BinaryInstruction>(false, OP_or, I64Type, LenOr,
-                                               LenParts[3]);
-  MInstruction *IsZero = createInstruction<CmpInstruction>(
-      false, CmpInstruction::Predicate::ICMP_EQ, I64Type, LenOr, Zero);
+  MBasicBlock *DoneBB = nullptr;
+  if (!LengthIsKnownNonZero) {
+    MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+    U256Inst LenParts = extractU256Operand(LengthComponents);
+    MInstruction *LenOr = createInstruction<BinaryInstruction>(
+        false, OP_or, I64Type, LenParts[0], LenParts[1]);
+    LenOr = createInstruction<BinaryInstruction>(false, OP_or, I64Type, LenOr,
+                                                 LenParts[2]);
+    LenOr = createInstruction<BinaryInstruction>(false, OP_or, I64Type, LenOr,
+                                                 LenParts[3]);
+    MInstruction *IsZero = createInstruction<CmpInstruction>(
+        false, CmpInstruction::Predicate::ICMP_EQ, I64Type, LenOr, Zero);
 
-  MBasicBlock *CopyBB = createBasicBlock();
-  MBasicBlock *DoneBB = createBasicBlock();
-  createInstruction<BrIfInstruction>(true, Ctx, IsZero, DoneBB, CopyBB);
-  addSuccessor(DoneBB);
-  addSuccessor(CopyBB);
+    MBasicBlock *CopyBB = createBasicBlock();
+    DoneBB = createBasicBlock();
+    createInstruction<BrIfInstruction>(true, Ctx, IsZero, DoneBB, CopyBB);
+    addSuccessor(DoneBB);
+    addSuccessor(CopyBB);
 
-  setInsertBlock(CopyBB);
+    setInsertBlock(CopyBB);
+  }
 
   normalizeOperandU64(DestAddrComponents);
   normalizeOperandU64(SrcAddrComponents);
@@ -5143,31 +5150,36 @@ void EVMMirBuilder::handleMCopy(Operand DestAddrComponents,
       false, OP_mul, I64Type, Words, WordCopyCost);
   chargeDynamicGasIR(CopyGas);
 
-  // Expand memory for both source and destination ranges.
-  MInstruction *DestEnd = createInstruction<BinaryInstruction>(
-      false, OP_add, I64Type, DestOffset, Len);
-  MInstruction *SrcEnd = createInstruction<BinaryInstruction>(
-      false, OP_add, I64Type, SrcOffset, Len);
-  MInstruction *DestOverflow = createInstruction<CmpInstruction>(
-      false, CmpInstruction::Predicate::ICMP_ULT, I64Type, DestEnd, DestOffset);
-  MInstruction *SrcOverflow = createInstruction<CmpInstruction>(
-      false, CmpInstruction::Predicate::ICMP_ULT, I64Type, SrcEnd, SrcOffset);
-  MInstruction *Overflow = createInstruction<BinaryInstruction>(
-      false, OP_or, I64Type, DestOverflow, SrcOverflow);
+  bool UsedSharedPrecheck =
+      LengthIsKnownNonZero && tryConsumeConstBlockMemoryPrecheck();
+  if (!UsedSharedPrecheck) {
+    // Expand memory for both source and destination ranges.
+    MInstruction *DestEnd = createInstruction<BinaryInstruction>(
+        false, OP_add, I64Type, DestOffset, Len);
+    MInstruction *SrcEnd = createInstruction<BinaryInstruction>(
+        false, OP_add, I64Type, SrcOffset, Len);
+    MInstruction *DestOverflow = createInstruction<CmpInstruction>(
+        false, CmpInstruction::Predicate::ICMP_ULT, I64Type, DestEnd,
+        DestOffset);
+    MInstruction *SrcOverflow = createInstruction<CmpInstruction>(
+        false, CmpInstruction::Predicate::ICMP_ULT, I64Type, SrcEnd, SrcOffset);
+    MInstruction *Overflow = createInstruction<BinaryInstruction>(
+        false, OP_or, I64Type, DestOverflow, SrcOverflow);
 
-  MInstruction *DestGreater = createInstruction<CmpInstruction>(
-      false, CmpInstruction::Predicate::ICMP_UGT, I64Type, DestEnd, SrcEnd);
-  MInstruction *RequiredSize = createInstruction<SelectInstruction>(
-      false, I64Type, DestGreater, DestEnd, SrcEnd);
+    MInstruction *DestGreater = createInstruction<CmpInstruction>(
+        false, CmpInstruction::Predicate::ICMP_UGT, I64Type, DestEnd, SrcEnd);
+    MInstruction *RequiredSize = createInstruction<SelectInstruction>(
+        false, I64Type, DestGreater, DestEnd, SrcEnd);
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
-  ++MemStats.MCopyExpandCount;
-  if (CurBlockMemStats.Active) {
-    CurBlockMemStats.ExpandCallCount++;
-  }
+    ++MemStats.MCopyExpandCount;
+    if (CurBlockMemStats.Active) {
+      CurBlockMemStats.ExpandCallCount++;
+    }
 #endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
-  expandMemoryIR(RequiredSize, Overflow);
+    expandMemoryIR(RequiredSize, Overflow);
+  }
 
-  MInstruction *MemBase = getMemoryDataPointer();
+  MInstruction *MemBase = getDirectMemoryDataPointer(UsedSharedPrecheck);
   MInstruction *DestBase = createInstruction<BinaryInstruction>(
       false, OP_add, I64Type, MemBase, DestOffset);
   MInstruction *SrcBase = createInstruction<BinaryInstruction>(
@@ -5185,13 +5197,23 @@ void EVMMirBuilder::handleMCopy(Operand DestAddrComponents,
   };
   createInstruction<ICallInstruction>(true, &Ctx.VoidType, MemmoveAddr,
                                       MemmoveArgs);
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (UsedSharedPrecheck) {
+    ++MemStats.PrecheckedMCopyOpCount;
+    if (CurBlockMemStats.Active) {
+      ++CurBlockMemStats.PrecheckedMCopyOpCount;
+    }
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  createInstruction<BrInstruction>(true, Ctx, DoneBB);
-  addSuccessor(DoneBB);
+  if (DoneBB != nullptr) {
+    createInstruction<BrInstruction>(true, Ctx, DoneBB);
+    addSuccessor(DoneBB);
 
-  setInsertBlock(DoneBB);
+    setInsertBlock(DoneBB);
+  }
 }
 
 template <size_t NumTopics, typename... TopicArgs>
@@ -6912,6 +6934,7 @@ bool EVMMirBuilder::hasMemoryCompileStats() const {
          MemStats.LinearU64AddrFastPathCount != 0 ||
          MemStats.ConstBasePtrInitCount != 0 ||
          MemStats.ConstBasePtrReuseCount != 0 ||
+         MemStats.PrecheckedMCopyOpCount != 0 ||
          MemStats.ConstDispBytes32MLoadCount != 0 ||
          MemStats.ConstDispBytes32MStoreCount != 0 ||
          MemStats.DispBytes32MLoadCount != 0 ||
@@ -7200,8 +7223,9 @@ void EVMMirBuilder::dumpMemoryCompileStats() const {
       "[EVM-MEM-SUMMARY] mload_expand=%llu mstore_expand=%llu "
       "mstore8_expand=%llu mcopy_expand=%llu block_const_precheck=%llu "
       "block_linear_precheck=%llu prechecked_mload_ops=%llu "
-      "prechecked_mstore_ops=%llu reload_mem_size=%llu get_mem_ptr=%llu "
-      "mem_base_instance_loads=%llu mem_base_cache_uses=%llu "
+      "prechecked_mstore_ops=%llu prechecked_mcopy_ops=%llu "
+      "reload_mem_size=%llu get_mem_ptr=%llu mem_base_instance_loads=%llu "
+      "mem_base_cache_uses=%llu "
       "linear_u64_addr_fast_ops=%llu linear_u64_mload_fast_ops=%llu "
       "linear_u64_mstore_fast_ops=%llu "
       "const_base_ptr_inits=%llu const_base_ptr_reuses=%llu "
@@ -7218,6 +7242,7 @@ void EVMMirBuilder::dumpMemoryCompileStats() const {
       static_cast<unsigned long long>(MemStats.BlockLinearPrecheckCount),
       static_cast<unsigned long long>(MemStats.PrecheckedMLoadOpCount),
       static_cast<unsigned long long>(MemStats.PrecheckedMStoreOpCount),
+      static_cast<unsigned long long>(MemStats.PrecheckedMCopyOpCount),
       static_cast<unsigned long long>(MemStats.ReloadMemorySizeCount),
       static_cast<unsigned long long>(MemStats.GetMemoryDataPointerCount),
       static_cast<unsigned long long>(MemStats.MemoryBaseInstanceLoadCount),
@@ -7883,8 +7908,9 @@ void EVMMirBuilder::endMemoryCompileBlock() {
       "mem_base_cache_uses=%llu reload_mem_size=%llu "
       "block_const_precheck=%llu block_linear_precheck=%llu "
       "prechecked_direct_ops=%llu prechecked_mload_ops=%llu "
-      "prechecked_mstore_ops=%llu linear_u64_addr_fast_ops=%llu "
-      "linear_u64_mload_fast_ops=%llu linear_u64_mstore_fast_ops=%llu "
+      "prechecked_mstore_ops=%llu prechecked_mcopy_ops=%llu "
+      "linear_u64_addr_fast_ops=%llu linear_u64_mload_fast_ops=%llu "
+      "linear_u64_mstore_fast_ops=%llu "
       "const_base_ptr_inits=%llu const_base_ptr_reuses=%llu "
       "const_disp_bytes32_mload_ops=%llu const_disp_bytes32_mstore_ops=%llu "
       "disp_bytes32_mload_ops=%llu disp_bytes32_mstore_ops=%llu "
@@ -7928,6 +7954,7 @@ void EVMMirBuilder::endMemoryCompileBlock() {
       static_cast<unsigned long long>(CurBlockMemStats.PrecheckedDirectOpCount),
       static_cast<unsigned long long>(CurBlockMemStats.PrecheckedMLoadOpCount),
       static_cast<unsigned long long>(CurBlockMemStats.PrecheckedMStoreOpCount),
+      static_cast<unsigned long long>(CurBlockMemStats.PrecheckedMCopyOpCount),
       static_cast<unsigned long long>(
           CurBlockMemStats.LinearU64AddrFastPathCount),
       static_cast<unsigned long long>(

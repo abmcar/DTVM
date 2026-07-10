@@ -1,0 +1,14 @@
+// MSIZE observes memory growth order, so const MCOPY prechecks must not cross it
+PUSH1 0x01
+PUSH1 0x00
+MSTORE
+MSIZE
+PUSH1 0x80
+MSTORE
+PUSH1 0x20
+PUSH1 0x80
+PUSH1 0xA0
+MCOPY
+PUSH1 0x20
+PUSH1 0xA0
+RETURN
