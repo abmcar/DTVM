@@ -1,11 +1,10 @@
 % paper/wisa2026-en/main.tex
-% WISA 2026 camera-ready (LNCS format, up to 12 pages)
-% CAMERA-READY TODO before final submission:
-%   (1) fill the real author list / affiliations / emails / ORCID iDs below;
-%   (2) fill pdfauthor in \hypersetup to match;
-%   (3) fill or delete the credits block (acknowledgements / disclosure)
-%       before the bibliography;
-%   (4) sign the Springer consent-to-publish form (outside LaTeX).
+% WISA 2026 camera-ready (LNCS format, hard limit 12 pages).
+% Deadline: email to wisa2026@126.com before 2026-07-16 23:59,
+% subject "Camera-ready: [Paper ID]".
+% Remaining TODO: (1) decide the credits block before the bibliography
+% (funding/acknowledgements + disclosure); (2) ORCID iDs optional
+% (\orcidID{} after each author name if provided).
 
 \documentclass[runningheads]{llncs}
 
@@ -18,7 +17,7 @@
 \usepackage[breaklinks=true,hidelinks]{hyperref}
 \hypersetup{
   pdftitle={dMIR Peephole Rewrites for Consensus-Critical EVM JITs with First-Class Carry Operators},
-  pdfauthor={},% CAMERA-READY TODO: full author list, e.g. First Author and Chunyan Zhao
+  pdfauthor={Yihao Wei, Rui Zhang, Haiyang Yu, Cheqing Jin, Chunyan Zhao},
   pdfsubject={WISA 2026},
   pdfkeywords={Blockchain information systems, EVM JIT, dMIR, Peephole optimization, SMT equivalence checking, Carry chain, Translation validation}
 }
@@ -39,14 +38,17 @@
 
 \titlerunning{dMIR Rewrites for EVM JITs}
 
-% CAMERA-READY TODO: replace every [\,TODO\,] placeholder with the real
-% author list (names, order), affiliations, emails, and ORCID iDs.
 % Corresponding author: Chunyan Zhao (marked with \Letter).
-\author{[First~Author~TODO]\inst{1} \and
-Chunyan~Zhao\textsuperscript{(\Letter)}\inst{1}}
-\authorrunning{[F. Author TODO] and C. Zhao}
-\institute{[Institution TODO], [City, Country TODO]\\
-\email{[first.author.email TODO]}, \email{[chunyan.zhao.email TODO]}}
+% Single shared affiliation, so no \inst markers (LNCS convention).
+\author{Yihao~Wei \and
+Rui~Zhang \and
+Haiyang~Yu \and
+Cheqing~Jin \and
+Chunyan~Zhao\textsuperscript{(\Letter)}}
+\authorrunning{Y. Wei et al.}
+\institute{East China Normal University, Shanghai, China\\
+\email{\{yhwei,rzhang,hyyu\}@stu.ecnu.edu.cn},
+\email{\{cyzhao,cqjin\}@dase.ecnu.edu.cn}}
 
 \maketitle
 

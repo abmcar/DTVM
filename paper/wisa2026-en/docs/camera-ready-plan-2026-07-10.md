@@ -44,15 +44,29 @@ author input.
 Page budget: rebuilt at exactly 12 pages (letter) after edits 1-4;
 re-verify after each further edit — page 12 bottom has <1 line slack.
 
-## Blocked on author input
+## Submission facts (from the acceptance email, 2026-07-06)
 
-- [ ] Full author list: names, order, affiliations, emails, ORCID iDs
-      (placeholders marked `TODO` in `main.tex`; pdfauthor too).
-- [ ] Acknowledgements / funding text + disclosure-of-interests wording
-      (commented credits block in `main.tex`).
-- [ ] Camera-ready deadline + any CCF/Springer submission-system steps from
-      the acceptance email (not visible from the machine); consent-to-publish
-      form is signed outside LaTeX.
+- Deadline: **2026-07-16 23:59** — email camera-ready materials to
+  `wisa2026@126.com`, subject `Camera-ready: [Paper ID]`. Late = withdrawal.
+- Long-paper hard limit: 12 pages. Proceedings: Springer LNCS (CCF C, EI).
+- At least one author must complete a Regular registration before the
+  conference; details on the conference "Camera-Ready" page.
+
+## Done (2026-07-10, second commit)
+
+- [x] Author block filled: Yihao Wei, Rui Zhang, Haiyang Yu, Cheqing Jin,
+      Chunyan Zhao (\Letter); East China Normal University, Shanghai, China;
+      grouped stu/dase emails; `\authorrunning{Y. Wei et al.}`; pdfauthor set.
+      Single shared affiliation, so no `\inst` markers.
+
+## Still open
+
+- [ ] Credits block (commented in `main.tex`): funding/acknowledgements text
+      and disclosure-of-interests wording — needs author decision.
+- [ ] ORCID iDs (optional; `\orcidID{}` after each author name if provided).
+- [ ] Paper ID for the email subject.
+- [ ] Check the conference "Camera-Ready" page for the exact material list
+      (LaTeX source, final PDF, copyright form) and registration steps.
 - [ ] Decide whether to publish the dMIR rule/Z3 artifact publicly or keep
       "available upon request" in §6.
 
