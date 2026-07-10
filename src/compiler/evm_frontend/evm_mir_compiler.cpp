@@ -4553,19 +4553,14 @@ void EVMMirBuilder::handleCodeCopy(Operand DestOffsetComponents,
                                    Operand OffsetComponents,
                                    Operand SizeComponents) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  normalizeOffsetWithSize(DestOffsetComponents, SizeComponents);
+  preExpandCopyMemory(DestOffsetComponents, SizeComponents);
+  MInstruction *Size = extractKnownU64LowOperand(SizeComponents);
+  chargeWordCopyGasIR(Size);
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
   normalizeOperandU64(OffsetComponents, &Non64Value);
-#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
-  syncGasToMemory();
-#endif
   callRuntimeForWithErrorCheck<void, uint64_t, uint64_t, uint64_t>(
-      RuntimeFunctions.SetCodeCopy, DestOffsetComponents, OffsetComponents,
-      SizeComponents);
-#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
-  reloadGasFromMemory();
-#endif
-  reloadMemorySizeFromInstance();
+      RuntimeFunctions.SetCodeCopyNoExpand, DestOffsetComponents,
+      OffsetComponents, SizeComponents);
 }
 
 typename EVMMirBuilder::Operand
@@ -6436,6 +6431,41 @@ void EVMMirBuilder::preExpandKeccakTwoWordMemory(Operand &OffsetComponents) {
   expandMemoryIR(RequiredSize, Overflow);
 }
 
+void EVMMirBuilder::preExpandCopyMemory(Operand &DestOffsetComponents,
+                                        Operand &SizeComponents) {
+  normalizeOffsetWithSize(DestOffsetComponents, SizeComponents);
+
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *DestOffset = extractKnownU64LowOperand(DestOffsetComponents);
+  MInstruction *Size = extractKnownU64LowOperand(SizeComponents);
+  MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
+      false, OP_add, I64Type, DestOffset, Size);
+  MInstruction *Overflow = createInstruction<CmpInstruction>(
+      false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
+      DestOffset);
+  expandMemoryIR(RequiredSize, Overflow);
+}
+
+void EVMMirBuilder::chargeWordCopyGasIR(MInstruction *Size) {
+  MType *I64Type = &Ctx.I64Type;
+  MInstruction *Shift5 = createIntConstInstruction(I64Type, 5);
+  MInstruction *WordMask = createIntConstInstruction(I64Type, 31);
+  MInstruction *Words = createInstruction<BinaryInstruction>(
+      false, OP_ushr, I64Type, Size, Shift5);
+  MInstruction *TrailingBytes = createInstruction<BinaryInstruction>(
+      false, OP_and, I64Type, Size, WordMask);
+  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+  MInstruction *HasTrailingBytes = createInstruction<CmpInstruction>(
+      false, CmpInstruction::Predicate::ICMP_NE, I64Type, TrailingBytes, Zero);
+  Words = createInstruction<BinaryInstruction>(false, OP_add, I64Type, Words,
+                                               HasTrailingBytes);
+  MInstruction *WordCopyCost =
+      createIntConstInstruction(I64Type, zen::evm::WORD_COPY_COST);
+  MInstruction *CopyGas = createInstruction<BinaryInstruction>(
+      false, OP_mul, I64Type, Words, WordCopyCost);
+  chargeDynamicGasIR(CopyGas);
+}
+
 // Template function for no-argument runtime calls
 template <typename RetType>
 typename EVMMirBuilder::Operand
@@ -6826,19 +6856,13 @@ void EVMMirBuilder::handleCallDataCopy(Operand DestOffsetComponents,
                                        Operand SizeComponents) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
-  normalizeOperandU64(DestOffsetComponents, &Non64Value);
+  preExpandCopyMemory(DestOffsetComponents, SizeComponents);
+  MInstruction *Size = extractKnownU64LowOperand(SizeComponents);
+  chargeWordCopyGasIR(Size);
   normalizeOperandU64(OffsetComponents, &Non64Value);
-  normalizeOperandU64(SizeComponents, &Non64Value);
-#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
-  syncGasToMemory();
-#endif
   callRuntimeForWithErrorCheck<void, uint64_t, uint64_t, uint64_t>(
-      RuntimeFunctions.SetCallDataCopy, DestOffsetComponents, OffsetComponents,
-      SizeComponents);
-#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
-  reloadGasFromMemory();
-#endif
-  reloadMemorySizeFromInstance();
+      RuntimeFunctions.SetCallDataCopyNoExpand, DestOffsetComponents,
+      OffsetComponents, SizeComponents);
 }
 
 void EVMMirBuilder::handleExtCodeCopy(Operand AddressComponents,

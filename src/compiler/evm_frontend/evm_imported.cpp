@@ -212,6 +212,7 @@ const RuntimeFunctions &getRuntimeFunctionTable() {
       .GetCallDataSize = &evmGetCallDataSize,
       .GetCodeSize = &evmGetCodeSize,
       .SetCodeCopy = &evmSetCodeCopy,
+      .SetCodeCopyNoExpand = &evmSetCodeCopyNoExpand,
       .GetGasPrice = &evmGetGasPrice,
       .GetExtCodeSize = &evmGetExtCodeSize,
       .GetExtCodeHash = &evmGetExtCodeHash,
@@ -234,6 +235,7 @@ const RuntimeFunctions &getRuntimeFunctionTable() {
       .SetTStore = &evmSetTStore,
       .SetCallDataCopy = &evmSetCallDataCopy,
       .TouchExtCodeCopyAccount = &evmTouchExtCodeCopyAccount,
+      .SetCallDataCopyNoExpand = &evmSetCallDataCopyNoExpand,
       .SetExtCodeCopy = &evmSetExtCodeCopy,
       .SetReturnDataCopy = &evmSetReturnDataCopy,
       .ExpandMemoryNoGas = &evmExpandMemoryNoGas,
@@ -669,11 +671,21 @@ void evmSetCallDataCopy(zen::runtime::EVMInstance *Instance,
       return;
     }
   }
+  evmSetCallDataCopyNoExpand(Instance, DestOffset, Offset, Size);
+}
 
+void evmSetCallDataCopyNoExpand(zen::runtime::EVMInstance *Instance,
+                                uint64_t DestOffset, uint64_t Offset,
+                                uint64_t Size) {
+  // JIT no-expand callers must prove memory and charge word-copy gas first.
+  if (Size == 0) {
+    return;
+  }
   const evmc_message *Msg = Instance->getCurrentMessage();
   ZEN_ASSERT(Msg && "No current message set in EVMInstance");
 
   uint8_t *MemoryBase = Instance->getMemoryBase();
+  ZEN_ASSERT(MemoryBase);
 
   // Calculate actual source offset and copy size
   uint64_t ActualOffset =
@@ -1289,13 +1301,23 @@ void evmSetCodeCopy(zen::runtime::EVMInstance *Instance, uint64_t DestOffset,
       return;
     }
   }
+  evmSetCodeCopyNoExpand(Instance, DestOffset, Offset, Size);
+}
 
+void evmSetCodeCopyNoExpand(zen::runtime::EVMInstance *Instance,
+                            uint64_t DestOffset, uint64_t Offset,
+                            uint64_t Size) {
+  // JIT no-expand callers must prove memory and charge word-copy gas first.
+  if (Size == 0) {
+    return;
+  }
   const zen::runtime::EVMModule *Module = Instance->getModule();
   ZEN_ASSERT(Module);
   const zen::common::Byte *Code = Module->Code;
   size_t CodeSize = Module->CodeSize;
 
   uint8_t *MemoryBase = Instance->getMemoryBase();
+  ZEN_ASSERT(MemoryBase);
 
   if (Offset < CodeSize) {
     auto CopySize = std::min(Size, CodeSize - Offset);

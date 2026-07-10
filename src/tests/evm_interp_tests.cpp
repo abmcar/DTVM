@@ -275,6 +275,14 @@ std::vector<uint8_t> makePaddedAddressWord(const evmc::address &Address) {
   return Word;
 }
 
+std::vector<uint8_t> makeIncrementingBytes(size_t Size) {
+  std::vector<uint8_t> Data(Size);
+  for (size_t I = 0; I < Data.size(); ++I) {
+    Data[I] = static_cast<uint8_t>(I);
+  }
+  return Data;
+}
+
 void expectInterpMatchesMultipass(const std::string &ModuleName,
                                   const std::vector<uint8_t> &Bytecode,
                                   const std::vector<uint8_t> &CallData,
@@ -621,6 +629,74 @@ TEST(EVMMultipassDisplacedBytes32Test,
   EXPECT_TRUE(Exec.JITCompiled);
 #endif
   EXPECT_EQ(Exec.Status, EVMC_OUT_OF_GAS);
+}
+
+TEST(EVMMultipassCopyHelperTest,
+     CallDataCopyMatchesInterpreterAfterMemoryPreExpand) {
+  auto BytecodeBuf = zen::utils::fromHex("6030601060203760406020f3");
+  ASSERT_TRUE(BytecodeBuf) << "Failed to parse calldata-copy bytecode";
+
+  const std::vector<uint8_t> CallData = makeIncrementingBytes(80);
+  std::vector<uint8_t> ExpectedOutput;
+  ExpectedOutput.insert(ExpectedOutput.end(), CallData.begin() + 16,
+                        CallData.begin() + 64);
+  ExpectedOutput.resize(64, 0);
+
+  expectInterpMatchesMultipass(
+      "calldatacopy_preexpand", *BytecodeBuf, CallData, EVMC_SUCCESS,
+      zen::utils::toHex(ExpectedOutput.data(), ExpectedOutput.size()));
+}
+
+TEST(EVMMultipassCopyHelperTest,
+     CallDataCopyZeroSizeWithOversizedDestRemainsNoOp) {
+  auto BytecodeBuf = zen::utils::fromHex(
+      "60006000"
+      "7f0100000000000000000000000000000000000000000000000000000000000000"
+      "3760006000f3");
+  ASSERT_TRUE(BytecodeBuf)
+      << "Failed to parse zero-size calldata-copy bytecode";
+
+  expectInterpMatchesMultipass("calldatacopy_zero_size_oversized_dest",
+                               *BytecodeBuf, {}, EVMC_SUCCESS);
+}
+
+TEST(EVMMultipassCopyHelperTest,
+     CallDataCopyNonZeroSizeWithOversizedDestReturnsOutOfGas) {
+  auto BytecodeBuf = zen::utils::fromHex(
+      "60016000"
+      "7f0100000000000000000000000000000000000000000000000000000000000000"
+      "3700");
+  ASSERT_TRUE(BytecodeBuf)
+      << "Failed to parse oversized calldata-copy bytecode";
+
+  expectInterpMatchesMultipass("calldatacopy_nonzero_size_oversized_dest",
+                               *BytecodeBuf, {}, EVMC_OUT_OF_GAS);
+}
+
+TEST(EVMMultipassCopyHelperTest,
+     CodeCopyMatchesInterpreterAfterMemoryPreExpand) {
+  auto BytecodeBuf = zen::utils::fromHex("6008600060003960206000f3");
+  ASSERT_TRUE(BytecodeBuf) << "Failed to parse code-copy bytecode";
+
+  std::vector<uint8_t> ExpectedOutput = {0x60, 0x08, 0x60, 0x00,
+                                         0x60, 0x00, 0x39, 0x60};
+  ExpectedOutput.resize(32, 0);
+
+  expectInterpMatchesMultipass(
+      "codecopy_preexpand", *BytecodeBuf, {}, EVMC_SUCCESS,
+      zen::utils::toHex(ExpectedOutput.data(), ExpectedOutput.size()));
+}
+
+TEST(EVMMultipassCopyHelperTest,
+     CodeCopyNonZeroSizeWithOversizedDestReturnsOutOfGas) {
+  auto BytecodeBuf = zen::utils::fromHex(
+      "60016000"
+      "7f0100000000000000000000000000000000000000000000000000000000000000"
+      "3900");
+  ASSERT_TRUE(BytecodeBuf) << "Failed to parse oversized code-copy bytecode";
+
+  expectInterpMatchesMultipass("codecopy_nonzero_size_oversized_dest",
+                               *BytecodeBuf, {}, EVMC_OUT_OF_GAS);
 }
 
 TEST(EVMMultipassKeccakHelperTest,
