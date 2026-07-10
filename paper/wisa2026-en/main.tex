@@ -1,23 +1,26 @@
 % paper/wisa2026-en/main.tex
-% WISA 2026 submission (LNCS format, up to 12 pages)
-% Double-blind: no author, affiliation, acknowledgment, funding,
-% self-citation, or code-repository link.
+% WISA 2026 camera-ready (LNCS format, up to 12 pages)
+% CAMERA-READY TODO before final submission:
+%   (1) fill the real author list / affiliations / emails / ORCID iDs below;
+%   (2) fill pdfauthor in \hypersetup to match;
+%   (3) fill or delete the credits block (acknowledgements / disclosure)
+%       before the bibliography;
+%   (4) sign the Springer consent-to-publish form (outside LaTeX).
 
 \documentclass[runningheads]{llncs}
 
 \usepackage[T1]{fontenc}
+\usepackage{marvosym}% \Letter marker for the corresponding author
 \usepackage{graphicx}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{multirow}
 \usepackage[breaklinks=true,hidelinks]{hyperref}
 \hypersetup{
-  pdftitle={},
-  pdfauthor={},
-  pdfsubject={},
-  pdfkeywords={},
-  pdfcreator={},
-  pdfproducer={}
+  pdftitle={dMIR Peephole Rewrites for Consensus-Critical EVM JITs with First-Class Carry Operators},
+  pdfauthor={},% CAMERA-READY TODO: full author list, e.g. First Author and Chunyan Zhao
+  pdfsubject={WISA 2026},
+  pdfkeywords={Blockchain information systems, EVM JIT, dMIR, Peephole optimization, SMT equivalence checking, Carry chain, Translation validation}
 }
 \AtBeginDocument{\renewcommand{\doi}[1]{%
   \href{https://doi.org/\detokenize{#1}}{doi:\detokenize{#1}}}}
@@ -36,15 +39,19 @@
 
 \titlerunning{dMIR Rewrites for EVM JITs}
 
-\author{Anonymous Author(s)}
-\authorrunning{Anonymous}
-\institute{Anonymous Institution\\
-\email{anonymous@example.com}}
+% CAMERA-READY TODO: replace every [\,TODO\,] placeholder with the real
+% author list (names, order), affiliations, emails, and ORCID iDs.
+% Corresponding author: Chunyan Zhao (marked with \Letter).
+\author{[First~Author~TODO]\inst{1} \and
+Chunyan~Zhao\textsuperscript{(\Letter)}\inst{1}}
+\authorrunning{[F. Author TODO] and C. Zhao}
+\institute{[Institution TODO], [City, Country TODO]\\
+\email{[first.author.email TODO]}, \email{[chunyan.zhao.email TODO]}}
 
 \maketitle
 
 \begin{abstract}
-Peephole rewrites in blockchain JIT compilers must preserve transaction semantics bit-for-bit; divergence between consensus-path EVM clients can cause chain forks. Lowering U256 (256-bit) arithmetic to 64-bit hardware creates multi-word carry chains, but LLVM/Alive2 overflow intrinsics expose carry through multi-result tuples, splitting carry-dependent rewrites across SSA nodes. This blocks many rules from single-query equivalence checks and leaves engineers to drop such rules, ship them unverified, or hand-prove them. dMIR, the middle IR of DTVM (an open-source EVM JIT), represents carry and overflow as first-class bit-vector operators, so each dMIR rewrite becomes a single Z3 equivalence query within a two-tier optimization architecture. An offline Z3 admission and coverage pipeline checks all 70 production dMIR rewrites under fixed-width modular bit-vector semantics, including carry-chain rewrites enabled by ADC/SBB operators. A separate x86 CgIR (code-generation IR) layer adds 13 cleanup rewrites validated by matched differential testing rather than SMT. The full 83-rule system achieves a 7.24\% geometric-mean speedup on 27 evmone-bench workloads, with all 5{,}884 paired differential tests across Cancun statetests and EVM-spec unit tests reporting byte-identical final state and matching gas accounting (correctness bounded by suite coverage). This design addresses a verification bottleneck for consensus-critical EVM JITs through a domain-specific IR whose carry and overflow semantics are SMT-checkable.
+Peephole rewrites in blockchain JIT compilers must preserve transaction semantics bit-for-bit; divergence between consensus-path EVM clients can cause chain forks. Lowering U256 (256-bit) arithmetic to 64-bit hardware creates multi-word carry chains, but LLVM/Alive2 overflow intrinsics expose carry through multi-result tuples, splitting carry-dependent rewrites across SSA nodes. This blocks many rules from direct single-query equivalence checks and leaves engineers to drop them, ship them unverified, or hand-prove them. dMIR, the middle IR of DTVM (an open-source EVM JIT), represents carry and overflow as first-class bit-vector operators, so each dMIR rewrite becomes a single Z3 equivalence query within a two-tier optimization architecture. An offline Z3 admission and coverage pipeline checks all 70 production dMIR rewrites under fixed-width modular bit-vector semantics, including carry-chain rewrites enabled by ADC/SBB operators. A separate x86 CgIR (code-generation IR) layer adds 13 cleanup rewrites validated by matched differential testing rather than SMT. The full 83-rule system achieves a 7.24\% geometric-mean speedup on 27 evmone-bench workloads, with all 5{,}884 paired differential tests across Cancun statetests and EVM-spec unit tests reporting byte-identical final state and matching gas accounting (correctness bounded by suite coverage). This design addresses a verification bottleneck for consensus-critical EVM JITs through a domain-specific IR whose carry and overflow semantics are SMT-checkable.
 
 \keywords{Blockchain information systems \and EVM JIT \and dMIR \and Peephole optimization \and SMT equivalence checking \and Carry chain \and Translation validation}
 \end{abstract}
@@ -56,6 +63,14 @@ Peephole rewrites in blockchain JIT compilers must preserve transaction semantic
 \FloatBarrier
 \input{sections/05-conclusion}
 \input{sections/06-availability}
+
+% CAMERA-READY TODO: fill in (or delete) the credits block below.
+% llncs v2.24 provides \begin{credits} with \ackname / \discintname.
+%\begin{credits}
+%\subsubsection{\ackname} [Funding sources and thanks TODO.]
+%\subsubsection{\discintname} The authors have no competing interests to
+%declare that are relevant to the content of this article.
+%\end{credits}
 
 \bibliographystyle{splncs04}
 \bibliography{references}

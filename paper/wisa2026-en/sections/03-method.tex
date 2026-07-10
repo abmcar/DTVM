@@ -66,7 +66,9 @@ operands and the 1-bit carry to 257 bits, sums once, and slices: the
 low 256 bits are the result and bit 256 is carry out. This embeds carry
 propagation entirely in bit-vector arithmetic with no multi-return tuple
 or auxiliary predicate. The model covers dMIR arithmetic and flags; gas,
-memory aliasing, storage, and x86 equivalence remain outside it. The same
+memory aliasing, storage, and x86 equivalence remain outside it and are
+exercised only empirically, by the matched differential suites of
+Sec.~\ref{sec:correctness}, which compare final state and gas accounting. The same
 semantics covers ordinary operators
 (\texttt{add}, \texttt{sub}, \texttt{mul}, \texttt{and}, \texttt{or},
 \texttt{xor}, shifts); only the carry-chain operators are not provided
@@ -154,11 +156,14 @@ that selects the 70 production rules. The corpus pass reproduces,
 byte-identical to the prior corpus audit, the same audit-accepted subset
 of 1{,}432 rules; equivalence between the two paths is the contribution,
 not a yield gain. The audit-accepted denominator used below is 1{,}432.
-The three rule populations have distinct roles: \textbf{70} production
-rules are deployed (the only ones loaded at runtime); \textbf{1{,}966}
-enumerator-admitted candidates (Sec.~\ref{sec:evaluation}) characterize
-search-space capacity; \textbf{1{,}432} corpus-audit-accepted candidates
-serve as the shadow-audit denominator.
+The rule populations in this paper have distinct roles: \textbf{70}
+production dMIR rules are deployed---joined at runtime by \textbf{13}
+x86 CgIR cleanups for the \textbf{83}-rule production set
+(Table~\ref{tab:rule-classes}), the only rules loaded in the JIT;
+\textbf{1{,}966} enumerator-admitted candidates
+(Sec.~\ref{sec:evaluation}) characterize search-space capacity;
+\textbf{1{,}432} corpus-audit-accepted candidates serve as the
+shadow-audit denominator (Sec.~\ref{sec:shadow-audit}).
 
 \paragraph{Counterexamples.} A rejected carry template illustrates why
 SMT admission is essential on the chain: $\texttt{SBB}(x, x, c_f) \to 0$
@@ -197,6 +202,6 @@ selected manually from recurring profile hotspots and lowering
 patterns, then submitted one by one to Z3; this is hotspot-guided
 curation, not a claim of systematic optimality. The enumeration pipeline
 is a measurement channel: it does not drive production rule maintenance,
-and the 1966 admitted candidates are not automatically promoted to
+and the 1{,}966 admitted candidates are not automatically promoted to
 production. The x86-layer rules are covered by code review and matched
 test suites.
