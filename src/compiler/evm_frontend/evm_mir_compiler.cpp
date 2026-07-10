@@ -5026,18 +5026,6 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
   }
   U256Inst ValueParts = extractU256Operand(ValueComponents);
 
-  MInstruction *SizeConst = createIntConstInstruction(I64Type, 1);
-  MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
-      false, OP_add, I64Type, Offset, SizeConst);
-  // Tie expansion ordering to the stored value to prevent reordering.
-  MInstruction *Zero = createIntConstInstruction(I64Type, 0);
-  MInstruction *ValueDep = createInstruction<BinaryInstruction>(
-      false, OP_and, I64Type, ValueParts[0], Zero);
-  RequiredSize = createInstruction<BinaryInstruction>(false, OP_add, I64Type,
-                                                      RequiredSize, ValueDep);
-  MInstruction *Overflow = createInstruction<CmpInstruction>(
-      false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
-      Offset);
   bool UsedConstPrecheck = false;
   if (!UsedLinearPrecheck) {
     UsedConstPrecheck = tryConsumeConstBlockMemoryPrecheck();
@@ -5053,6 +5041,18 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
                          OriginalConstOffset, OffsetKnownU64, 1,
                          UsedSharedPrecheck);
   if (!UsedSharedPrecheck) {
+    MInstruction *SizeConst = createIntConstInstruction(I64Type, 1);
+    MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
+        false, OP_add, I64Type, Offset, SizeConst);
+    // Tie expansion ordering to the stored value to prevent reordering.
+    MInstruction *Zero = createIntConstInstruction(I64Type, 0);
+    MInstruction *ValueDep = createInstruction<BinaryInstruction>(
+        false, OP_and, I64Type, ValueParts[0], Zero);
+    RequiredSize = createInstruction<BinaryInstruction>(false, OP_add, I64Type,
+                                                        RequiredSize, ValueDep);
+    MInstruction *Overflow = createInstruction<CmpInstruction>(
+        false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
+        Offset);
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
     ++MemStats.MStore8ExpandCount;
     if (CurBlockMemStats.Active) {
