@@ -456,6 +456,23 @@ TEST(EVMRangeDifferential, AndU64MaskThenNarrowAddMatchesInterpreter) {
   }
 }
 
+TEST(EVMRangeDifferential, DeadUnderResolvedFallthroughMatchesInterpreter) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01, // PC0 PUSH1 0x01 (take JUMPI)
+      0x60, 0x0b, // PC2 PUSH1 0x0b
+      0x57,       // PC4 JUMPI
+      0x01,       // PC5 ADD (dead under-resolved fallthrough)
+      0x60, 0x00, // PC6 PUSH1 0x00
+      0x60, 0x0b, // PC8 PUSH1 0x0b
+      0x56,       // PC10 JUMP
+      0x5b,       // PC11 JUMPDEST
+      0x00,       // PC12 STOP
+  };
+
+  EXPECT_TRUE(expectInterpMatchesMultipass("dead_under_resolved_fallthrough",
+                                           Bytecode, {}));
+}
+
 // Regression: a lifted block with a hidden live-in prefix (HiddenLiveInPrefix
 // Depth > 0) that takes a materializing exit must spill its logical stack from
 // the stack bottom, not from byte offset Hidden*32. The lifted logical stack

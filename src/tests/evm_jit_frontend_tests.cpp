@@ -485,6 +485,11 @@ private:
 #undef MOCK_VOID_STUB
 };
 
+class DynamicPushMockEVMBuilder : public MockEVMBuilder {
+public:
+  Operand handlePush(const zen::common::Bytes &) { return Operand(); }
+};
+
 TEST(EVMMirBuilderConstFoldTest, ExpFoldsConstantOperands) {
   MirBuilderConstFoldHarness Harness;
   using Operand = EVMMirBuilder::Operand;
@@ -569,6 +574,31 @@ TEST(EVMMirBuilderConstFoldTest, SignextendFoldsConstantOperands) {
   // SIGNEXTEND(31, x): index >= 31 leaves the value untouched
   EXPECT_EQ(fold({31, 0, 0, 0}, {1, 0, 0, Ones}).getConstValue(),
             (U256Value{1, 0, 0, Ones}));
+}
+
+TEST(EVMJITFrontendVisitorTest, DynamicJumpConsistencyErrorEscapesVisitor) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x04, // PC0 PUSH1 0x04 (analyzer resolves a constant destination)
+      0x56,       // PC2 JUMP
+      0xfe,       // PC3 INVALID padding
+      0x5b,       // PC4 JUMPDEST
+      0x00,       // PC5 STOP
+  };
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  DynamicPushMockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<DynamicPushMockEVMBuilder> Visitor(Builder,
+                                                                  &Ctx);
+  try {
+    (void)Visitor.compile();
+    FAIL() << "dynamic-jump consistency error was swallowed";
+  } catch (const zen::common::Error &Error) {
+    EXPECT_EQ(Error.getCode(),
+              zen::common::ErrorCode::EVMDynamicJumpConsistencyFailed);
+  }
 }
 
 TEST(EVMJITFrontendAnalyzerTest, ConstantJumpCanonicalizesJumpDestRuns) {
@@ -707,34 +737,40 @@ TEST(EVMJITFrontendAnalyzerTest,
   EXPECT_FALSE(JumpDestBlock->CanLiftStack);
 }
 
-TEST(EVMJITFrontendAnalyzerTest, UnderResolvedEntryDepthBlockIsNotLifted) {
+TEST(EVMJITFrontendAnalyzerTest,
+     UnderResolvedEntryDepthInvalidatesStaticSuccessors) {
   // A block whose resolved entry depth cannot cover its own stack pops
-  // (ResolvedEntryStackDepth + MinStackHeight < 0) must never be lifted. Here
-  // the JUMPI fallthrough block enters at depth 0 and its ADD pops two slots,
-  // so MinStackHeight is -2. Lifting it would size the logical entry state to
-  // the too-shallow depth and trip a spurious EVMStackUnderflow in
-  // validateLiftedBlockStackBounds. This is the local signature of an
-  // internal-function return continuation whose absolute entry depth the region
-  // uniform-entry heuristic under-counts by the caller's hidden frame; the
-  // non-lifted path stays correct because its runtime stack-depth check reads
-  // the real (deeper) runtime stack.
+  // (ResolvedEntryStackDepth + MinStackHeight < 0) has an untrustworthy
+  // absolute depth. Any static successor whose depth may depend on that exit
+  // is equally untrustworthy and must not feed entry-shape or range analysis.
   const std::vector<uint8_t> Bytecode = {
       0x60, 0x01, // PC0 PUSH1 0x01 (cond)
-      0x60, 0x07, // PC2 PUSH1 0x07 (jumpi dest)
+      0x60, 0x0b, // PC2 PUSH1 0x0b (jumpi dest)
       0x57,       // PC4 JUMPI
       0x01,       // PC5 ADD (fallthrough block pops two slots at entry depth 0)
-      0x00,       // PC6 STOP
-      0x5b,       // PC7 JUMPDEST
-      0x00        // PC8 STOP
+      0x60, 0x00, // PC6 PUSH1 0x00
+      0x60, 0x0b, // PC8 PUSH1 0x0b
+      0x56,       // PC10 JUMP
+      0x5b,       // PC11 JUMPDEST
+      0x00        // PC12 STOP
   };
 
   const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
   const auto *UnderflowBlock = findBlock(Analyzer, 5);
+  const auto *SuccessorBlock = findBlock(Analyzer, 11);
   ASSERT_NE(UnderflowBlock, nullptr);
+  ASSERT_NE(SuccessorBlock, nullptr);
 
-  EXPECT_EQ(UnderflowBlock->ResolvedEntryStackDepth, 0);
   EXPECT_EQ(UnderflowBlock->MinStackHeight, -2);
+  EXPECT_EQ(UnderflowBlock->ResolvedEntryStackDepth, -1);
+  EXPECT_TRUE(UnderflowBlock->HasInconsistentEntryDepth);
   EXPECT_FALSE(UnderflowBlock->CanLiftStack);
+  EXPECT_TRUE(UnderflowBlock->EntryStackRanges.empty());
+
+  EXPECT_EQ(SuccessorBlock->ResolvedEntryStackDepth, -1);
+  EXPECT_TRUE(SuccessorBlock->HasInconsistentEntryDepth);
+  EXPECT_FALSE(SuccessorBlock->CanLiftStack);
+  EXPECT_TRUE(SuccessorBlock->EntryStackRanges.empty());
 }
 
 TEST(EVMJITFrontendAnalyzerTest,

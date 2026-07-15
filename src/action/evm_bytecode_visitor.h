@@ -816,9 +816,8 @@ private:
         handleEndBlock();
         handleStop();
       }
-    } catch (const common::Error &E) {
-      ZEN_UNREACHABLE();
-      return false;
+    } catch (const common::Error &) {
+      throw;
     }
     return true;
   }

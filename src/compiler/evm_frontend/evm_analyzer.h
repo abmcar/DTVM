@@ -447,6 +447,7 @@ public:
     resolveEntryDepths();
     markDynamicJumpTargetCandidates();
     resolveDynamicJumpTargetEntryDepths();
+    invalidateUnderResolvedEntryDepths();
     finalizeEntryShapeMetadata();
     finalizeLiftability();
     runRangeAnalysis(Bytecode, BytecodeSize);
@@ -1291,6 +1292,17 @@ private:
     }
   }
 
+  void invalidateUnderResolvedEntryDepths() {
+    for (const auto &[EntryPC, Info] : BlockInfos) {
+      if (Info.ResolvedEntryStackDepth >= 0 &&
+          Info.ResolvedEntryStackDepth + Info.MinStackHeight < 0) {
+        // The absolute entry depth cannot satisfy this block's own pops, so
+        // neither it nor depths propagated from its exit are trustworthy.
+        invalidateReachableEntryDepths(EntryPC);
+      }
+    }
+  }
+
   bool hasCompatibleDynamicJumpTargetsForRegion(uint64_t RegionEntryPC) const {
     int32_t DynamicJumpEntryDepth = -1;
     if (!getUniformDynamicJumpEntryDepthForRegion(RegionEntryPC,
@@ -1424,20 +1436,6 @@ private:
       // non-lifted path is depth-free and correct (established by this branch's
       // materialization gates).
       if (Info.CanLiftStack && Info.EntryDepthFromRegionHeuristic) {
-        Info.CanLiftStack = false;
-      }
-      // Subsumed sanity check: a block whose resolved entry depth cannot cover
-      // its own stack pops (ResolvedEntryStackDepth + MinStackHeight < 0) is
-      // provably under-resolved -- a real block cannot pop below the true stack
-      // bottom. The taint rule above already excludes every heuristic-derived
-      // depth (the sole known source of such under-counting), so this now fires
-      // only for a hypothetical residual static under-resolution. Kept as a
-      // defensive net: lifting an under-resolved block would trip a spurious
-      // EVMStackUnderflow in validateLiftedBlockStackBounds, while the
-      // non-lifted path stays correct because its runtime stack-depth check
-      // reads the real (deeper) runtime stack.
-      if (Info.CanLiftStack &&
-          Info.ResolvedEntryStackDepth + Info.MinStackHeight < 0) {
         Info.CanLiftStack = false;
       }
       if (Info.CanLiftStack && Info.IsDynamicJumpTargetCandidate &&
@@ -1742,9 +1740,8 @@ private:
     return EVMValueRange::U64;
   }
 
-  // Pop `Count` entries from `Stack`, padding with U256 if the stack is
-  // shallower than expected (under-approximated entry stack should never
-  // happen after `resolveEntryDepths` succeeded, but guard defensively).
+  // Pop up to `Count` existing entries. Missing operands stay unrepresented;
+  // propagation validates producer and successor shapes before meeting them.
   static void popStackRanges(std::vector<EVMValueRange> &Stack, size_t Count) {
     while (Count > 0 && !Stack.empty()) {
       Stack.pop_back();
@@ -2150,14 +2147,25 @@ private:
 
         const size_t SuccDepth =
             static_cast<size_t>(SuccInfo.ResolvedEntryStackDepth);
-        // seedRangeEntryVectors already sizes every block with
-        // ResolvedEntryStackDepth >= 0 correctly; this branch is unreachable.
-        ZEN_ASSERT(SuccInfo.EntryStackRanges.size() == SuccDepth);
-
-        // Producer's exit depth and successor's entry depth are linked by
-        // resolveEntryDepths and must match for every block pair reaching this
-        // point (both have ResolvedEntryStackDepth >= 0 and consistent depth).
-        ZEN_ASSERT(ExitStack.size() == SuccDepth);
+        if (SuccInfo.EntryStackRanges.size() != SuccDepth ||
+            ExitStack.size() != SuccDepth) {
+          // Slot indices are bottom-to-top, so resizing either vector could
+          // align unrelated values and unsafely enable a narrow-value path.
+          // Discard every inferred range and disable lifting, which also
+          // depends on the absolute stack shape whose invariant just failed.
+          for (auto &[FallbackPC, FallbackInfo] : BlockInfos) {
+            (void)FallbackPC;
+            FallbackInfo.CanLiftStack = false;
+            FallbackInfo.EntryStackRanges.clear();
+            if (FallbackInfo.ResolvedEntryStackDepth >= 0 &&
+                !FallbackInfo.HasInconsistentEntryDepth) {
+              FallbackInfo.EntryStackRanges.assign(
+                  static_cast<size_t>(FallbackInfo.ResolvedEntryStackDepth),
+                  EVMValueRange::U256);
+            }
+          }
+          return;
+        }
         // Meet the producer's exit stack into the successor's entry stack.
         bool Changed = false;
         for (size_t I = 0; I < SuccDepth; ++I) {
