@@ -158,14 +158,12 @@ public:
     int32_t ResolvedEntryStackDepth = -1;
     int32_t ResolvedExitStackDepth = -1;
     int32_t FullEntryStateDepth = -1;
-    // True when ResolvedEntryStackDepth was derived from the dynamic-jump
-    // region uniform-entry heuristic -- either seeded directly by
-    // resolveDynamicJumpTargetEntryDepths or inherited through static
-    // propagation from such a seed. A heuristic depth has no correctness proof
-    // (it can under-count a caller's hidden frame), so tainted blocks are never
-    // lifted; only depths propagated purely from the function entry (seed depth
-    // 0) stay trusted. See finalizeLiftability.
-    bool EntryDepthFromRegionHeuristic = false;
+    // True when this block may be entered with a runtime stack depth supplied
+    // by an indirect jump. The analyzer's statically resolved depth may then
+    // under-count a caller's hidden frame, so tainted blocks are never lifted.
+    // The taint starts at every JUMPDEST once a reachable dynamic source exists
+    // and follows static successors. See markDynamicDispatchEntryDepthTaint().
+    bool EntryDepthMayComeFromDynamicDispatch = false;
     int32_t HiddenLiveInPrefixDepth = 0;
     bool HasInconsistentEntryDepth = false;
     bool IsEntryStateCompatible = false;
@@ -481,6 +479,7 @@ public:
     linkPredecessors();
     resolveEntryDepths();
     markDynamicJumpTargetCandidates();
+    markDynamicDispatchEntryDepthTaint();
     resolveDynamicJumpTargetEntryDepths();
     invalidateUnderResolvedEntryDepths();
     finalizeEntryShapeMetadata();
@@ -530,6 +529,68 @@ private:
       }
     }
     return Reachable;
+  }
+
+  void markDynamicDispatchEntryDepthTaint() {
+    // Dead dynamic sources cannot execute, so first prove that at least one
+    // dynamic jump is reachable from the function entry in the conservative
+    // analyzer CFG. This deliberately does not prune JUMPI edges by proving
+    // their runtime condition constant.
+    std::unordered_set<uint64_t> Visited;
+    std::queue<uint64_t> WorkList;
+    Visited.insert(EntryBlockPC);
+    WorkList.push(EntryBlockPC);
+    bool HasReachableDynamicJump = false;
+    while (!WorkList.empty()) {
+      const uint64_t BlockPC = WorkList.front();
+      WorkList.pop();
+      auto It = BlockInfos.find(BlockPC);
+      if (It == BlockInfos.end()) {
+        continue;
+      }
+      if (It->second.HasDynamicJump) {
+        HasReachableDynamicJump = true;
+        break;
+      }
+      for (uint64_t SuccPC : It->second.Successors) {
+        if (Visited.insert(SuccPC).second) {
+          WorkList.push(SuccPC);
+        }
+      }
+    }
+    if (!HasReachableDynamicJump) {
+      return;
+    }
+
+    // Runtime indirect dispatch can land on any canonical JUMPDEST, including
+    // backward targets outside the analyzer's forward dynamic-region
+    // heuristic. The unknown absolute depth remains unknown along every static
+    // successor edge until execution terminates, so taint the full closure.
+    Visited.clear();
+    WorkList = {};
+    for (auto &[BlockPC, Info] : BlockInfos) {
+      if (!Info.IsJumpDest || !Visited.insert(BlockPC).second) {
+        continue;
+      }
+      Info.EntryDepthMayComeFromDynamicDispatch = true;
+      WorkList.push(BlockPC);
+    }
+    while (!WorkList.empty()) {
+      const uint64_t BlockPC = WorkList.front();
+      WorkList.pop();
+      auto It = BlockInfos.find(BlockPC);
+      if (It == BlockInfos.end()) {
+        continue;
+      }
+      for (uint64_t SuccPC : It->second.Successors) {
+        auto SuccIt = BlockInfos.find(SuccPC);
+        if (SuccIt == BlockInfos.end() || !Visited.insert(SuccPC).second) {
+          continue;
+        }
+        SuccIt->second.EntryDepthMayComeFromDynamicDispatch = true;
+        WorkList.push(SuccPC);
+      }
+    }
   }
 
   // Fallback: look up pre-resolved jump target from the shared cache.
@@ -1028,7 +1089,6 @@ private:
       InvalidInfo.HasInconsistentEntryDepth = true;
       InvalidInfo.ResolvedEntryStackDepth = -1;
       InvalidInfo.ResolvedExitStackDepth = -1;
-      InvalidInfo.EntryDepthFromRegionHeuristic = false;
       for (uint64_t NextSucc : InvalidInfo.Successors) {
         if (InvalidateVisited.emplace(NextSucc, true).second) {
           InvalidateWorkList.push(NextSucc);
@@ -1072,15 +1132,12 @@ private:
         }
         if (SuccInfo.ResolvedEntryStackDepth < 0) {
           SuccInfo.ResolvedEntryStackDepth = ExitDepth;
-          // A successor's depth comes entirely from this predecessor's exit
-          // depth, so it is trusted iff the predecessor is. Propagate the
-          // region-heuristic taint along the static edge. A successor first
-          // resolved from a trusted (entry-seeded) predecessor keeps that depth
-          // and is never re-tainted here (the consistency branch below only
-          // checks equality), matching the rule that static-from-entry depths
-          // stay trusted.
-          SuccInfo.EntryDepthFromRegionHeuristic =
-              Info.EntryDepthFromRegionHeuristic;
+          // A successor inherits both this predecessor's resolved depth and the
+          // fact that runtime indirect dispatch may supply a different absolute
+          // depth. The separate dispatch-closure walk also marks successors
+          // whose static depth was resolved earlier from a trusted predecessor.
+          SuccInfo.EntryDepthMayComeFromDynamicDispatch =
+              Info.EntryDepthMayComeFromDynamicDispatch;
           WorkList.push(Succ);
         } else if (SuccInfo.ResolvedEntryStackDepth != ExitDepth) {
           invalidateReachableEntryDepths(Succ);
@@ -1359,7 +1416,7 @@ private:
           // guess, not a static propagation from the function entry. Mark it so
           // finalizeLiftability keeps this block (and every static successor
           // that inherits the depth) out of lifting.
-          Info.EntryDepthFromRegionHeuristic = true;
+          Info.EntryDepthMayComeFromDynamicDispatch = true;
           WorkList.push(Info.EntryPC);
           continue;
         }
@@ -1503,19 +1560,16 @@ private:
       Info.CanLiftStack = EntryKnown && !Info.HasUndefinedInstr &&
                           !Info.HasInconsistentEntryDepth &&
                           !DynamicJumpDestConflict && !NonLiftableDynamicSource;
-      // Never lift a block whose resolved entry depth came from the dynamic-
-      // jump region uniform-entry heuristic (directly seeded or inherited by
-      // static propagation from such a seed). Lifting bakes the block's
-      // absolute entry depth into its materializing exit spill
+      // Never lift a block that may inherit its absolute entry depth from
+      // runtime indirect dispatch. This includes every JUMPDEST and its static
+      // successor closure once a reachable dynamic source exists, not only the
+      // analyzer's forward dynamic region. Lifting bakes the statically modeled
+      // depth into its materializing exit spill
       // (spillTrackedStackPreservingPrefix sets StackSize absolutely to the
-      // modeled depth), so a heuristic depth that under-counts a caller's
-      // hidden frame -- e.g. an internal-function return continuation -- would
-      // truncate the caller's deeper frame slots and silently diverge from the
-      // interpreter. Only depths propagated purely from the function entry
-      // (seed depth 0) carry a correctness proof, so only they may lift; the
-      // non-lifted path is depth-free and correct (established by this branch's
-      // materialization gates).
-      if (Info.CanLiftStack && Info.EntryDepthFromRegionHeuristic) {
+      // modeled depth), so an under-counted caller frame would be truncated and
+      // silently diverge from the interpreter. The non-lifted path keeps using
+      // the runtime stack and does not require an absolute entry depth.
+      if (Info.CanLiftStack && Info.EntryDepthMayComeFromDynamicDispatch) {
         Info.CanLiftStack = false;
       }
       if (Info.CanLiftStack && Info.IsDynamicJumpTargetCandidate &&

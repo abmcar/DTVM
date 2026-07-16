@@ -1056,11 +1056,11 @@ TEST(EVMJITFrontendAnalyzerTest,
   // The entry block resolves purely from the function entry (seed depth 0), so
   // it is trusted -- never tainted -- even though it carries the dynamic jump.
   EXPECT_TRUE(EntryBlock->HasDynamicJump);
-  EXPECT_FALSE(EntryBlock->EntryDepthFromRegionHeuristic);
+  EXPECT_FALSE(EntryBlock->EntryDepthMayComeFromDynamicDispatch);
 
   // The region JUMPDEST's depth is the heuristic's guess: tainted and unlifted.
   EXPECT_EQ(RegionJumpDest->ResolvedEntryStackDepth, 0);
-  EXPECT_TRUE(RegionJumpDest->EntryDepthFromRegionHeuristic);
+  EXPECT_TRUE(RegionJumpDest->EntryDepthMayComeFromDynamicDispatch);
   EXPECT_FALSE(RegionJumpDest->CanLiftStack);
 
   // The static successor inherits the tainted depth by propagation. It is not a
@@ -1069,8 +1069,87 @@ TEST(EVMJITFrontendAnalyzerTest,
   EXPECT_EQ(Continuation->ResolvedEntryStackDepth, 0);
   EXPECT_EQ(Continuation->MinStackHeight, 0);
   EXPECT_FALSE(Continuation->IsDynamicJumpTargetCandidate);
-  EXPECT_TRUE(Continuation->EntryDepthFromRegionHeuristic);
+  EXPECT_TRUE(Continuation->EntryDepthMayComeFromDynamicDispatch);
   EXPECT_FALSE(Continuation->CanLiftStack);
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     BackwardDynamicTargetTaintsPlainStaticSuccessor) {
+  // PC23 is a reachable dynamic jump. At runtime it can jump backward to PC3
+  // with a hidden caller-frame value, even though PC3 also has a statically
+  // resolved depth-0 predecessor from PC14. PC8 is a plain (non-JUMPDEST)
+  // static successor of PC3, so the dynamic-entry depth taint must reach it and
+  // prevent lifting with the incorrect static depth.
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x0e, // PC0  PUSH1 14
+      0x56,       // PC2  JUMP
+      0x5b,       // PC3  JUMPDEST (backward dynamic target)
+      0x5f,       // PC4  PUSH0 (condition false)
+      0x60, 0x0b, // PC5  PUSH1 11
+      0x57,       // PC7  JUMPI
+      0x60, 0x0b, // PC8  PUSH1 11 (plain static successor)
+      0x56,       // PC10 JUMP
+      0x5b,       // PC11 JUMPDEST
+      0x50,       // PC12 POP
+      0x00,       // PC13 STOP
+      0x5b,       // PC14 JUMPDEST
+      0x5f,       // PC15 PUSH0 (condition false)
+      0x60, 0x03, // PC16 PUSH1 3
+      0x57,       // PC18 JUMPI (static depth-0 edge to PC3)
+      0x60, 0xaa, // PC19 PUSH1 0xaa (hidden caller-frame value)
+      0x5f,       // PC21 PUSH0 (CALLDATALOAD offset)
+      0x35,       // PC22 CALLDATALOAD
+      0x56,       // PC23 dynamic backward JUMP to PC3
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *BackwardTarget = findBlock(Analyzer, 3);
+  const auto *PlainSuccessor = findBlock(Analyzer, 8);
+  const auto *DynamicSource = findBlock(Analyzer, 19);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(BackwardTarget, nullptr);
+  ASSERT_NE(PlainSuccessor, nullptr);
+  ASSERT_NE(DynamicSource, nullptr);
+
+  EXPECT_TRUE(DynamicSource->HasDynamicJump);
+  EXPECT_FALSE(EntryBlock->EntryDepthMayComeFromDynamicDispatch);
+  EXPECT_TRUE(BackwardTarget->EntryDepthMayComeFromDynamicDispatch);
+  EXPECT_TRUE(PlainSuccessor->EntryDepthMayComeFromDynamicDispatch);
+  EXPECT_EQ(PlainSuccessor->ResolvedEntryStackDepth, 0);
+  EXPECT_FALSE(PlainSuccessor->IsDynamicJumpTargetCandidate);
+  EXPECT_FALSE(PlainSuccessor->CanLiftStack);
+  EXPECT_FALSE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     StaticallyDisconnectedDynamicSourceDoesNotTaintLiveSuccessor) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x04, // PC0 PUSH1 4
+      0x56,       // PC2 JUMP
+      0xfe,       // PC3 INVALID padding
+      0x5b,       // PC4 JUMPDEST
+      0x60, 0x01, // PC5 PUSH1 1
+      0x60, 0x0b, // PC7 PUSH1 11
+      0x57,       // PC9 JUMPI
+      0x00,       // PC10 STOP (live plain successor)
+      0x5b,       // PC11 JUMPDEST
+      0x00,       // PC12 STOP
+      0x5b,       // PC13 JUMPDEST (disconnected dynamic source)
+      0x5f,       // PC14 PUSH0
+      0x35,       // PC15 CALLDATALOAD
+      0x56,       // PC16 JUMP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *LiveSuccessor = findBlock(Analyzer, 10);
+  const auto *DynamicSource = findBlock(Analyzer, 13);
+  ASSERT_NE(LiveSuccessor, nullptr);
+  ASSERT_NE(DynamicSource, nullptr);
+
+  EXPECT_TRUE(DynamicSource->HasDynamicJump);
+  EXPECT_FALSE(LiveSuccessor->EntryDepthMayComeFromDynamicDispatch);
+  EXPECT_TRUE(LiveSuccessor->CanLiftStack);
 }
 
 TEST(EVMJITFrontendAnalyzerTest, HiddenEntryPrefixKeepsStaticMergesLiftable) {

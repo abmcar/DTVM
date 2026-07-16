@@ -584,6 +584,48 @@ TEST(EVMLiftedStackDepth, HiddenPrefixMaterializingExitMatchesInterp) {
   EXPECT_EQ(Multi.OutputHex, Interp.OutputHex) << "output diverged";
 }
 
+TEST(EVMLiftedStackDepth, BackwardDynamicEntryMatchesInterpreter) {
+  // A reachable indirect jump can target PC3 backward with a hidden stack
+  // value. PC3 also has a statically resolved depth-0 entry, but that depth
+  // must not allow its plain successor PC8 to lift and discard the hidden
+  // value before PC11 consumes it.
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x0e, // PC0  PUSH1 14
+      0x56,       // PC2  JUMP
+      0x5b,       // PC3  JUMPDEST (backward dynamic target)
+      0x5f,       // PC4  PUSH0 (condition false)
+      0x60, 0x0b, // PC5  PUSH1 11
+      0x57,       // PC7  JUMPI
+      0x60, 0x0b, // PC8  PUSH1 11 (plain static successor)
+      0x56,       // PC10 JUMP
+      0x5b,       // PC11 JUMPDEST
+      0x50,       // PC12 POP (consumes hidden 0xaa)
+      0x00,       // PC13 STOP
+      0x5b,       // PC14 JUMPDEST
+      0x5f,       // PC15 PUSH0 (condition false)
+      0x60, 0x03, // PC16 PUSH1 3
+      0x57,       // PC18 JUMPI (static depth-0 edge to PC3)
+      0x60, 0xaa, // PC19 PUSH1 0xaa (hidden caller-frame value)
+      0x5f,       // PC21 PUSH0 (CALLDATALOAD offset)
+      0x35,       // PC22 CALLDATALOAD
+      0x56,       // PC23 dynamic backward JUMP to PC3
+  };
+  std::vector<uint8_t> CallData(32, 0);
+  CallData.back() = 0x03;
+
+  const auto Interp = runEvmBytecode("backward_dynamic_entry_interp", Bytecode,
+                                     common::RunMode::InterpMode, CallData);
+  const auto Multi =
+      runEvmBytecode("backward_dynamic_entry_multipass", Bytecode,
+                     common::RunMode::MultipassMode, CallData);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Multi.JITCompiled) << "multipass did not JIT-compile";
+#endif
+  EXPECT_EQ(Interp.Status, EVMC_SUCCESS) << "interpreter did not succeed";
+  EXPECT_EQ(Multi.Status, Interp.Status) << "status diverged";
+  EXPECT_EQ(Multi.OutputHex, Interp.OutputHex) << "output diverged";
+}
+
 // Deep-entry risk shape: block PC33 is a shared "increment-and-return"
 // subroutine that returns via a stack-passed return PC (SWAP1 then dynamic
 // JUMP), so per-block abstract-stack analysis cannot resolve its return
