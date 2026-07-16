@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "compiler/evm_frontend/evm_analyzer.h"
 #include "evm/evm.h"
 #include "evm_test_host.hpp"
 #include "runtime/evm_module.h"
@@ -521,24 +522,22 @@ TEST(EVMLiftedStackDepth, HiddenPrefixMaterializingExitMatchesInterp) {
   EXPECT_EQ(Multi.OutputHex, Interp.OutputHex) << "output diverged";
 }
 
-// Deep-entry reproducer (recovered by dropping the whole-module fallback
-// guards). This is a minimal internal-function-call shape: block PC33 is a
-// shared "increment-and-return" subroutine that returns via a stack-passed
-// return PC (SWAP1 then dynamic JUMP), so its return continuations cannot be
-// resolved by any per-block abstract-stack pass; their ResolvedEntryStackDepth
-// stays < 0 and the invalidation cascades along the static CFG.
+// Deep-entry risk shape: block PC33 is a shared "increment-and-return"
+// subroutine that returns via a stack-passed return PC (SWAP1 then dynamic
+// JUMP), so per-block abstract-stack analysis cannot resolve its return
+// continuations. Their ResolvedEntryStackDepth stays < 0 and the invalidation
+// cascades along the static CFG.
 //
 // One continuation (PC18) falls through to PC22, whose ADD reads two stack
 // slots -- a static successor of an unresolved-depth block that reads 2 slots.
-// Before this change the analyzer's non-lifted deep-entry predicate fired on
-// exactly this pattern and set ShouldFallbackToInterp=1, routing the whole
-// module to the interpreter. After the dynamic-boundary fix and guard removal
-// the module must JIT-compile and stay byte-identical to the interpreter.
+// The non-lifted deep-entry predicate fires on this pattern. Keep the module on
+// the interpreter path until non-lifted runtime-stack materialization can
+// preserve deeper caller frames for every such shape.
 //
 // Execution: two calls into PC33 turn the initial 0x05 into 0x08 (0x05+1 in the
 // outer frame, 0x07+1 in the inner frame), which is MSTOREd and RETURNed as a
 // single 32-byte word.
-TEST(EVMDeepEntryFallback, InternalCallContinuationJITsAndMatchesInterp) {
+TEST(EVMDeepEntryFallback, InternalCallContinuationFallsBackAndMatchesInterp) {
   const std::vector<uint8_t> Bytecode = {
       0x60, 0x08, // PC0  PUSH1 0x08
       0x60, 0x05, // PC2  PUSH1 0x05  (value threaded through the subroutine)
@@ -568,16 +567,18 @@ TEST(EVMDeepEntryFallback, InternalCallContinuationJITsAndMatchesInterp) {
       0x90,       // PC37 SWAP1
       0x56,       // PC38 JUMP        (dynamic return via stack PC)
   };
+  COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  ASSERT_TRUE(Analyzer.analyze(Bytecode.data(), Bytecode.size()));
+  EXPECT_TRUE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
+
   const std::vector<uint8_t> CallData;
   auto Interp = runEvmBytecode("deep_entry_interp", Bytecode,
                                common::RunMode::InterpMode, CallData);
   auto Multi = runEvmBytecode("deep_entry_multipass", Bytecode,
                               common::RunMode::MultipassMode, CallData);
 #ifdef ZEN_ENABLE_JIT
-  // The whole point of this test: the guards are gone, so this module must now
-  // JIT-compile instead of falling back to the interpreter.
-  EXPECT_TRUE(Multi.JITCompiled)
-      << "deep-entry module did not JIT-compile (guard not removed?)";
+  EXPECT_FALSE(Multi.JITCompiled)
+      << "non-lifted deep-entry risk must fall back to the interpreter";
 #endif
   EXPECT_EQ(Interp.Status, EVMC_SUCCESS) << "interpreter did not succeed";
   EXPECT_EQ(Multi.Status, Interp.Status) << "status diverged";

@@ -83,14 +83,13 @@ EVMModule::newEVMModule(Runtime &RT, CodeHolderUniquePtr CodeHolder,
     COMPILER::EVMAnalyzer Analyzer(Rev);
     Analyzer.analyze(reinterpret_cast<const uint8_t *>(Mod->Code),
                      Mod->CodeSize);
-    // The two structural whole-module guards that used to sit here
-    // (compatible-dynamic-return trampoline and non-lifted deep-entry risk)
-    // protected an SSA stack-lifting optimization that skipped runtime-stack
-    // materialization at some lifted-block exits. That dynamic-boundary hazard
-    // is now closed at the source (spill-depth fix, forced dynamic-exit
-    // materialization, and lift gating), so only the size/complexity threshold
-    // remains -- it bounds compile cost and is orthogonal to lifting.
-    Mod->ShouldFallbackToInterp = Analyzer.getJITSuitability().ShouldFallback;
+    // Lifted-path boundary fixes do not cover unresolved non-lifted deep-entry
+    // shapes, including builds with ZEN_ENABLE_EVM_STACK_SSA_LIFT=OFF. Keep
+    // those modules on the interpreter until their deeper caller frames can be
+    // materialized soundly by the JIT.
+    Mod->ShouldFallbackToInterp =
+        Analyzer.getJITSuitability().ShouldFallback ||
+        Analyzer.hasUnresolvedNonLiftedDeepEntryRisk();
 
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
     if (RT.getConfig().EnableProfileGuidedJIT) {

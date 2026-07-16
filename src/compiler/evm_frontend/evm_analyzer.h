@@ -416,6 +416,36 @@ public:
 
   const JITSuitabilityResult &getJITSuitability() const { return JITResult; }
 
+  bool hasUnresolvedNonLiftedDeepEntryRisk() const {
+    for (const auto &[BlockPC, Info] : BlockInfos) {
+      (void)BlockPC;
+      if (Info.CanLiftStack || Info.ResolvedEntryStackDepth >= 0) {
+        continue;
+      }
+
+      const int32_t RequiredEntryDepth = -Info.MinStackHeight;
+      if (RequiredEntryDepth <= 1) {
+        continue;
+      }
+
+      for (uint64_t PredBlockPC : Info.Predecessors) {
+        auto PredIt = BlockInfos.find(PredBlockPC);
+        if (PredIt == BlockInfos.end()) {
+          continue;
+        }
+
+        const BlockInfo &PredInfo = PredIt->second;
+        if (PredInfo.CanLiftStack || PredInfo.ResolvedEntryStackDepth >= 0) {
+          continue;
+        }
+
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   bool hasCanonicalJumpDest(uint64_t PC) const {
     return JumpDestCanonicalPCs.count(PC) != 0;
   }
