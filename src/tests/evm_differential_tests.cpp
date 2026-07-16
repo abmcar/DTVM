@@ -474,6 +474,34 @@ TEST(EVMRangeDifferential, DeadUnderResolvedFallthroughMatchesInterpreter) {
                                            Bytecode, {}));
 }
 
+TEST(EVMDeepEntryFallback, DeadCfgDoesNotBlockJITAndMatchesInterpreter) {
+  const std::vector<uint8_t> Bytecode = {
+      0x00, // PC0 STOP
+      0x5b, // PC1 JUMPDEST (dead dynamic source)
+      0x5f, // PC2 PUSH0
+      0x35, // PC3 CALLDATALOAD
+      0x56, // PC4 JUMP (unreachable dynamic jump)
+      0x5b, // PC5 JUMPDEST (dead predecessor)
+      0x50, // PC6 POP
+      0x5b, // PC7 JUMPDEST (dead, requires two entry slots)
+      0x01, // PC8 ADD
+      0x00, // PC9 STOP
+  };
+  COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  ASSERT_TRUE(Analyzer.analyze(Bytecode.data(), Bytecode.size()));
+  ASSERT_FALSE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
+
+  const auto Interp = runEvmBytecode("dead_deep_entry_interp", Bytecode,
+                                     common::RunMode::InterpMode);
+  const auto Multi = runEvmBytecode("dead_deep_entry_multipass", Bytecode,
+                                    common::RunMode::MultipassMode);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Multi.JITCompiled) << "dead CFG blocked JIT compilation";
+#endif
+  EXPECT_EQ(Multi.Status, Interp.Status);
+  EXPECT_EQ(Multi.OutputHex, Interp.OutputHex);
+}
+
 // Regression: a lifted block with a hidden live-in prefix (HiddenLiveInPrefix
 // Depth > 0) that takes a materializing exit must spill its logical stack from
 // the stack bottom, not from byte offset Hidden*32. The lifted logical stack
@@ -530,14 +558,16 @@ TEST(EVMLiftedStackDepth, HiddenPrefixMaterializingExitMatchesInterp) {
 //
 // One continuation (PC18) falls through to PC22, whose ADD reads two stack
 // slots -- a static successor of an unresolved-depth block that reads 2 slots.
-// The non-lifted deep-entry predicate fires on this pattern. Keep the module on
-// the interpreter path until non-lifted runtime-stack materialization can
-// preserve deeper caller frames for every such shape.
+// The conservative admission predicate fires on this reachable pattern. A
+// forced-JIT control currently matches the interpreter for this bytecode, but
+// this local shape does not prove that every deeper caller frame is safe; the
+// mainnet tx46 storage divergence is the external evidence requiring the guard.
 //
 // Execution: two calls into PC33 turn the initial 0x05 into 0x08 (0x05+1 in the
 // outer frame, 0x07+1 in the inner frame), which is MSTOREd and RETURNed as a
 // single 32-byte word.
-TEST(EVMDeepEntryFallback, InternalCallContinuationFallsBackAndMatchesInterp) {
+TEST(EVMDeepEntryFallback,
+     ReachableInternalCallUsesConservativeAdmissionFallback) {
   const std::vector<uint8_t> Bytecode = {
       0x60, 0x08, // PC0  PUSH1 0x08
       0x60, 0x05, // PC2  PUSH1 0x05  (value threaded through the subroutine)
@@ -578,7 +608,7 @@ TEST(EVMDeepEntryFallback, InternalCallContinuationFallsBackAndMatchesInterp) {
                               common::RunMode::MultipassMode, CallData);
 #ifdef ZEN_ENABLE_JIT
   EXPECT_FALSE(Multi.JITCompiled)
-      << "non-lifted deep-entry risk must fall back to the interpreter";
+      << "conservative deep-entry admission guard did not fall back";
 #endif
   EXPECT_EQ(Interp.Status, EVMC_SUCCESS) << "interpreter did not succeed";
   EXPECT_EQ(Multi.Status, Interp.Status) << "status diverged";

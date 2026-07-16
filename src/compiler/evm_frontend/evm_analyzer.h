@@ -417,9 +417,11 @@ public:
   const JITSuitabilityResult &getJITSuitability() const { return JITResult; }
 
   bool hasUnresolvedNonLiftedDeepEntryRisk() const {
+    const std::unordered_set<uint64_t> PossiblyReachableBlockPCs =
+        collectPossiblyReachableBlockPCs();
     for (const auto &[BlockPC, Info] : BlockInfos) {
-      (void)BlockPC;
-      if (Info.CanLiftStack || Info.ResolvedEntryStackDepth >= 0) {
+      if (PossiblyReachableBlockPCs.count(BlockPC) == 0 || Info.CanLiftStack ||
+          Info.ResolvedEntryStackDepth >= 0) {
         continue;
       }
 
@@ -429,6 +431,9 @@ public:
       }
 
       for (uint64_t PredBlockPC : Info.Predecessors) {
+        if (PossiblyReachableBlockPCs.count(PredBlockPC) == 0) {
+          continue;
+        }
         auto PredIt = BlockInfos.find(PredBlockPC);
         if (PredIt == BlockInfos.end()) {
           continue;
@@ -485,6 +490,46 @@ public:
   }
 
 private:
+  std::unordered_set<uint64_t> collectPossiblyReachableBlockPCs() const {
+    std::unordered_set<uint64_t> Reachable;
+    if (BlockInfos.count(EntryBlockPC) == 0) {
+      return Reachable;
+    }
+
+    std::queue<uint64_t> WorkList;
+    Reachable.insert(EntryBlockPC);
+    WorkList.push(EntryBlockPC);
+    bool DynamicTargetsQueued = false;
+    while (!WorkList.empty()) {
+      const uint64_t BlockPC = WorkList.front();
+      WorkList.pop();
+      auto It = BlockInfos.find(BlockPC);
+      if (It == BlockInfos.end()) {
+        continue;
+      }
+
+      const BlockInfo &Info = It->second;
+      for (uint64_t SuccPC : Info.Successors) {
+        if (Reachable.insert(SuccPC).second) {
+          WorkList.push(SuccPC);
+        }
+      }
+
+      if (!Info.HasDynamicJump || DynamicTargetsQueued) {
+        continue;
+      }
+      DynamicTargetsQueued = true;
+      // Indirect-jump lowering can dispatch a reachable dynamic source to any
+      // canonical JUMPDEST, independent of analyzer region heuristics.
+      for (const auto &[TargetPC, TargetInfo] : BlockInfos) {
+        if (TargetInfo.IsJumpDest && Reachable.insert(TargetPC).second) {
+          WorkList.push(TargetPC);
+        }
+      }
+    }
+    return Reachable;
+  }
+
   // Fallback: look up pre-resolved jump target from the shared cache.
   // Used when local abstract stack analysis cannot resolve the jump.
   // The shared map stores raw (non-canonicalized) PCs; we canonicalize here
