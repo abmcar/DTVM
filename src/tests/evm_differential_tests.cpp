@@ -502,6 +502,40 @@ TEST(EVMDeepEntryFallback, DeadCfgDoesNotBlockJITAndMatchesInterpreter) {
   EXPECT_EQ(Multi.OutputHex, Interp.OutputHex);
 }
 
+TEST(EVMDeepEntryFallback,
+     InvalidConstantJumpTrapsWithoutConservativeFallback) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xff, // PC0 PUSH1 0xff (invalid jump destination)
+      0x56,       // PC2 JUMP
+      0x5b,       // PC3 JUMPDEST (dead predecessor)
+      0x50,       // PC4 POP
+      0x5b,       // PC5 JUMPDEST (dead, requires two entry slots)
+      0x01,       // PC6 ADD
+      0x00,       // PC7 STOP
+  };
+  COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
+  ASSERT_TRUE(Analyzer.analyze(Bytecode.data(), Bytecode.size()));
+  const auto &Blocks = Analyzer.getBlockInfos();
+  const auto SourceIt = Blocks.find(0);
+  ASSERT_NE(SourceIt, Blocks.end());
+  EXPECT_FALSE(Analyzer.hasUnknownDynamicJumpTargets());
+  EXPECT_FALSE(SourceIt->second.HasDynamicJump);
+  EXPECT_FALSE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
+
+  const auto Interp = runEvmBytecode("invalid_constant_jump_interp", Bytecode,
+                                     common::RunMode::InterpMode);
+  const auto Multi = runEvmBytecode("invalid_constant_jump_multipass", Bytecode,
+                                    common::RunMode::MultipassMode);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Multi.JITCompiled)
+      << "constant-invalid jump incorrectly triggered interpreter fallback";
+#endif
+  EXPECT_NE(Interp.Status, EVMC_SUCCESS);
+  EXPECT_EQ(Interp.Status, EVMC_BAD_JUMP_DESTINATION);
+  EXPECT_EQ(Multi.Status, Interp.Status);
+  EXPECT_EQ(Multi.OutputHex, Interp.OutputHex);
+}
+
 // Regression: a lifted block with a hidden live-in prefix (HiddenLiveInPrefix
 // Depth > 0) that takes a materializing exit must spill its logical stack from
 // the stack bottom, not from byte offset Hidden*32. The lifted logical stack

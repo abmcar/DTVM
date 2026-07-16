@@ -810,10 +810,12 @@ private:
         Stack.pop_back();
         updateHeights();
 
-        if (Dest.KnownConst && Dest.FitsU64 && hasCanonicalJumpDest(Dest.Low)) {
-          Info.HasConstantJump = true;
-          Info.ConstantJumpTargetPC = getCanonicalJumpDestPC(Dest.Low);
-          Info.Successors.push_back(Info.ConstantJumpTargetPC);
+        if (Dest.KnownConst) {
+          if (Dest.FitsU64 && hasCanonicalJumpDest(Dest.Low)) {
+            Info.HasConstantJump = true;
+            Info.ConstantJumpTargetPC = getCanonicalJumpDestPC(Dest.Low);
+            Info.Successors.push_back(Info.ConstantJumpTargetPC);
+          }
         } else if (tryResolveFromSharedMap(ScanPC - 1, Info)) {
           // Resolved via shared cache (covers patterns like SWAPn→JUMP).
         } else {
@@ -846,13 +848,15 @@ private:
 
         Info.HasConditionalJump = true;
         Info.Successors.push_back(FallthroughEntryPC);
-        if (Dest.KnownConst && Dest.FitsU64 && hasCanonicalJumpDest(Dest.Low)) {
-          Info.HasConstantJump = true;
-          Info.ConstantJumpTargetPC = getCanonicalJumpDestPC(Dest.Low);
-          if (Info.ConstantJumpTargetPC != FallthroughEntryPC) {
-            Info.Successors.push_back(Info.ConstantJumpTargetPC);
+        if (Dest.KnownConst) {
+          if (Dest.FitsU64 && hasCanonicalJumpDest(Dest.Low)) {
+            Info.HasConstantJump = true;
+            Info.ConstantJumpTargetPC = getCanonicalJumpDestPC(Dest.Low);
+            if (Info.ConstantJumpTargetPC != FallthroughEntryPC) {
+              Info.Successors.push_back(Info.ConstantJumpTargetPC);
+            }
           }
-        } else if (!Dest.KnownConst || !Dest.FitsU64) {
+        } else {
           if (tryResolveFromSharedMap(ScanPC - 1, Info, FallthroughEntryPC)) {
             // Resolved via shared cache.
           } else {
@@ -861,10 +865,9 @@ private:
             Info.DynamicJumpTargetRegionEntryPC = FallthroughEntryPC;
           }
         }
-        // Note: the implicit else (KnownConst && FitsU64 but NOT a valid
-        // JUMPDEST) is intentionally left without a successor for the taken
-        // branch — at runtime that path traps with BAD_JUMP_DESTINATION,
-        // so it is effectively dead. Only the fallthrough is reachable.
+        // A known constant that is not a valid JUMPDEST is intentionally left
+        // without a successor for the taken branch: that path traps with
+        // BAD_JUMP_DESTINATION, so only the fallthrough is reachable.
         NextEntryPC = FallthroughEntryPC;
         NextBodyStartPC = FallthroughBodyStartPC;
         HasNextBlock = true;

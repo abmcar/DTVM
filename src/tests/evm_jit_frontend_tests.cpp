@@ -803,6 +803,53 @@ TEST(EVMJITFrontendAnalyzerTest, DeadDeepEntryBlocksDoNotTriggerFallbackRisk) {
 }
 
 TEST(EVMJITFrontendAnalyzerTest,
+     InvalidConstantJumpDoesNotMakeDeadDeepEntryBlocksReachable) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xff, // PC0 PUSH1 0xff (invalid jump destination)
+      0x56,       // PC2 JUMP
+      0x5b,       // PC3 JUMPDEST (dead predecessor)
+      0x50,       // PC4 POP
+      0x5b,       // PC5 JUMPDEST (dead, requires two entry slots)
+      0x01,       // PC6 ADD
+      0x00,       // PC7 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *SourceBlock = findBlock(Analyzer, 0);
+  const auto *DeepEntryBlock = findBlock(Analyzer, 5);
+  ASSERT_NE(SourceBlock, nullptr);
+  ASSERT_NE(DeepEntryBlock, nullptr);
+  EXPECT_FALSE(Analyzer.hasUnknownDynamicJumpTargets());
+  EXPECT_FALSE(SourceBlock->HasDynamicJump);
+  EXPECT_FALSE(SourceBlock->HasConstantJump);
+  EXPECT_TRUE(SourceBlock->Successors.empty());
+  EXPECT_EQ(DeepEntryBlock->MinStackHeight, -2);
+  EXPECT_FALSE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     HighLimbConstantJumpiKeepsOnlyFallthroughReachable) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01,                                     // PC0 condition
+      0x68, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PC2 PUSH9 2^64
+      0x00, 0x00,
+      0x57, // PC12 JUMPI
+      0x00, // PC13 STOP (fallthrough)
+      0x5b, // PC14 JUMPDEST (invalid taken target is not this block)
+      0x00, // PC15 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *SourceBlock = findBlock(Analyzer, 0);
+  ASSERT_NE(SourceBlock, nullptr);
+  EXPECT_FALSE(Analyzer.hasUnknownDynamicJumpTargets());
+  EXPECT_TRUE(SourceBlock->HasConditionalJump);
+  EXPECT_FALSE(SourceBlock->HasDynamicJump);
+  EXPECT_FALSE(SourceBlock->HasConstantJump);
+  expectPCList(SourceBlock->Successors, {13});
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
      RegionHeuristicDepthTaintPropagatesAndBlocksLifting) {
   // A block whose resolved entry depth was produced by the dynamic-jump region
   // uniform-entry heuristic -- rather than by static propagation from the
