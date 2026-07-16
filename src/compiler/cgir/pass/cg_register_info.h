@@ -334,6 +334,24 @@ public:
     return use_nodbg_begin(RegNo) == use_nodbg_end();
   }
 
+  // The use-def list stores definitions as a prefix and uses as a suffix. Walk
+  // backward from the tail through only the uses; MO == Head terminates the
+  // circular Prev chain when the list contains only uses.
+  bool hasUseOutside(Register RegNo, const CgInstruction &MI) const {
+    CgOperand *Head = getRegUseDefListHead(RegNo);
+    if (!Head)
+      return false;
+
+    for (CgOperand *MO = Head->Contents.Reg.Prev; MO->isUse();
+         MO = MO->Contents.Reg.Prev) {
+      if (MO->getParent() != &MI)
+        return true;
+      if (MO == Head)
+        break;
+    }
+    return false;
+  }
+
   /// use_instr_iterator/use_instr_begin/use_instr_end - Walk all uses of the
   /// specified register, stepping by CgInstruction.
   using use_instr_iterator =
