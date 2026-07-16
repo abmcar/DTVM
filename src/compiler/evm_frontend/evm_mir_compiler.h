@@ -158,14 +158,15 @@ public:
 
     // Constructor for EVMU256Type with 4 I64 components
     Operand(U256Inst Components, EVMType Type)
-        : Type(Type), U256Components(Components), IsU256MultiComponent(true) {
+        : Type(Type), U256Components(Components), IsU256MultiComponent(true),
+          IsU256InstructionBacked(true) {
       ZEN_ASSERT(Type == EVMType::UINT256 && "Multi-component only for U256");
     }
 
     // Constructor for U256 multi-component with explicit range
     Operand(U256Inst Components, EVMType Type, ValueRange Range)
         : Type(Type), Range(Range), U256Components(Components),
-          IsU256MultiComponent(true) {
+          IsU256MultiComponent(true), IsU256InstructionBacked(true) {
       ZEN_ASSERT(Type == EVMType::UINT256 && "Multi-component only for U256");
     }
 
@@ -220,6 +221,7 @@ public:
     }
 
     bool isU256MultiComponent() const { return IsU256MultiComponent; }
+    bool isU256InstructionBacked() const { return IsU256InstructionBacked; }
     bool isConstant() const { return IsConstant; }
     bool isZeroConstant() const {
       return IsConstant && ConstValue[0] == 0 && ConstValue[1] == 0 &&
@@ -310,6 +312,7 @@ public:
     U256Value ConstValue = {};
     bool IsConstant = false;
     bool IsU256MultiComponent = false;
+    bool IsU256InstructionBacked = false;
     DeferredKind DeferredValueKind = DeferredKind::NONE;
     // Range of the base value of a deferred zero-test (the value being tested),
     // used to narrow the OR-fold when materialized.
@@ -368,7 +371,7 @@ public:
   void handleVoidReturn();
   void handleJump(Operand Dest);
   void handleJumpI(Operand Dest, Operand Cond);
-  void handleJumpDest(const uint64_t &PC);
+  void handleJumpDest(const uint64_t &PC, bool HasLiveFallthrough);
 
   // ==================== Arithmetic Instruction Handlers ====================
 

@@ -741,7 +741,10 @@ private:
           // Consecutive JUMPDEST opcodes share one body BB in multipass.
           // Charge all skipped metering points before jumping to the shared
           // destination at the end of the run.
-          bool HasLiveFallthrough = !InDeadCode;
+          const bool HasDeferredLiftedFallthrough =
+              DeferredLiftedJumpDestFallthrough;
+          DeferredLiftedJumpDestFallthrough = false;
+          bool HasLiveFallthrough = !InDeadCode || HasDeferredLiftedFallthrough;
           uint64_t RunStartPC = PC;
           while (Ip < IpEnd && static_cast<evmc_opcode>(*Ip) == OP_JUMPDEST) {
             Ip++;
@@ -750,24 +753,20 @@ private:
           if (PC > RunStartPC && HasLiveFallthrough) {
             Builder.meterOpcodeRange(RunStartPC, PC);
           }
-          // When a JUMP/JUMPI terminator falls through into a JUMPDEST, the
-          // terminator handler already called handleBeginBlock for the
-          // fallthrough target before the JUMPDEST opcode is decoded, so the
-          // block currently being decoded IS this JUMPDEST's block
-          // (CurrentBlockEntryPC == RunStartPC). Its incoming entry edge was
-          // already assigned by the predecessor terminator. Re-running the
-          // fallthrough-edge assignment here would record a spurious self-edge
-          // (PredBlockPC == BlockPC) that is absent from the block's
-          // predecessor order, corrupting phi incoming-slot bookkeeping. Skip
-          // the redundant edge assignment in that case (gated on
-          // CurrentBlockLifted so the flag-OFF path is unchanged);
-          // handleJumpDest + the re-begin below still run to wire the body
-          // branch and re-materialize the lifted entry state in the canonical
-          // JUMPDEST body block.
+          // A lifted JUMPI fallthrough that starts at this JUMPDEST has already
+          // assigned its entry state and finalized the predecessor block, but
+          // deliberately deferred handleBeginBlock until handleJumpDest wires
+          // the staging fallthrough BB to the canonical body. Materializing a
+          // shared-entry phi in that staging BB would give it the analyzer's
+          // full predecessor count even though the BB has only the single
+          // JUMPI fallthrough predecessor.
           bool AlreadyBegunLiftedEntry = HasLiveFallthrough &&
                                          CurrentBlockLifted &&
                                          RunStartPC == CurrentBlockEntryPC;
-          if (AlreadyBegunLiftedEntry) {
+          if (HasDeferredLiftedFallthrough) {
+            // Entry edge assignment and predecessor finalization are complete.
+            // Begin the target once below, after entering its canonical body.
+          } else if (AlreadyBegunLiftedEntry) {
             // Entry edge already assigned by the predecessor terminator; do not
             // reassign. The predecessor's handleBeginBlock already restored
             // this block's lifted logical entry state onto the logical stack.
@@ -790,7 +789,7 @@ private:
               }
             }
           }
-          Builder.handleJumpDest(PC);
+          Builder.handleJumpDest(PC, HasLiveFallthrough);
           handleBeginBlock(Analyzer);
           Builder.meterOpcode(Opcode, PC);
           break;
@@ -2371,9 +2370,12 @@ private:
     uint64_t JumpSuccPC = 0;
     bool HasJumpSucc =
         tryGetConstantJumpSuccessorPC(Analyzer, Dest, JumpSuccPC);
-    uint64_t FallthroughPC = PC + 1;
-    if (Analyzer.hasCanonicalJumpDest(FallthroughPC)) {
-      FallthroughPC = Analyzer.getCanonicalJumpDestPC(FallthroughPC);
+    const uint64_t RawFallthroughPC = PC + 1;
+    const bool FallthroughStartsAtJumpDest =
+        Analyzer.hasCanonicalJumpDest(RawFallthroughPC);
+    uint64_t FallthroughPC = RawFallthroughPC;
+    if (FallthroughStartsAtJumpDest) {
+      FallthroughPC = Analyzer.getCanonicalJumpDestPC(RawFallthroughPC);
     }
     bool CanLiftFallthrough =
         CurrentBlockLifted && isLiftedBlock(FallthroughPC);
@@ -2432,7 +2434,15 @@ private:
     assertDynamicJumpConsistency(Analyzer, Dest);
     Builder.handleJumpI(Dest, Cond);
     PC = FallthroughPC;
-    handleBeginBlock(Analyzer);
+    if (FallthroughStartsAtJumpDest && isLiftedBlock(FallthroughPC)) {
+      // handleJumpI leaves the builder in a one-predecessor staging BB. A
+      // lifted shared JUMPDEST must materialize its merge state in the
+      // canonical body instead, after the next decode iteration wires this
+      // fallthrough edge through handleJumpDest.
+      DeferredLiftedJumpDestFallthrough = true;
+    } else {
+      handleBeginBlock(Analyzer);
+    }
   }
 
   template <CompareOperator Opr> void handleCompare() {
@@ -3085,6 +3095,7 @@ private:
   uint64_t PC = 0;
   uint64_t CurrentBlockEntryPC = 0;
   bool CurrentBlockLifted = false;
+  bool DeferredLiftedJumpDestFallthrough = false;
 };
 
 } // namespace COMPILER

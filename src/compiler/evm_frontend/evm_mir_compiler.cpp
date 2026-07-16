@@ -1669,7 +1669,8 @@ void EVMMirBuilder::handleJumpI(Operand Dest, Operand Cond) {
   setInsertBlock(FallThroughBB);
 }
 
-void EVMMirBuilder::handleJumpDest(const uint64_t &PC) {
+void EVMMirBuilder::handleJumpDest(const uint64_t &PC,
+                                   bool HasLiveFallthrough) {
   auto BodyIt = JumpDestBodyTable.find(PC);
   ZEN_ASSERT(BodyIt != JumpDestBodyTable.end() && "JUMPDEST body not found");
   MBasicBlock *DestBB = BodyIt->second;
@@ -1681,7 +1682,7 @@ void EVMMirBuilder::handleJumpDest(const uint64_t &PC) {
       break;
     }
   }
-  if (CurBB != DestBB && !IsExceptionSetBB) {
+  if (HasLiveFallthrough && CurBB != DestBB && !IsExceptionSetBB) {
     if (CurBB->empty()) {
       registerPhiIncomingBlock(PC, CurrentBlockPC, CurBB);
       CurBB->addSuccessor(DestBB);

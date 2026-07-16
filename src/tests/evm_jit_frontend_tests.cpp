@@ -491,7 +491,7 @@ public:
 
   void handleJump(Operand) {}
   void handleJumpI(Operand, Operand) {}
-  void handleJumpDest(const uint64_t &) {}
+  void handleJumpDest(const uint64_t &, bool) {}
   void handleStop() {}
   void handleUndefined() { Undefined = true; }
   void handleInvalid() { Undefined = true; }
@@ -864,6 +864,167 @@ TEST(EVMJITFrontendAnalyzerTest,
   EXPECT_EQ(JumpDestBlock->ResolvedEntryStackDepth, 0);
   EXPECT_TRUE(JumpDestBlock->CanLiftStack);
   expectPCList(JumpDestBlock->Predecessors, {0});
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     JumpiFallthroughSharedJumpDestRequiresLiftedMerge) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PC0  PUSH1 0xaa (first incoming value)
+      0x5f,       // PC2  PUSH0 (first condition offset)
+      0x35,       // PC3  CALLDATALOAD
+      0x60, 0x10, // PC4  PUSH1 16 (shared merge target)
+      0x57,       // PC6  JUMPI
+      0x50,       // PC7  POP
+      0x60, 0xbb, // PC8  PUSH1 0xbb (second incoming value)
+      0x60, 0x20, // PC10 PUSH1 32 (independent second condition offset)
+      0x35,       // PC12 CALLDATALOAD
+      0x60, 0x17, // PC13 PUSH1 23 (unused taken target)
+      0x57,       // PC15 JUMPI (fallthrough = shared target)
+      0x5b,       // PC16 JUMPDEST (shared merge target)
+      0x5f,       // PC17 PUSH0
+      0x52,       // PC18 MSTORE
+      0x60, 0x20, // PC19 PUSH1 32
+      0x5f,       // PC21 PUSH0
+      0xf3,       // PC22 RETURN
+      0x5b,       // PC23 JUMPDEST (unused taken target)
+      0x00,       // PC24 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *SecondPredBlock = findBlock(Analyzer, 7);
+  const auto *SharedTarget = findBlock(Analyzer, 16);
+  const auto *TakenTarget = findBlock(Analyzer, 23);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(SecondPredBlock, nullptr);
+  ASSERT_NE(SharedTarget, nullptr);
+  ASSERT_NE(TakenTarget, nullptr);
+
+  expectPCList(EntryBlock->Successors, {7, 16});
+  expectPCList(SecondPredBlock->Successors, {16, 23});
+
+  EXPECT_TRUE(SharedTarget->IsJumpDest);
+  EXPECT_EQ(SharedTarget->ResolvedEntryStackDepth, 1);
+  EXPECT_EQ(SharedTarget->FullEntryStateDepth, 1);
+  EXPECT_TRUE(SharedTarget->RequiresEntryMergeState);
+  EXPECT_TRUE(SharedTarget->CanLiftStack);
+  expectPCList(SharedTarget->Predecessors, {0, 7});
+  expectPCList(Analyzer.getPotentialEntryPredecessorsForBlock(16), {0, 7});
+
+  EXPECT_TRUE(TakenTarget->IsJumpDest);
+  EXPECT_EQ(TakenTarget->ResolvedEntryStackDepth, 1);
+  EXPECT_TRUE(TakenTarget->CanLiftStack);
+  expectPCList(TakenTarget->Predecessors, {7});
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     ConsecutiveJumpDestSharedMergeDisablesStackLifting) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PC0  PUSH1 0xaa (first incoming value)
+      0x5f,       // PC2  PUSH0 (first condition offset)
+      0x35,       // PC3  CALLDATALOAD
+      0x60, 0x11, // PC4  PUSH1 17 (canonical shared merge target)
+      0x57,       // PC6  JUMPI
+      0x50,       // PC7  POP
+      0x60, 0xbb, // PC8  PUSH1 0xbb (second incoming value)
+      0x60, 0x20, // PC10 PUSH1 32 (independent second condition offset)
+      0x35,       // PC12 CALLDATALOAD
+      0x60, 0x18, // PC13 PUSH1 24 (unused taken target)
+      0x57,       // PC15 JUMPI (fallthrough begins JUMPDEST run)
+      0x5b,       // PC16 JUMPDEST (alias of PC17)
+      0x5b,       // PC17 JUMPDEST (canonical shared merge target)
+      0x5f,       // PC18 PUSH0
+      0x52,       // PC19 MSTORE
+      0x60, 0x20, // PC20 PUSH1 32
+      0x5f,       // PC22 PUSH0
+      0xf3,       // PC23 RETURN
+      0x5b,       // PC24 JUMPDEST (unused taken target)
+      0x00,       // PC25 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *SecondPredBlock = findBlock(Analyzer, 7);
+  const auto *SharedTarget = findBlock(Analyzer, 17);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(SecondPredBlock, nullptr);
+  ASSERT_NE(SharedTarget, nullptr);
+
+  EXPECT_TRUE(Analyzer.hasCanonicalJumpDest(16));
+  EXPECT_EQ(Analyzer.getCanonicalJumpDestPC(16), 17U);
+  EXPECT_EQ(findBlock(Analyzer, 16), nullptr);
+  expectPCList(EntryBlock->Successors, {7, 17});
+  expectPCList(SecondPredBlock->Successors, {17, 24});
+
+  EXPECT_TRUE(SharedTarget->IsJumpDest);
+  EXPECT_EQ(SharedTarget->ResolvedEntryStackDepth, 1);
+  EXPECT_TRUE(SharedTarget->RequiresEntryMergeState);
+  EXPECT_FALSE(SharedTarget->CanLiftStack);
+  expectPCList(SharedTarget->Predecessors, {0, 7});
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     ConsecutiveJumpDestSinglePredecessorRemainsLiftable) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x03, // PC0 PUSH1 3 (raw alias destination)
+      0x56,       // PC2 JUMP
+      0x5b,       // PC3 JUMPDEST (alias of PC4)
+      0x5b,       // PC4 JUMPDEST (canonical target)
+      0x00,       // PC5 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *CanonicalTarget = findBlock(Analyzer, 4);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(CanonicalTarget, nullptr);
+
+  EXPECT_TRUE(Analyzer.hasCanonicalJumpDest(3));
+  EXPECT_EQ(Analyzer.getCanonicalJumpDestPC(3), 4U);
+  EXPECT_EQ(findBlock(Analyzer, 3), nullptr);
+  expectPCList(EntryBlock->Successors, {4});
+
+  EXPECT_TRUE(CanonicalTarget->IsJumpDest);
+  EXPECT_EQ(CanonicalTarget->ResolvedEntryStackDepth, 0);
+  EXPECT_FALSE(CanonicalTarget->RequiresEntryMergeState);
+  EXPECT_TRUE(CanonicalTarget->CanLiftStack);
+  expectPCList(CanonicalTarget->Predecessors, {0});
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     ConsecutiveJumpDestEmptySharedEntryRemainsLiftable) {
+  const std::vector<uint8_t> Bytecode = {
+      0x5f,       // PC0 PUSH0 (condition offset)
+      0x35,       // PC1 CALLDATALOAD
+      0x60, 0x09, // PC2 PUSH1 9 (canonical shared target)
+      0x57,       // PC4 JUMPI
+      0x60, 0x09, // PC5 PUSH1 9 (second edge target)
+      0x56,       // PC7 JUMP
+      0x5b,       // PC8 JUMPDEST (alias of PC9)
+      0x5b,       // PC9 JUMPDEST (canonical shared target)
+      0x00,       // PC10 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *SecondPredBlock = findBlock(Analyzer, 5);
+  const auto *CanonicalTarget = findBlock(Analyzer, 9);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(SecondPredBlock, nullptr);
+  ASSERT_NE(CanonicalTarget, nullptr);
+
+  EXPECT_TRUE(Analyzer.hasCanonicalJumpDest(8));
+  EXPECT_EQ(Analyzer.getCanonicalJumpDestPC(8), 9U);
+  EXPECT_EQ(findBlock(Analyzer, 8), nullptr);
+  expectPCList(EntryBlock->Successors, {5, 9});
+  expectPCList(SecondPredBlock->Successors, {9});
+
+  EXPECT_TRUE(CanonicalTarget->IsJumpDest);
+  EXPECT_EQ(CanonicalTarget->ResolvedEntryStackDepth, 0);
+  EXPECT_EQ(CanonicalTarget->FullEntryStateDepth, 0);
+  EXPECT_TRUE(CanonicalTarget->RequiresEntryMergeState);
+  EXPECT_TRUE(CanonicalTarget->CanLiftStack);
+  expectPCList(CanonicalTarget->Predecessors, {0, 5});
 }
 
 TEST(EVMJITFrontendAnalyzerTest,

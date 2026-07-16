@@ -491,6 +491,14 @@ public:
 private:
   friend struct EVMAnalyzerRangeTestAccess;
 
+  bool isMultiOpcodeCanonicalJumpDest(uint64_t PC) const {
+    if (PC == 0 || getCanonicalJumpDestPC(PC) != PC) {
+      return false;
+    }
+    auto PrevIt = JumpDestCanonicalPCs.find(PC - 1);
+    return PrevIt != JumpDestCanonicalPCs.end() && PrevIt->second == PC;
+  }
+
   std::unordered_set<uint64_t> collectPossiblyReachableBlockPCs() const {
     std::unordered_set<uint64_t> Reachable;
     if (BlockInfos.count(EntryBlockPC) == 0) {
@@ -1560,6 +1568,19 @@ private:
       Info.CanLiftStack = EntryKnown && !Info.HasUndefinedInstr &&
                           !Info.HasInconsistentEntryDepth &&
                           !DynamicJumpDestConflict && !NonLiftableDynamicSource;
+      // Consecutive JUMPDEST opcodes share one canonical analyzer block, but
+      // codegen retains an entry thunk for every raw destination so each alias
+      // can charge its own skipped JUMPDEST gas. Those alias thunks are extra
+      // MIR predecessors that do not appear in the analyzer's logical
+      // predecessor list. A canonical block with a non-empty logical merge
+      // must therefore stay on the runtime-stack path rather than build a phi
+      // from a smaller predecessor model. Empty entry states do not build
+      // phis, so the extra thunks are harmless there.
+      if (Info.CanLiftStack && Info.IsJumpDest &&
+          Info.RequiresEntryMergeState && Info.FullEntryStateDepth > 0 &&
+          isMultiOpcodeCanonicalJumpDest(EntryPC)) {
+        Info.CanLiftStack = false;
+      }
       // Never lift a block that may inherit its absolute entry depth from
       // runtime indirect dispatch. This includes every JUMPDEST and its static
       // successor closure once a reachable dynamic source exists, not only the
