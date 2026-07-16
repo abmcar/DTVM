@@ -83,9 +83,9 @@ still required.
 
 ## Tests
 
-- `cmake --build build --target ircompiler compiler evmJitFrontendTests -j2`:
-  pass.
-- `build/evmJitFrontendTests
+- `cmake --build build --target ircompiler compiler evmJitFrontendTests
+  evmMirVerifierTests -j2`: pass.
+- `build/evmMirVerifierTests
   --gtest_filter=MIRVerifierTest.SharedDagMemoizationIsVerifierLocalAndResetsPerVerify`:
   pass. The test verifies that:
   - a shared invalid node reached through a diamond is checked once per
@@ -95,17 +95,32 @@ still required.
   - the invalid shared node is still diagnosed;
   - a shared invalid load index, reached only through the verifier's auxiliary
     operand path, is also diagnosed once per `verify()` call;
+  - shared invalid store indices and WASM memory-check bases are each
+    diagnosed once per `verify()` call, covering every auxiliary operand edge
+    changed to enter the memoizing override;
   - a plain `MVisitor` still visits the shared node once per use.
 - `rg 'MVisitor::visitInstruction' src/compiler/mir/pass/verifier.cpp`: no
   matches. Load/store indices and WASM memory-check bases enter the verifier's
   memoizing override instead of bypassing it.
-- `build/evmJitFrontendTests`: 34 tests passed after merging upstream main.
+- `build/evmJitFrontendTests`: 33 tests passed after the verifier regression
+  moved to its own target; `build/evmMirVerifierTests`: 1 test passed.
+- GCC 11.5, Release, virtual stack enabled, target-only ASan: the pre-split
+  test layout reproduced CI's `use-after-poison` in
+  `MBasicBlock::addStatement`; the split targets pass 2/2 with the verifier
+  target still compiled and linked with ASan. GCC 12.5 normal Release and the
+  equivalent ASan configuration also pass 2/2. The failure was a mixed
+  instrumentation weak-inline/COMDAT selection in the test executable, not a
+  production `finalizeEVMBase` failure; the const-fold harness finalization is
+  unchanged.
+- `ctest --test-dir build --output-on-failure -j2`: all 13 registered test
+  targets passed after generating the EVM assembly and Solidity fixtures used
+  by the complete local suite.
 - `tests/mir`: all 775 `RUN` lines passed with the built `ircompiler` and
   `FileCheck`. The environment did not provide the `lit` executable, so the
   same `ircompiler | FileCheck` commands declared by the test files were run
   directly.
-- `clang-format --dry-run -style=file -Werror` on the four changed C++ files:
-  pass.
+- `clang-format --dry-run -style=file -Werror` on the changed C++ files and
+  `cmake-format --check` on `src/tests/CMakeLists.txt`: pass.
 - `git diff --check`: pass.
 - `tools/format.sh check`: blocked by existing formatting violations in
   unmodified files; none of the reported paths are changed by this work.
