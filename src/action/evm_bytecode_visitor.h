@@ -65,6 +65,32 @@ private:
     uint64_t Value = 0;
   };
 
+  struct LargeStaticWorkspaceVerifierResult {
+    uint64_t Candidates = 0;
+    uint64_t VerifiedSegments = 0;
+    uint64_t VerifiedOps = 0;
+    uint64_t VerifiedMLoadOps = 0;
+    uint64_t VerifiedMStoreOps = 0;
+    uint64_t VerifiedMStore8Ops = 0;
+    uint64_t MaxRequiredSize = 0;
+    uint64_t Rejected = 0;
+    uint64_t RejectDynamicOffset = 0;
+    uint64_t RejectUnknownBase = 0;
+    uint64_t RejectUnboundedInterval = 0;
+    uint64_t RejectOverflowRisk = 0;
+    uint64_t RejectSideEffect = 0;
+    uint64_t RejectHelperByteExactRisk = 0;
+    uint64_t RejectTooFewOps = 0;
+    bool HasLoweringPlan = false;
+    uint64_t LoweringFirstPC = 0;
+    uint64_t LoweringLastPC = 0;
+    uint64_t LoweringMaxRequiredSize = 0;
+    uint64_t LoweringCoveredOps = 0;
+    uint64_t LoweringCoveredMLoadOps = 0;
+    uint64_t LoweringCoveredMStoreOps = 0;
+    uint64_t LoweringCoveredMStore8Ops = 0;
+  };
+
   template <typename T, typename = void>
   struct HasRegisterCurrentBlockPC : std::false_type {};
   template <typename T>
@@ -601,6 +627,7 @@ private:
 
         case OP_MSTORE8: {
           Builder.noteMemoryOpcodeInBlock(Opcode, PC);
+          maybePrepareLinearBlockMemoryPrecheck(Opcode);
           Operand Addr = pop();
           Operand Value = pop();
           Builder.handleMStore8(Addr, Value);
@@ -1043,6 +1070,38 @@ private:
             CurBlockLinearPrecheckPlan.CoveredOpcode == OP_MSTORE);
       }
     }
+
+    LargeStaticWorkspaceVerifierResult LargeStaticWorkspace =
+        analyzeLargeStaticWorkspaceVerifier(Bytecode, BytecodeSize, PC);
+    if (hasLargeStaticWorkspaceVerifierResult(LargeStaticWorkspace)) {
+      Builder.noteLargeStaticWorkspaceVerifierResult(
+          LargeStaticWorkspace.Candidates,
+          LargeStaticWorkspace.VerifiedSegments,
+          LargeStaticWorkspace.VerifiedOps,
+          LargeStaticWorkspace.VerifiedMLoadOps,
+          LargeStaticWorkspace.VerifiedMStoreOps,
+          LargeStaticWorkspace.VerifiedMStore8Ops,
+          LargeStaticWorkspace.MaxRequiredSize, LargeStaticWorkspace.Rejected,
+          LargeStaticWorkspace.RejectDynamicOffset,
+          LargeStaticWorkspace.RejectUnknownBase,
+          LargeStaticWorkspace.RejectUnboundedInterval,
+          LargeStaticWorkspace.RejectOverflowRisk,
+          LargeStaticWorkspace.RejectSideEffect,
+          LargeStaticWorkspace.RejectHelperByteExactRisk,
+          LargeStaticWorkspace.RejectTooFewOps);
+    }
+#ifdef ZEN_ENABLE_EVM_MEM_LARGE_STATIC_WORKSPACE_LOWERING
+    if (LargeStaticWorkspace.HasLoweringPlan) {
+      Builder.setMemoryCompileBlockLargeStaticWorkspacePrecheckPlan(
+          LargeStaticWorkspace.LoweringFirstPC,
+          LargeStaticWorkspace.LoweringLastPC,
+          LargeStaticWorkspace.LoweringMaxRequiredSize,
+          LargeStaticWorkspace.LoweringCoveredOps,
+          LargeStaticWorkspace.LoweringCoveredMLoadOps,
+          LargeStaticWorkspace.LoweringCoveredMStoreOps,
+          LargeStaticWorkspace.LoweringCoveredMStore8Ops);
+    }
+#endif // ZEN_ENABLE_EVM_MEM_LARGE_STATIC_WORKSPACE_LOWERING
     const auto &BlockInfo = BlockInfos.at(PC);
     CurrentBlockEntryPC = PC;
     CurrentBlockHiddenLiveInPrefixDepth = 0;
@@ -1180,6 +1239,12 @@ private:
     }
     Result = LHS + RHS;
     return true;
+  }
+
+  static bool hasLargeStaticWorkspaceVerifierResult(
+      const LargeStaticWorkspaceVerifierResult &Result) {
+    return Result.Candidates != 0 || Result.VerifiedSegments != 0 ||
+           Result.Rejected != 0;
   }
 
   static bool parsePushConstU64(const Byte *Bytecode, size_t BytecodeSize,
@@ -1337,6 +1402,47 @@ private:
     return Plan;
   }
 
+  BlockLinearPrecheckPlan analyzeLinearMstore8DirectMemoryBlockPrecheck(
+      const Byte *Bytecode, size_t BytecodeSize, uint64_t EntryPC) {
+    uint64_t ScanPC = 0;
+    if (!consumeLinearRecurrencePrefix(Bytecode, BytecodeSize, EntryPC,
+                                       ScanPC)) {
+      return {};
+    }
+
+    uint64_t CoveredDirectOps = 0;
+    while (ScanPC < BytecodeSize) {
+      evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[ScanPC]);
+      if (Opcode == OP_JUMPDEST || isBlockTerminatorOpcode(Opcode)) {
+        break;
+      }
+
+      uint64_t MotifPC = ScanPC;
+      if (!consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP1) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP1) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_MSTORE8) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_DUP2) ||
+          !consumeExpectedOpcode(Bytecode, BytecodeSize, MotifPC, OP_ADD)) {
+        return {};
+      }
+
+      ++CoveredDirectOps;
+      ScanPC = MotifPC;
+    }
+
+    if (CoveredDirectOps < 2) {
+      return {};
+    }
+
+    BlockLinearPrecheckPlan Plan;
+    Plan.Eligible = true;
+    Plan.CoveredOpcode = OP_MSTORE8;
+    Plan.AccessWidth = 1;
+    Plan.CoveredDirectOps = CoveredDirectOps;
+    Plan.StrideStackIndex = 3;
+    return Plan;
+  }
+
   BlockLinearPrecheckPlan analyzeLinearDirectMemoryBlockPrecheck(
       const Byte *Bytecode, size_t BytecodeSize, uint64_t EntryPC) {
     BlockLinearPrecheckPlan Plan = analyzeLinearMloadDirectMemoryBlockPrecheck(
@@ -1344,8 +1450,13 @@ private:
     if (Plan.Eligible) {
       return Plan;
     }
-    return analyzeLinearMstoreDirectMemoryBlockPrecheck(Bytecode, BytecodeSize,
+    Plan = analyzeLinearMstoreDirectMemoryBlockPrecheck(Bytecode, BytecodeSize,
                                                         EntryPC);
+    if (Plan.Eligible) {
+      return Plan;
+    }
+    return analyzeLinearMstore8DirectMemoryBlockPrecheck(Bytecode, BytecodeSize,
+                                                         EntryPC);
   }
 
   void maybePrepareLinearBlockMemoryPrecheck(evmc_opcode Opcode) {
@@ -1356,6 +1467,477 @@ private:
     }
     Builder.prepareLinearBlockMemoryPrecheck(
         Stack.peek(CurBlockLinearPrecheckPlan.StrideStackIndex));
+  }
+
+  LargeStaticWorkspaceVerifierResult
+  analyzeLargeStaticWorkspaceVerifier(const Byte *Bytecode, size_t BytecodeSize,
+                                      uint64_t EntryPC) {
+    LargeStaticWorkspaceVerifierResult Result;
+    constexpr uint64_t InitialUnknownLiveIns = 128;
+    constexpr uint64_t MinVerifiedDirectOps = 16;
+
+    struct SegmentState {
+      bool Active = false;
+      bool DynamicOffset = false;
+      bool OverflowRisk = false;
+      uint64_t DirectOps = 0;
+      uint64_t MLoadOps = 0;
+      uint64_t MStoreOps = 0;
+      uint64_t MStore8Ops = 0;
+      uint64_t MaxRequiredSize = 0;
+      uint64_t FirstDirectPC = 0;
+      uint64_t LastDirectPC = 0;
+    };
+
+    enum class SegmentRejectReason : uint8_t {
+      None,
+      DynamicOffset,
+      UnknownBase,
+      OverflowRisk,
+      SideEffect,
+      HelperByteExactRisk,
+      TooFewOps,
+    };
+
+    std::vector<AbstractConstU64> SimStack(
+        static_cast<size_t>(InitialUnknownLiveIns), makeUnknownConstU64());
+    SegmentState Segment;
+
+    auto ResetSegment = [&]() { Segment = SegmentState(); };
+
+    auto FinalizeSegment = [&](SegmentRejectReason Reason) {
+      if (!Segment.Active || Segment.DirectOps == 0) {
+        ResetSegment();
+        return;
+      }
+
+      ++Result.Candidates;
+      SegmentRejectReason FinalReason = Reason;
+      if (FinalReason == SegmentRejectReason::None && Segment.DynamicOffset) {
+        FinalReason = SegmentRejectReason::DynamicOffset;
+      }
+      if (FinalReason == SegmentRejectReason::None && Segment.OverflowRisk) {
+        FinalReason = SegmentRejectReason::OverflowRisk;
+      }
+      if (FinalReason == SegmentRejectReason::None &&
+          Segment.DirectOps < MinVerifiedDirectOps) {
+        FinalReason = SegmentRejectReason::TooFewOps;
+      }
+
+      if (FinalReason == SegmentRejectReason::None) {
+        ++Result.VerifiedSegments;
+        Result.VerifiedOps += Segment.DirectOps;
+        Result.VerifiedMLoadOps += Segment.MLoadOps;
+        Result.VerifiedMStoreOps += Segment.MStoreOps;
+        Result.VerifiedMStore8Ops += Segment.MStore8Ops;
+        if (Segment.MaxRequiredSize > Result.MaxRequiredSize) {
+          Result.MaxRequiredSize = Segment.MaxRequiredSize;
+        }
+        if (!Result.HasLoweringPlan ||
+            Segment.DirectOps > Result.LoweringCoveredOps) {
+          Result.HasLoweringPlan = true;
+          Result.LoweringFirstPC = Segment.FirstDirectPC;
+          Result.LoweringLastPC = Segment.LastDirectPC;
+          Result.LoweringMaxRequiredSize = Segment.MaxRequiredSize;
+          Result.LoweringCoveredOps = Segment.DirectOps;
+          Result.LoweringCoveredMLoadOps = Segment.MLoadOps;
+          Result.LoweringCoveredMStoreOps = Segment.MStoreOps;
+          Result.LoweringCoveredMStore8Ops = Segment.MStore8Ops;
+        }
+      } else {
+        ++Result.Rejected;
+        switch (FinalReason) {
+        case SegmentRejectReason::DynamicOffset:
+          ++Result.RejectDynamicOffset;
+          break;
+        case SegmentRejectReason::UnknownBase:
+          ++Result.RejectUnknownBase;
+          break;
+        case SegmentRejectReason::OverflowRisk:
+          ++Result.RejectOverflowRisk;
+          break;
+        case SegmentRejectReason::SideEffect:
+          ++Result.RejectSideEffect;
+          break;
+        case SegmentRejectReason::HelperByteExactRisk:
+          ++Result.RejectHelperByteExactRisk;
+          break;
+        case SegmentRejectReason::TooFewOps:
+          ++Result.RejectTooFewOps;
+          break;
+        case SegmentRejectReason::None:
+          break;
+        }
+      }
+      ResetSegment();
+    };
+
+    auto EnsureStack = [&](size_t Count) {
+      while (SimStack.size() < Count) {
+        SimStack.insert(SimStack.begin(), makeUnknownConstU64());
+      }
+    };
+
+    auto Pop = [&]() {
+      EnsureStack(1);
+      AbstractConstU64 Value = SimStack.back();
+      SimStack.pop_back();
+      return Value;
+    };
+
+    auto Drop = [&](size_t Count) {
+      EnsureStack(Count);
+      while (Count-- != 0) {
+        SimStack.pop_back();
+      }
+    };
+
+    auto PushUnknown = [&]() { SimStack.push_back(makeUnknownConstU64()); };
+    auto PushConst = [&](uint64_t Value) {
+      SimStack.push_back(makeKnownConstU64(Value));
+    };
+
+    auto NoteDirectMemoryOp = [&](evmc_opcode Opcode, uint64_t OpPC,
+                                  AbstractConstU64 Offset, uint64_t Size) {
+      Segment.Active = true;
+      if (Segment.DirectOps == 0) {
+        Segment.FirstDirectPC = OpPC;
+      }
+      Segment.LastDirectPC = OpPC;
+      ++Segment.DirectOps;
+      switch (Opcode) {
+      case OP_MLOAD:
+        ++Segment.MLoadOps;
+        break;
+      case OP_MSTORE:
+        ++Segment.MStoreOps;
+        break;
+      case OP_MSTORE8:
+        ++Segment.MStore8Ops;
+        break;
+      default:
+        break;
+      }
+
+      if (!Offset.Known) {
+        Segment.DynamicOffset = true;
+        return;
+      }
+
+      uint64_t RequiredSize = 0;
+      if (!addConstU64(Offset.Value, Size, RequiredSize)) {
+        Segment.OverflowRisk = true;
+        return;
+      }
+      if (RequiredSize > Segment.MaxRequiredSize) {
+        Segment.MaxRequiredSize = RequiredSize;
+      }
+    };
+
+    auto HandleHelperSensitiveOpcode = [&](evmc_opcode Opcode) {
+      FinalizeSegment(SegmentRejectReason::None);
+      switch (Opcode) {
+      case OP_KECCAK256:
+        Drop(2);
+        PushUnknown();
+        break;
+      case OP_CALLDATACOPY:
+      case OP_CODECOPY:
+      case OP_RETURNDATACOPY:
+        Drop(3);
+        break;
+      case OP_EXTCODECOPY:
+        Drop(4);
+        break;
+      case OP_LOG0:
+        Drop(2);
+        break;
+      case OP_LOG1:
+        Drop(3);
+        break;
+      case OP_LOG2:
+        Drop(4);
+        break;
+      case OP_LOG3:
+        Drop(5);
+        break;
+      case OP_LOG4:
+        Drop(6);
+        break;
+      case OP_CREATE:
+        Drop(3);
+        PushUnknown();
+        break;
+      case OP_CREATE2:
+        Drop(4);
+        PushUnknown();
+        break;
+      case OP_CALL:
+      case OP_CALLCODE:
+        Drop(7);
+        PushUnknown();
+        break;
+      case OP_DELEGATECALL:
+      case OP_STATICCALL:
+        Drop(6);
+        PushUnknown();
+        break;
+      default:
+        break;
+      }
+    };
+
+    for (uint64_t ScanPC = EntryPC; ScanPC < BytecodeSize; ++ScanPC) {
+      evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[ScanPC]);
+      if (ScanPC != EntryPC && Opcode == OP_JUMPDEST) {
+        break;
+      }
+
+      if (isBlockTerminatorOpcode(Opcode)) {
+        FinalizeSegment(SegmentRejectReason::None);
+        break;
+      }
+
+      if (isHelperSensitiveOpcode(Opcode)) {
+        HandleHelperSensitiveOpcode(Opcode);
+        continue;
+      }
+
+      switch (Opcode) {
+      case OP_JUMPDEST:
+        break;
+      case OP_PUSH0:
+        PushConst(0);
+        break;
+      case OP_PUSH1:
+      case OP_PUSH2:
+      case OP_PUSH3:
+      case OP_PUSH4:
+      case OP_PUSH5:
+      case OP_PUSH6:
+      case OP_PUSH7:
+      case OP_PUSH8: {
+        uint8_t NumBytes =
+            static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+        uint64_t Value = 0;
+        if (!parsePushConstU64(Bytecode, BytecodeSize, ScanPC + 1, NumBytes,
+                               Value)) {
+          FinalizeSegment(SegmentRejectReason::UnknownBase);
+          return Result;
+        }
+        PushConst(Value);
+        ScanPC += NumBytes;
+        break;
+      }
+      case OP_PUSH9:
+      case OP_PUSH10:
+      case OP_PUSH11:
+      case OP_PUSH12:
+      case OP_PUSH13:
+      case OP_PUSH14:
+      case OP_PUSH15:
+      case OP_PUSH16:
+      case OP_PUSH17:
+      case OP_PUSH18:
+      case OP_PUSH19:
+      case OP_PUSH20:
+      case OP_PUSH21:
+      case OP_PUSH22:
+      case OP_PUSH23:
+      case OP_PUSH24:
+      case OP_PUSH25:
+      case OP_PUSH26:
+      case OP_PUSH27:
+      case OP_PUSH28:
+      case OP_PUSH29:
+      case OP_PUSH30:
+      case OP_PUSH31:
+      case OP_PUSH32: {
+        uint8_t NumBytes =
+            static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+        if (NumBytes > BytecodeSize - ScanPC - 1) {
+          FinalizeSegment(SegmentRejectReason::UnknownBase);
+          return Result;
+        }
+        ScanPC += NumBytes;
+        PushUnknown();
+        break;
+      }
+      case OP_DUP1:
+      case OP_DUP2:
+      case OP_DUP3:
+      case OP_DUP4:
+      case OP_DUP5:
+      case OP_DUP6:
+      case OP_DUP7:
+      case OP_DUP8:
+      case OP_DUP9:
+      case OP_DUP10:
+      case OP_DUP11:
+      case OP_DUP12:
+      case OP_DUP13:
+      case OP_DUP14:
+      case OP_DUP15:
+      case OP_DUP16: {
+        uint8_t Index =
+            static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_DUP1) + 1;
+        EnsureStack(Index);
+        SimStack.push_back(SimStack[SimStack.size() - Index]);
+        break;
+      }
+      case OP_SWAP1:
+      case OP_SWAP2:
+      case OP_SWAP3:
+      case OP_SWAP4:
+      case OP_SWAP5:
+      case OP_SWAP6:
+      case OP_SWAP7:
+      case OP_SWAP8:
+      case OP_SWAP9:
+      case OP_SWAP10:
+      case OP_SWAP11:
+      case OP_SWAP12:
+      case OP_SWAP13:
+      case OP_SWAP14:
+      case OP_SWAP15:
+      case OP_SWAP16: {
+        uint8_t Index =
+            static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_SWAP1) + 1;
+        EnsureStack(static_cast<size_t>(Index) + 1);
+        std::swap(SimStack.back(), SimStack[SimStack.size() - Index - 1]);
+        break;
+      }
+      case OP_POP:
+        Drop(1);
+        break;
+      case OP_ADD: {
+        AbstractConstU64 LHS = Pop();
+        AbstractConstU64 RHS = Pop();
+        uint64_t Sum = 0;
+        if (LHS.Known && RHS.Known && addConstU64(LHS.Value, RHS.Value, Sum)) {
+          PushConst(Sum);
+        } else {
+          PushUnknown();
+        }
+        break;
+      }
+      case OP_SUB: {
+        AbstractConstU64 LHS = Pop();
+        AbstractConstU64 RHS = Pop();
+        if (LHS.Known && RHS.Known && LHS.Value >= RHS.Value) {
+          PushConst(LHS.Value - RHS.Value);
+        } else {
+          PushUnknown();
+        }
+        break;
+      }
+      case OP_CALLDATALOAD:
+        Drop(1);
+        PushUnknown();
+        break;
+      case OP_CALLDATASIZE:
+      case OP_CODESIZE:
+      case OP_RETURNDATASIZE:
+      case OP_PC:
+      case OP_GAS:
+      case OP_ADDRESS:
+      case OP_ORIGIN:
+      case OP_CALLER:
+      case OP_CALLVALUE:
+      case OP_GASPRICE:
+      case OP_COINBASE:
+      case OP_TIMESTAMP:
+      case OP_NUMBER:
+      case OP_PREVRANDAO:
+      case OP_GASLIMIT:
+      case OP_CHAINID:
+      case OP_SELFBALANCE:
+      case OP_BASEFEE:
+      case OP_BLOBBASEFEE:
+        PushUnknown();
+        break;
+      case OP_ISZERO:
+      case OP_NOT:
+      case OP_BYTE:
+      case OP_BLOBHASH:
+      case OP_BALANCE:
+      case OP_EXTCODESIZE:
+      case OP_EXTCODEHASH:
+      case OP_BLOCKHASH:
+        Drop(1);
+        PushUnknown();
+        break;
+      case OP_MLOAD: {
+        AbstractConstU64 Offset = Pop();
+        NoteDirectMemoryOp(Opcode, ScanPC, Offset, 32);
+        PushUnknown();
+        break;
+      }
+      case OP_MSTORE: {
+        AbstractConstU64 Offset = Pop();
+        Drop(1);
+        NoteDirectMemoryOp(Opcode, ScanPC, Offset, 32);
+        break;
+      }
+      case OP_MSTORE8: {
+        AbstractConstU64 Offset = Pop();
+        Drop(1);
+        NoteDirectMemoryOp(Opcode, ScanPC, Offset, 1);
+        break;
+      }
+      case OP_MSIZE:
+        PushUnknown();
+        break;
+      case OP_MCOPY:
+        FinalizeSegment(SegmentRejectReason::HelperByteExactRisk);
+        Drop(3);
+        break;
+      case OP_SLOAD:
+      case OP_TLOAD:
+        FinalizeSegment(SegmentRejectReason::SideEffect);
+        Drop(1);
+        PushUnknown();
+        break;
+      case OP_SSTORE:
+      case OP_TSTORE:
+        FinalizeSegment(SegmentRejectReason::SideEffect);
+        Drop(2);
+        break;
+      case OP_MUL:
+      case OP_DIV:
+      case OP_SDIV:
+      case OP_MOD:
+      case OP_SMOD:
+      case OP_EXP:
+      case OP_SIGNEXTEND:
+      case OP_LT:
+      case OP_GT:
+      case OP_SLT:
+      case OP_SGT:
+      case OP_EQ:
+      case OP_AND:
+      case OP_OR:
+      case OP_XOR:
+      case OP_SHL:
+      case OP_SHR:
+      case OP_SAR:
+        Drop(2);
+        PushUnknown();
+        break;
+      case OP_ADDMOD:
+      case OP_MULMOD:
+        Drop(3);
+        PushUnknown();
+        break;
+      default:
+        FinalizeSegment(SegmentRejectReason::UnknownBase);
+        PushUnknown();
+        break;
+      }
+    }
+
+    FinalizeSegment(SegmentRejectReason::None);
+    return Result;
   }
 
   BlockConstPrecheckPlan
@@ -1576,7 +2158,42 @@ private:
         SawDirectMemory = true;
         break;
       }
+      case OP_MCOPY: {
+        if (SimStack.size() < 3) {
+          return {};
+        }
+        AbstractConstU64 DestAddr = SimStack.back();
+        SimStack.pop_back();
+        AbstractConstU64 SrcAddr = SimStack.back();
+        SimStack.pop_back();
+        AbstractConstU64 Length = SimStack.back();
+        SimStack.pop_back();
+        if (!Length.Known) {
+          return {};
+        }
+        if (Length.Value == 0) {
+          break;
+        }
+        if (!DestAddr.Known || !SrcAddr.Known) {
+          return {};
+        }
+        uint64_t DestRequiredSize = 0;
+        uint64_t SrcRequiredSize = 0;
+        if (!addConstU64(DestAddr.Value, Length.Value, DestRequiredSize) ||
+            !addConstU64(SrcAddr.Value, Length.Value, SrcRequiredSize)) {
+          return {};
+        }
+        Plan.MaxRequiredSize = std::max(
+            Plan.MaxRequiredSize, std::max(DestRequiredSize, SrcRequiredSize));
+        Plan.CoveredDirectOps++;
+        SawDirectMemory = true;
+        break;
+      }
       case OP_MSIZE:
+        if (SawDirectMemory) {
+          Plan.Eligible = Plan.CoveredDirectOps >= 2;
+          return Plan;
+        }
         SimStack.push_back(makeUnknownConstU64());
         break;
       default:

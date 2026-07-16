@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -62,6 +63,8 @@ public:
     Builder.initEVM(&Ctx);
   }
 
+  ~MirBuilderConstFoldHarness() { Builder.finalizeEVMBase(); }
+
   COMPILER::EVMFrontendContext Ctx;
   COMPILER::MFunction Func;
   EVMMirBuilder Builder;
@@ -105,6 +108,47 @@ void expectPCList(const std::vector<uint64_t> &Actual,
     EXPECT_EQ(Actual[Index], ExpectedPC) << "mismatch at index " << Index;
     ++Index;
   }
+}
+
+void appendPushU64(std::vector<uint8_t> &Bytecode, uint64_t Value) {
+  if (Value == 0) {
+    Bytecode.push_back(OP_PUSH0);
+    return;
+  }
+
+  uint8_t Bytes = 0;
+  uint64_t Tmp = Value;
+  while (Tmp != 0) {
+    ++Bytes;
+    Tmp >>= 8;
+  }
+  Bytecode.push_back(static_cast<uint8_t>(OP_PUSH0) + Bytes);
+  for (int Shift = static_cast<int>(Bytes) - 1; Shift >= 0; --Shift) {
+    Bytecode.push_back(static_cast<uint8_t>((Value >> (Shift * 8)) & 0xff));
+  }
+}
+
+std::vector<uint8_t> makeLargeStaticConstMStoreBlock(uint64_t Ops) {
+  std::vector<uint8_t> Bytecode;
+  for (uint64_t I = 0; I < Ops; ++I) {
+    appendPushU64(Bytecode, I + 1);
+    appendPushU64(Bytecode, I * 32);
+    Bytecode.push_back(OP_MSTORE);
+  }
+  Bytecode.push_back(OP_STOP);
+  return Bytecode;
+}
+
+std::vector<uint8_t> makeLargeStaticDynamicOffsetMStoreBlock(uint64_t Ops) {
+  std::vector<uint8_t> Bytecode;
+  for (uint64_t I = 0; I < Ops; ++I) {
+    appendPushU64(Bytecode, I + 1);
+    Bytecode.push_back(OP_PUSH0);
+    Bytecode.push_back(OP_CALLDATALOAD);
+    Bytecode.push_back(OP_MSTORE);
+  }
+  Bytecode.push_back(OP_STOP);
+  return Bytecode;
 }
 
 struct MockOperand {
@@ -372,13 +416,14 @@ public:
   MOCK_VOID_STUB(handleCallDataCopy);
   MOCK_VOID_STUB(handleCodeCopy);
   MOCK_VOID_STUB(handleExtCodeCopy);
-  MOCK_VOID_STUB(handleMCopy);
   MOCK_VOID_STUB(handleMStore8);
 
   void handleMStore(Operand Addr, Operand Value) {
     LastMStore = {Addr.resolvedValue(), Value.resolvedValue()};
     MStoreCount++;
   }
+
+  void handleMCopy(Operand, Operand, Operand) { MCopyCount++; }
 
   Operand handleKeccak256(Operand, Operand) {
     KeccakCount++;
@@ -417,9 +462,59 @@ public:
   MOCK_VOID_STUB(handleTStore);
 
   void beginMemoryCompileBlock(uint64_t) {}
-  void setMemoryCompileBlockConstPrecheckPlan(uint64_t, uint64_t) {}
-  void setMemoryCompileBlockLinearPrecheckPlan(uint64_t, uint64_t, bool) {}
-  void prepareLinearBlockMemoryPrecheck(Operand) {}
+  void setMemoryCompileBlockConstPrecheckPlan(uint64_t MaxRequiredSize,
+                                              uint64_t CoveredDirectOps) {
+    ConstPrecheckPlanCount++;
+    ConstPrecheckMaxRequiredSize = MaxRequiredSize;
+    ConstPrecheckCoveredDirectOps = CoveredDirectOps;
+  }
+  void setMemoryCompileBlockLinearPrecheckPlan(uint64_t AccessWidth,
+                                               uint64_t CoveredDirectOps,
+                                               bool ValueEqualsFirstAddr) {
+    LinearPrecheckPlanCount++;
+    LastLinearPrecheckAccessWidth = AccessWidth;
+    LastLinearPrecheckCoveredDirectOps = CoveredDirectOps;
+    LastLinearPrecheckValueEqualsFirstAddr = ValueEqualsFirstAddr;
+  }
+  void setMemoryCompileBlockLargeStaticWorkspacePrecheckPlan(
+      uint64_t, uint64_t, uint64_t MaxRequiredSize, uint64_t CoveredDirectOps,
+      uint64_t CoveredMLoadOps, uint64_t CoveredMStoreOps,
+      uint64_t CoveredMStore8Ops) {
+    ++LargeStaticWorkspaceLoweringPlans;
+    LargeStaticWorkspaceLoweringMaxRequiredSize = MaxRequiredSize;
+    LargeStaticWorkspaceLoweringCoveredOps = CoveredDirectOps;
+    LargeStaticWorkspaceLoweringCoveredMLoadOps = CoveredMLoadOps;
+    LargeStaticWorkspaceLoweringCoveredMStoreOps = CoveredMStoreOps;
+    LargeStaticWorkspaceLoweringCoveredMStore8Ops = CoveredMStore8Ops;
+  }
+  void noteLargeStaticWorkspaceVerifierResult(
+      uint64_t Candidates, uint64_t VerifiedSegments, uint64_t VerifiedOps,
+      uint64_t VerifiedMLoadOps, uint64_t VerifiedMStoreOps,
+      uint64_t VerifiedMStore8Ops, uint64_t MaxRequiredSize, uint64_t Rejected,
+      uint64_t RejectDynamicOffset, uint64_t RejectUnknownBase,
+      uint64_t RejectUnboundedInterval, uint64_t RejectOverflowRisk,
+      uint64_t RejectSideEffect, uint64_t RejectHelperByteExactRisk,
+      uint64_t RejectTooFewOps) {
+    LargeStaticWorkspaceCandidates += Candidates;
+    LargeStaticWorkspaceVerifiedSegments += VerifiedSegments;
+    LargeStaticWorkspaceVerifiedOps += VerifiedOps;
+    LargeStaticWorkspaceVerifiedMLoadOps += VerifiedMLoadOps;
+    LargeStaticWorkspaceVerifiedMStoreOps += VerifiedMStoreOps;
+    LargeStaticWorkspaceVerifiedMStore8Ops += VerifiedMStore8Ops;
+    LargeStaticWorkspaceMaxRequiredSize =
+        std::max(LargeStaticWorkspaceMaxRequiredSize, MaxRequiredSize);
+    LargeStaticWorkspaceRejected += Rejected;
+    LargeStaticWorkspaceRejectDynamicOffset += RejectDynamicOffset;
+    LargeStaticWorkspaceRejectUnknownBase += RejectUnknownBase;
+    LargeStaticWorkspaceRejectUnboundedInterval += RejectUnboundedInterval;
+    LargeStaticWorkspaceRejectOverflowRisk += RejectOverflowRisk;
+    LargeStaticWorkspaceRejectSideEffect += RejectSideEffect;
+    LargeStaticWorkspaceRejectHelperByteExactRisk += RejectHelperByteExactRisk;
+    LargeStaticWorkspaceRejectTooFewOps += RejectTooFewOps;
+  }
+  void prepareLinearBlockMemoryPrecheck(Operand) {
+    LinearPrecheckPrepareCount++;
+  }
   void noteMemoryOpcodeInBlock(evmc_opcode, uint64_t) {}
   void noteHelperOpcodeInBlock(evmc_opcode, uint64_t) {}
   void endMemoryCompileBlock() {}
@@ -447,6 +542,18 @@ public:
   }
 
   uint32_t mstoreCount() const { return MStoreCount; }
+
+  uint32_t mcopyCount() const { return MCopyCount; }
+
+  uint32_t constPrecheckPlanCount() const { return ConstPrecheckPlanCount; }
+
+  uint64_t constPrecheckMaxRequiredSize() const {
+    return ConstPrecheckMaxRequiredSize;
+  }
+
+  uint64_t constPrecheckCoveredDirectOps() const {
+    return ConstPrecheckCoveredDirectOps;
+  }
 
   uint32_t keccakCount() const { return KeccakCount; }
 
@@ -487,8 +594,47 @@ public:
     return RuntimeStack.back().resolvedValue();
   }
 
+  uint32_t linearPrecheckPlanCount() const { return LinearPrecheckPlanCount; }
+
+  uint64_t lastLinearPrecheckAccessWidth() const {
+    return LastLinearPrecheckAccessWidth;
+  }
+
+  uint64_t lastLinearPrecheckCoveredDirectOps() const {
+    return LastLinearPrecheckCoveredDirectOps;
+  }
+
+  bool lastLinearPrecheckValueEqualsFirstAddr() const {
+    return LastLinearPrecheckValueEqualsFirstAddr;
+  }
+
+  uint32_t linearPrecheckPrepareCount() const {
+    return LinearPrecheckPrepareCount;
+  }
+
   bool Trapped = false;
   bool Undefined = false;
+  uint64_t LargeStaticWorkspaceCandidates = 0;
+  uint64_t LargeStaticWorkspaceVerifiedSegments = 0;
+  uint64_t LargeStaticWorkspaceVerifiedOps = 0;
+  uint64_t LargeStaticWorkspaceVerifiedMLoadOps = 0;
+  uint64_t LargeStaticWorkspaceVerifiedMStoreOps = 0;
+  uint64_t LargeStaticWorkspaceVerifiedMStore8Ops = 0;
+  uint64_t LargeStaticWorkspaceMaxRequiredSize = 0;
+  uint64_t LargeStaticWorkspaceRejected = 0;
+  uint64_t LargeStaticWorkspaceRejectDynamicOffset = 0;
+  uint64_t LargeStaticWorkspaceRejectUnknownBase = 0;
+  uint64_t LargeStaticWorkspaceRejectUnboundedInterval = 0;
+  uint64_t LargeStaticWorkspaceRejectOverflowRisk = 0;
+  uint64_t LargeStaticWorkspaceRejectSideEffect = 0;
+  uint64_t LargeStaticWorkspaceRejectHelperByteExactRisk = 0;
+  uint64_t LargeStaticWorkspaceRejectTooFewOps = 0;
+  uint64_t LargeStaticWorkspaceLoweringPlans = 0;
+  uint64_t LargeStaticWorkspaceLoweringMaxRequiredSize = 0;
+  uint64_t LargeStaticWorkspaceLoweringCoveredOps = 0;
+  uint64_t LargeStaticWorkspaceLoweringCoveredMLoadOps = 0;
+  uint64_t LargeStaticWorkspaceLoweringCoveredMStoreOps = 0;
+  uint64_t LargeStaticWorkspaceLoweringCoveredMStore8Ops = 0;
 
 private:
   bool EnableRuntimeStackChecks = false;
@@ -498,6 +644,10 @@ private:
   std::vector<MockMeterOpcodeRangeRecord> MeteredRanges;
   MockMStoreRecord LastMStore = {};
   uint32_t MStoreCount = 0;
+  uint32_t MCopyCount = 0;
+  uint32_t ConstPrecheckPlanCount = 0;
+  uint64_t ConstPrecheckMaxRequiredSize = 0;
+  uint64_t ConstPrecheckCoveredDirectOps = 0;
   MockOperand::U256Value KeccakTwoWordLastOffset = {0, 0, 0, 0};
   MockOperand::U256Value KeccakTwoWordLastWord0 = {0, 0, 0, 0};
   MockOperand::U256Value KeccakTwoWordLastWord1 = {0, 0, 0, 0};
@@ -510,6 +660,11 @@ private:
   std::vector<Operand> RuntimeStack;
   MockOperand::U256Value LastPushValue = {0, 0, 0, 0};
   bool HasLastPushValue = false;
+  uint32_t LinearPrecheckPlanCount = 0;
+  uint64_t LastLinearPrecheckAccessWidth = 0;
+  uint64_t LastLinearPrecheckCoveredDirectOps = 0;
+  bool LastLinearPrecheckValueEqualsFirstAddr = false;
+  uint32_t LinearPrecheckPrepareCount = 0;
 
 #undef MOCK_OPERAND_STUB
 #undef MOCK_VOID_STUB
@@ -673,6 +828,17 @@ TEST(MIRVerifierTest, SharedDagMemoizationIsVerifierLocalAndResetsPerVerify) {
   OS.flush();
   EXPECT_EQ(countSubstring(Diagnostics, ExpectedBinaryError), 2U);
   EXPECT_EQ(countSubstring(Diagnostics, ExpectedAuxiliaryOperandError), 2U);
+}
+
+bool compileWithMockBuilder(const std::vector<uint8_t> &Bytecode,
+                            MockEVMBuilder &Builder) {
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  return Visitor.compile();
 }
 
 TEST(EVMJITFrontendAnalyzerTest, ConstantJumpCanonicalizesJumpDestRuns) {
@@ -899,6 +1065,51 @@ TEST(EVMJITFrontendAnalyzerTest,
   EXPECT_TRUE(SuccessorBlock->HasInconsistentEntryDepth);
   EXPECT_FALSE(SuccessorBlock->CanLiftStack);
   expectPCList(SuccessorBlock->Predecessors, {10});
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     LargeStaticWorkspaceVerifierCountsConstDirectStores) {
+  const std::vector<uint8_t> Bytecode = makeLargeStaticConstMStoreBlock(16);
+
+  MockEVMBuilder Builder;
+  EXPECT_TRUE(compileWithMockBuilder(Bytecode, Builder));
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.LargeStaticWorkspaceCandidates, 1U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceVerifiedSegments, 1U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceVerifiedOps, 16U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceVerifiedMLoadOps, 0U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceVerifiedMStoreOps, 16U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceVerifiedMStore8Ops, 0U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceMaxRequiredSize, 512U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceRejected, 0U);
+#ifdef ZEN_ENABLE_EVM_MEM_LARGE_STATIC_WORKSPACE_LOWERING
+  EXPECT_EQ(Builder.LargeStaticWorkspaceLoweringPlans, 1U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceLoweringMaxRequiredSize, 512U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceLoweringCoveredOps, 16U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceLoweringCoveredMStoreOps, 16U);
+#else
+  EXPECT_EQ(Builder.LargeStaticWorkspaceLoweringPlans, 0U);
+#endif
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     LargeStaticWorkspaceVerifierRejectsDynamicOffsets) {
+  const std::vector<uint8_t> Bytecode =
+      makeLargeStaticDynamicOffsetMStoreBlock(16);
+
+  MockEVMBuilder Builder;
+  EXPECT_TRUE(compileWithMockBuilder(Bytecode, Builder));
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.LargeStaticWorkspaceCandidates, 1U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceVerifiedSegments, 0U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceVerifiedOps, 0U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceRejected, 1U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceRejectDynamicOffset, 1U);
+  EXPECT_EQ(Builder.LargeStaticWorkspaceLoweringPlans, 0U);
 }
 
 TEST(EVMJITFrontendVisitorTest,
@@ -1244,6 +1455,144 @@ TEST(EVMJITFrontendVisitorTest, FusesLinearMStoreNextMotifIntoMeteredRange) {
   EXPECT_EQ(Builder.lastMStore().Value[0], 0x40U);
   EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
   EXPECT_EQ(Builder.topStackValue()[0], 0x60U);
+}
+
+TEST(EVMJITFrontendVisitorTest, PlansLinearMStore8NextMotifMemoryPrecheck) {
+  const std::vector<uint8_t> Bytecode = {
+      0x5f, // PUSH0 calldata offset for stride
+      0x35, // CALLDATALOAD
+      0x5f, // PUSH0 current
+      0x80, // DUP1
+      0x80, // DUP1
+      0x53, // MSTORE8
+      0x81, // DUP2
+      0x01, // ADD
+      0x80, // DUP1
+      0x80, // DUP1
+      0x53, // MSTORE8
+      0x81, // DUP2
+      0x01, // ADD
+      0x00  // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.linearPrecheckPlanCount(), 1U);
+  EXPECT_EQ(Builder.lastLinearPrecheckAccessWidth(), 1U);
+  EXPECT_EQ(Builder.lastLinearPrecheckCoveredDirectOps(), 2U);
+  EXPECT_FALSE(Builder.lastLinearPrecheckValueEqualsFirstAddr());
+  EXPECT_EQ(Builder.linearPrecheckPrepareCount(), 2U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE8), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
+}
+
+TEST(EVMJITFrontendVisitorTest, ConstMcopyRangesUseBlockMemoryPrecheck) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x20, // PUSH1 length 32
+      0x60, 0x00, // PUSH1 src 0
+      0x60, 0x40, // PUSH1 dest 64
+      0x5e,       // MCOPY
+      0x60, 0x10, // PUSH1 length 16
+      0x60, 0x20, // PUSH1 src 32
+      0x60, 0x60, // PUSH1 dest 96
+      0x5e,       // MCOPY
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.constPrecheckPlanCount(), 1U);
+  EXPECT_EQ(Builder.constPrecheckCoveredDirectOps(), 2U);
+  EXPECT_EQ(Builder.constPrecheckMaxRequiredSize(), 0x70U);
+  EXPECT_EQ(Builder.mcopyCount(), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 0U);
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     ZeroLengthMcopyDoesNotEnterBlockMemoryPrecheckPlan) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x00, // PUSH1 length 0
+      0x60, 0xff, // PUSH1 src
+      0x60, 0xff, // PUSH1 dest
+      0x5e,       // MCOPY
+      0x60, 0x01, // PUSH1 value
+      0x60, 0x00, // PUSH1 addr
+      0x52,       // MSTORE
+      0x60, 0x02, // PUSH1 value
+      0x60, 0x20, // PUSH1 addr
+      0x52,       // MSTORE
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.constPrecheckPlanCount(), 1U);
+  EXPECT_EQ(Builder.constPrecheckCoveredDirectOps(), 2U);
+  EXPECT_EQ(Builder.constPrecheckMaxRequiredSize(), 0x40U);
+  EXPECT_EQ(Builder.mcopyCount(), 1U);
+  EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 0U);
+}
+
+TEST(EVMJITFrontendVisitorTest, MSizeStopsConstMemoryPrecheckBeforeMcopy) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01, // PUSH1 value
+      0x60, 0x00, // PUSH1 addr
+      0x52,       // MSTORE
+      0x59,       // MSIZE
+      0x50,       // POP
+      0x60, 0x20, // PUSH1 length
+      0x60, 0x00, // PUSH1 src
+      0x60, 0x40, // PUSH1 dest
+      0x5e,       // MCOPY
+      0x60, 0x02, // PUSH1 value
+      0x60, 0x80, // PUSH1 addr
+      0x52,       // MSTORE
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.constPrecheckPlanCount(), 0U);
+  EXPECT_EQ(Builder.mcopyCount(), 1U);
+  EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 0U);
 }
 
 TEST(EVMJITFrontendVisitorTest, FusesCallerSlotKeccakIntoMeteredRange) {

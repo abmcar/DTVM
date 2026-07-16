@@ -1,0 +1,18 @@
+// Constant MCOPY ranges exercise shared memory precheck without changing copy semantics
+PUSH1 0xAA
+PUSH1 0x00
+MSTORE
+PUSH1 0xBB
+PUSH1 0x20
+MSTORE
+PUSH1 0x40
+PUSH1 0x00
+PUSH1 0x40
+MCOPY
+PUSH1 0x20
+PUSH1 0x40
+PUSH1 0x80
+MCOPY
+PUSH1 0xA0
+PUSH1 0x00
+RETURN

@@ -99,7 +99,7 @@ still required.
 - `rg 'MVisitor::visitInstruction' src/compiler/mir/pass/verifier.cpp`: no
   matches. Load/store indices and WASM memory-check bases enter the verifier's
   memoizing override instead of bypassing it.
-- `build/evmJitFrontendTests`: 28 tests passed.
+- `build/evmJitFrontendTests`: 34 tests passed after merging upstream main.
 - `tests/mir`: all 775 `RUN` lines passed with the built `ircompiler` and
   `FileCheck`. The environment did not provide the `lit` executable, so the
   same `ircompiler | FileCheck` commands declared by the test files were run
