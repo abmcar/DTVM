@@ -3,6 +3,7 @@
 #pragma once
 
 #include "compiler/mir/pass/visitor.h"
+#include "llvm/ADT/DenseSet.h"
 
 namespace COMPILER {
 
@@ -20,6 +21,7 @@ public:
 
   bool verify() {
     Broken = false;
+    VisitedInstructions.clear();
     visit();
     return !Broken;
   }
@@ -79,6 +81,12 @@ public:
       WasmOverflowI128BinaryInstruction &I) override;
 
 private:
+  void visitInstruction(MInstruction &I) override {
+    if (VisitedInstructions.insert(&I).second) {
+      MVisitor::visitInstruction(I);
+    }
+  }
+
   void visitIntExtInstruction(MType *OperandType, MType *ResultType);
   void visitTruncInstruction(MType *OperandType, MType *ResultType);
   void visitBitcastInstruction(MType *OperandType, MType *ResultType);
@@ -90,6 +98,7 @@ private:
   bool Broken = false;
   llvm::raw_ostream &OS;
   uint32_t FailedCount = 0;
+  llvm::DenseSet<const MInstruction *> VisitedInstructions;
 };
 
 } // namespace COMPILER
