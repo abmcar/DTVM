@@ -52,6 +52,9 @@ option(ZEN_ENABLE_EVM_GAS_REGISTER
 option(ZEN_ENABLE_EVM_STACK_SSA_LIFT
        "Enable conservative EVM stack lifting in multipass frontend" OFF
 )
+option(ZEN_ENABLE_EVM_MEM_LARGE_STATIC_WORKSPACE_LOWERING
+       "Enable experimental EVM large static workspace memory lowering" OFF
+)
 
 # Blockchain options
 option(ZEN_ENABLE_CHECKED_ARITHMETIC "Enable checked arithmetic" OFF)

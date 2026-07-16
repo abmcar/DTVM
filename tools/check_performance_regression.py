@@ -40,8 +40,22 @@ class BenchmarkResult:
     iterations: int
 
 
+raw_benchmark_json_outputs: List[str] = []
+
+
 def benchmark_env(lib_path: str, mode: str) -> Dict[str, str]:
     return {**os.environ, "EVMONE_EXTERNAL_OPTIONS": f"{lib_path},mode={mode}"}
+
+
+def evmc_config(lib_path: str, mode: str) -> str:
+    """Build the EVMC config argument expected by evmone-bench.
+
+    evmone-bench registers an external VM only when the config is passed as
+    the first positional argument: ``evmone-bench <evmc_config> <bench_dir>``.
+    Keep EVMONE_EXTERNAL_OPTIONS in the environment for compatibility, but do
+    not rely on it for registration.
+    """
+    return f"{lib_path},mode={mode}"
 
 
 def available_cpus() -> List[int]:
@@ -65,6 +79,8 @@ def split_benchmark_args(extra_args: Optional[List[str]]) -> Tuple[str, List[str
 
 
 def build_benchmark_cmd(
+    lib_path: str,
+    mode: str,
     benchmark_dir: str,
     json_out_path: str,
     benchmark_filter: str,
@@ -80,6 +96,7 @@ def build_benchmark_cmd(
 
     cmd.extend([
         "./build/bin/evmone-bench",
+        evmc_config(lib_path, mode),
         benchmark_dir,
         f"--benchmark_out={json_out_path}",
         "--benchmark_out_format=json",
@@ -107,6 +124,7 @@ def list_benchmark_names(
 ) -> List[str]:
     cmd = [
         "./build/bin/evmone-bench",
+        evmc_config(lib_path, mode),
         benchmark_dir,
         "--benchmark_list_tests",
         f"--benchmark_filter={benchmark_filter}",
@@ -198,12 +216,15 @@ def run_benchmark_shard(
     repetitions: int,
     benchmark_min_time: Optional[str],
     cpu: Optional[int],
+    keep_json_outputs: bool = False,
 ) -> List[BenchmarkResult]:
     fd, json_out_path = tempfile.mkstemp(suffix=".json")
     os.close(fd)
 
     try:
         cmd = build_benchmark_cmd(
+            lib_path,
+            mode,
             benchmark_dir,
             json_out_path,
             benchmark_filter,
@@ -223,12 +244,17 @@ def run_benchmark_shard(
             print(f"Benchmark execution failed with code {result.returncode}")
             sys.exit(2)
 
-        return parse_benchmark_json_file(json_out_path)
+        parse_path = json_out_path
+        if keep_json_outputs:
+            raw_benchmark_json_outputs.append(json_out_path)
+            json_out_path = ""
+        return parse_benchmark_json_file(parse_path)
     finally:
-        try:
-            os.unlink(json_out_path)
-        except OSError:
-            pass
+        if json_out_path:
+            try:
+                os.unlink(json_out_path)
+            except OSError:
+                pass
 
 
 def run_benchmark_parallel(
@@ -239,6 +265,7 @@ def run_benchmark_parallel(
     repetitions: int,
     benchmark_min_time: Optional[str],
     benchmark_jobs: int,
+    keep_json_outputs: bool = False,
 ) -> List[BenchmarkResult]:
     benchmark_filter, remaining_args = split_benchmark_args(extra_args)
 
@@ -254,6 +281,7 @@ def run_benchmark_parallel(
             repetitions,
             benchmark_min_time,
             cpu,
+            keep_json_outputs,
         )
 
     names = list_benchmark_names(
@@ -277,6 +305,8 @@ def run_benchmark_parallel(
 
             cpu = cpus[index % len(cpus)] if cpus else None
             cmd = build_benchmark_cmd(
+                lib_path,
+                mode,
                 benchmark_dir,
                 json_out_path,
                 exact_filter(shard_names),
@@ -313,6 +343,8 @@ def run_benchmark_parallel(
         results: List[BenchmarkResult] = []
         for json_out_path in temp_paths:
             results.extend(parse_benchmark_json_file(json_out_path))
+            if keep_json_outputs:
+                raw_benchmark_json_outputs.append(json_out_path)
 
         name_counts = Counter(result.name for result in results)
         duplicate_names = sorted(
@@ -325,11 +357,12 @@ def run_benchmark_parallel(
         return sorted(results, key=lambda result: result.name)
     finally:
         stop_processes(processes)
-        for json_out_path in temp_paths:
-            try:
-                os.unlink(json_out_path)
-            except OSError:
-                pass
+        if not keep_json_outputs:
+            for json_out_path in temp_paths:
+                try:
+                    os.unlink(json_out_path)
+                except OSError:
+                    pass
 
 
 def run_benchmark(
@@ -340,6 +373,7 @@ def run_benchmark(
     repetitions: int = 3,
     benchmark_min_time: Optional[str] = None,
     benchmark_jobs: int = 1,
+    keep_json_outputs: bool = False,
 ) -> List[BenchmarkResult]:
     """Run benchmark and parse JSON output.
 
@@ -363,6 +397,7 @@ def run_benchmark(
         repetitions,
         benchmark_min_time,
         benchmark_jobs,
+        keep_json_outputs,
     )
 
 
@@ -696,6 +731,12 @@ Examples:
         help="Write a concise Markdown summary to the given file (for PR comments)",
     )
     parser.add_argument(
+        "--raw-output",
+        metavar="PATH",
+        help="Write raw Google Benchmark JSON output to the given file. "
+             "Only supported with --benchmark-jobs=1.",
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -740,15 +781,36 @@ Examples:
         default=1,
         help="Run benchmark shards in parallel across CPUs (default: 1).",
     )
+    parser.add_argument(
+        "--list-only",
+        action="store_true",
+        help="List matching evmone-bench targets and exit without running them.",
+    )
 
     args = parser.parse_args()
 
-    if not args.baseline and not args.save_baseline:
+    if args.raw_output and args.benchmark_jobs != 1:
+        parser.error("--raw-output is only supported with --benchmark-jobs=1")
+
+    if not args.baseline and not args.save_baseline and not args.list_only:
         parser.error("Either --baseline or --save-baseline must be specified")
 
     bench_extra = None
     if args.benchmark_filter:
         bench_extra = [f"--benchmark_filter={args.benchmark_filter}"]
+
+    if args.list_only:
+        benchmark_filter, remaining_args = split_benchmark_args(bench_extra)
+        names = list_benchmark_names(
+            args.lib,
+            args.mode,
+            args.benchmark_dir,
+            benchmark_filter,
+            remaining_args,
+        )
+        for name in names:
+            print(name)
+        return 0
 
     # Run benchmarks
     try:
@@ -760,6 +822,7 @@ Examples:
             repetitions=args.benchmark_repetitions,
             benchmark_min_time=args.benchmark_min_time,
             benchmark_jobs=args.benchmark_jobs,
+            keep_json_outputs=bool(args.raw_output),
         )
     except Exception as e:
         print(f"::error::Failed to run benchmarks: {e}")
@@ -770,6 +833,17 @@ Examples:
         sys.exit(2)
 
     print(f"Collected {len(current_results)} benchmark results")
+
+    if args.raw_output:
+        if not raw_benchmark_json_outputs:
+            print("::error::Raw benchmark JSON was not captured")
+            sys.exit(2)
+        shutil.copyfile(raw_benchmark_json_outputs[0], args.raw_output)
+        try:
+            os.unlink(raw_benchmark_json_outputs[0])
+        except OSError:
+            pass
+        print(f"Wrote raw Google Benchmark JSON to {args.raw_output}")
 
     # Save baseline mode
     if args.save_baseline:
