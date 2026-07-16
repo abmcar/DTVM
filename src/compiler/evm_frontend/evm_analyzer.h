@@ -490,6 +490,8 @@ public:
   }
 
 private:
+  friend struct EVMAnalyzerRangeTestAccess;
+
   std::unordered_set<uint64_t> collectPossiblyReachableBlockPCs() const {
     std::unordered_set<uint64_t> Reachable;
     if (BlockInfos.count(EntryBlockPC) == 0) {
@@ -2177,6 +2179,20 @@ private:
   // successor's entry state.  A successor whose entry vector changed is
   // requeued.  Convergence: lattice height is 3, so each slot can change at
   // most twice.
+  void resetRangeAnalysisToConservativeState() {
+    for (auto &[EntryPC, Info] : BlockInfos) {
+      (void)EntryPC;
+      Info.CanLiftStack = false;
+      Info.EntryStackRanges.clear();
+      if (Info.ResolvedEntryStackDepth >= 0 &&
+          !Info.HasInconsistentEntryDepth) {
+        Info.EntryStackRanges.assign(
+            static_cast<size_t>(Info.ResolvedEntryStackDepth),
+            EVMValueRange::U256);
+      }
+    }
+  }
+
   void runRangeAnalysis(const uint8_t *Bytecode, size_t BytecodeSize) {
     seedRangeEntryVectors();
 
@@ -2228,17 +2244,7 @@ private:
           // align unrelated values and unsafely enable a narrow-value path.
           // Discard every inferred range and disable lifting, which also
           // depends on the absolute stack shape whose invariant just failed.
-          for (auto &[FallbackPC, FallbackInfo] : BlockInfos) {
-            (void)FallbackPC;
-            FallbackInfo.CanLiftStack = false;
-            FallbackInfo.EntryStackRanges.clear();
-            if (FallbackInfo.ResolvedEntryStackDepth >= 0 &&
-                !FallbackInfo.HasInconsistentEntryDepth) {
-              FallbackInfo.EntryStackRanges.assign(
-                  static_cast<size_t>(FallbackInfo.ResolvedEntryStackDepth),
-                  EVMValueRange::U256);
-            }
-          }
+          resetRangeAnalysisToConservativeState();
           return;
         }
         // Meet the producer's exit stack into the successor's entry stack.
