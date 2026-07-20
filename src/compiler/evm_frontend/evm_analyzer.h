@@ -1656,37 +1656,58 @@ private:
     // stays lifted keeps its zero-reload SSA entry (pure-SSA island). This is
     // sound because unlifting only forces additive runtime materialization,
     // which is always valid, at the cost of cross-boundary SSA residency.
-    bool HiddenBoundaryChanged = true;
-    while (HiddenBoundaryChanged) {
-      HiddenBoundaryChanged = false;
-      for (auto &[BlockPC, Info] : BlockInfos) {
-        (void)BlockPC;
-        if (!Info.CanLiftStack || Info.HiddenLiveInPrefixDepth <= 0) {
-          continue;
-        }
-        bool TouchesRuntime = blockExitMaterializesRuntimeStack(Info);
-        if (!TouchesRuntime) {
-          for (uint64_t PredBlockPC : Info.Predecessors) {
-            auto It = BlockInfos.find(PredBlockPC);
-            if (It == BlockInfos.end() || !It->second.CanLiftStack) {
-              TouchesRuntime = true;
-              break;
-            }
+    std::queue<uint64_t> HiddenBoundaryWorkList;
+    for (auto &[BlockPC, Info] : BlockInfos) {
+      if (!Info.CanLiftStack || Info.HiddenLiveInPrefixDepth <= 0) {
+        continue;
+      }
+      bool TouchesRuntime = blockExitMaterializesRuntimeStack(Info);
+      if (!TouchesRuntime) {
+        for (uint64_t PredBlockPC : Info.Predecessors) {
+          auto It = BlockInfos.find(PredBlockPC);
+          if (It == BlockInfos.end() || !It->second.CanLiftStack) {
+            TouchesRuntime = true;
+            break;
           }
         }
-        if (!TouchesRuntime) {
-          for (uint64_t SuccBlockPC : Info.Successors) {
-            auto It = BlockInfos.find(SuccBlockPC);
-            if (It == BlockInfos.end() || !It->second.CanLiftStack) {
-              TouchesRuntime = true;
-              break;
-            }
+      }
+      if (!TouchesRuntime) {
+        for (uint64_t SuccBlockPC : Info.Successors) {
+          auto It = BlockInfos.find(SuccBlockPC);
+          if (It == BlockInfos.end() || !It->second.CanLiftStack) {
+            TouchesRuntime = true;
+            break;
           }
         }
-        if (TouchesRuntime) {
-          Info.CanLiftStack = false;
-          HiddenBoundaryChanged = true;
+      }
+      if (TouchesRuntime) {
+        Info.CanLiftStack = false;
+        HiddenBoundaryWorkList.push(BlockPC);
+      }
+    }
+
+    while (!HiddenBoundaryWorkList.empty()) {
+      const uint64_t BlockPC = HiddenBoundaryWorkList.front();
+      HiddenBoundaryWorkList.pop();
+      const auto It = BlockInfos.find(BlockPC);
+      if (It == BlockInfos.end()) {
+        continue;
+      }
+      auto UnliftHiddenNeighbor = [&](uint64_t NeighborPC) {
+        auto NeighborIt = BlockInfos.find(NeighborPC);
+        if (NeighborIt == BlockInfos.end() ||
+            !NeighborIt->second.CanLiftStack ||
+            NeighborIt->second.HiddenLiveInPrefixDepth <= 0) {
+          return;
         }
+        NeighborIt->second.CanLiftStack = false;
+        HiddenBoundaryWorkList.push(NeighborPC);
+      };
+      for (uint64_t PredBlockPC : It->second.Predecessors) {
+        UnliftHiddenNeighbor(PredBlockPC);
+      }
+      for (uint64_t SuccBlockPC : It->second.Successors) {
+        UnliftHiddenNeighbor(SuccBlockPC);
       }
     }
 

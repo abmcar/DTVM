@@ -5,7 +5,7 @@
 - **Tier**: Full
 - **Original branch base**: main `5d64911`
 - **Validation base commit**: `ffc56028f68558e5a812813b0873ed46554909e7`
-- **Validated source hashes**: v4 evidence `metadata/source-files.sha256`
+- **Pre-hardening source hashes**: v4 evidence `metadata/source-files.sha256`
 - **Merged main parent**: `ce5f36f27f00436d2197e8a284c4ac71c4ee4283`
 
 ## Overview
@@ -142,17 +142,18 @@ predicate must not be relaxed from bytecode shape alone.
 
 ## Verification
 
-The validated source snapshot consists of base commit
+The pre-hardening validated source snapshot consists of base commit
 `ffc56028f68558e5a812813b0873ed46554909e7` plus the seven modified C/C++ files
 whose SHA-256 values are recorded in the v4 evidence as
 `metadata/source-files.sha256`. Those hashes were unchanged after testing. The
 untracked `bench-results/` directory and external EVM fixtures were not
 modified. This documentation was updated after the gate and does not affect the
-validated binaries.
+validated binaries. The post-review hardening below is not represented by those
+v4 hashes.
 
-Two fresh GCC 12 Release builds exercised stack SSA lift disabled and enabled.
-Both enabled multipass, spec tests, and precompile fallback. Each configuration
-ran the same focused tests:
+For that snapshot, two fresh GCC 12 Release builds exercised stack SSA lift
+disabled and enabled. Both enabled multipass, spec tests, and precompile
+fallback. Each configuration ran the same focused tests:
 
 | Test binary | Lift disabled | Lift enabled |
 |---|---:|---:|
@@ -167,6 +168,20 @@ constant jumps, backward dynamic-entry depth taint, dead `RETURN` and `REVERT`
 fallthrough, shared-entry phi construction, the retained unresolved-stack
 admission decision, and interpreter/JIT result equality including gas.
 
+Both builds completed without compiler errors. Each build emitted 14 compiler
+warning lines, with none attributed to a modified source file. The seven
+modified C/C++ files passed the repository's clang-format check, and
+`git diff --check HEAD` passed. The full-repository `tools/format.sh check`
+returned 123 for pre-existing formatting issues outside the change.
+
+### Post-review hardening verification
+
+The current worktree recompiled `evmJitFrontendTests`, `evmDifferentialTests`,
+and `dtvmapi` in the existing Release configurations with stack SSA lift
+disabled and enabled. Both configurations passed 46/46 frontend tests and 54/54
+differential tests. The added frontend test covers hidden-boundary fixed-point
+propagation.
+
 The project local gate produced:
 
 | Suite | Result |
@@ -177,15 +192,20 @@ The project local gate produced:
 | CTest targets | 12/12 |
 
 `ctest` ran against the worktree's lift-disabled `build/` and passed 12/12.
-The lift-enabled configuration separately ran the three JIT-dependent focused
-test binaries above. This avoids attributing the lift-disabled `ctest` result
-to both configurations.
+The lift-enabled configuration separately ran the two rebuilt JIT-dependent
+test binaries above. This avoids attributing the lift-disabled `ctest` result to
+both configurations.
 
-Both builds completed without compiler errors. Each build emitted 14 compiler
-warning lines, with none attributed to a modified source file. The seven
-modified C/C++ files pass the repository's clang-format check, and
-`git diff --check HEAD` passes. The full-repository `tools/format.sh check`
-still returns 123 for pre-existing formatting issues outside this change.
+Post-review hardening also makes JIT compile failure a sticky, atomic module
+fallback decision. The shared compile boundary covers eager and profile-guided
+background compilation without adding a test-only failure hook. The focused
+frontend and differential suites above exercise both lift configurations.
+
+Both incremental builds completed without compiler errors or warnings from the
+changed files. The five changed C/C++ files pass clang-format dry-runs with the
+configured formatter and LLVM 15, and `git diff --check HEAD` passes. The full-
+repository format gate still fails on pre-existing `tests/evm_asm/*.evm.hex`
+files without final newlines; none is part of this change.
 
 ### Mainnet replay evidence
 
@@ -222,8 +242,26 @@ MDBX database is not a complete mainnet state database.
 
 ## Performance scope
 
-This correctness gate provides no performance conclusion. Its elapsed-time
-fields are excluded from performance analysis.
+This correctness gate provides no end-to-end throughput conclusion. Its replay
+elapsed-time fields are excluded from performance analysis.
+
+The hidden-boundary fixed point now uses a transition-driven work queue instead
+of rescanning every block after each transition. On the same adversarial
+20,003-byte analyzer probe with 4,000 chained hidden-prefix blocks, a
+representative Release run fell from 462,992 us to 3,908 us while producing the
+same liftability result. This isolates the analyzer regression mechanism; it is
+not an application benchmark.
+
+The dynamic-entry taint remains intentionally conservative. A frozen base and
+pre-hardening PR-head scan of 252 unique mainnet-v2 prestate runtime bytecodes
+found lifted-block coverage falling from 15,442 to 1,109, but 230 of those
+modules already failed whole-module JIT admission. In the PR-head 300-fixture
+load trace, applying the exact-base admission predicate admitted 7 unique
+modules over 18 load events; the PR head admitted 8 over 19, with no admission
+loss. Among the seven modules admitted by both versions, lifted-block coverage
+fell from 32 to 24 by unique module, or from 72 to 63 when weighted by module
+loads. The latter is a 12.5% reduction in optimization coverage, not a measured
+12.5% execution slowdown.
 
 PR 561 and subsequent compiler-scan optimizations require independent,
 controlled A/B measurements built from explicitly frozen source snapshots.

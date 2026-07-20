@@ -1340,6 +1340,44 @@ TEST(EVMJITFrontendAnalyzerTest, HiddenEntryPrefixKeepsStaticMergesLiftable) {
   EXPECT_TRUE(JumpDestBlock->CanLiftStack);
 }
 
+TEST(EVMJITFrontendAnalyzerTest,
+     HiddenBoundaryUnliftingPropagatesAcrossMultipleBlocks) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PC0 PUSH1 preserved prefix
+      0x60, 0x05, // PC2 PUSH1 first block
+      0x56,       // PC4 JUMP
+      0x5b,       // PC5 JUMPDEST
+      0x60, 0x09, // PC6 PUSH1 second block
+      0x56,       // PC8 JUMP
+      0x5b,       // PC9 JUMPDEST
+      0x60, 0x0d, // PC10 PUSH1 third block
+      0x56,       // PC12 JUMP
+      0x5b,       // PC13 JUMPDEST
+      0x60, 0x11, // PC14 PUSH1 runtime boundary
+      0x56,       // PC16 JUMP
+      0x5b,       // PC17 JUMPDEST
+      0x0c,       // PC18 undefined instruction
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *FirstBlock = findBlock(Analyzer, 5);
+  const auto *SecondBlock = findBlock(Analyzer, 9);
+  const auto *ThirdBlock = findBlock(Analyzer, 13);
+  const auto *BoundaryBlock = findBlock(Analyzer, 17);
+  ASSERT_NE(FirstBlock, nullptr);
+  ASSERT_NE(SecondBlock, nullptr);
+  ASSERT_NE(ThirdBlock, nullptr);
+  ASSERT_NE(BoundaryBlock, nullptr);
+
+  EXPECT_GT(FirstBlock->HiddenLiveInPrefixDepth, 0);
+  EXPECT_GT(SecondBlock->HiddenLiveInPrefixDepth, 0);
+  EXPECT_GT(ThirdBlock->HiddenLiveInPrefixDepth, 0);
+  EXPECT_FALSE(BoundaryBlock->CanLiftStack);
+  EXPECT_FALSE(ThirdBlock->CanLiftStack);
+  EXPECT_FALSE(SecondBlock->CanLiftStack);
+  EXPECT_FALSE(FirstBlock->CanLiftStack);
+}
+
 TEST(EVMJITFrontendAnalyzerTest, MergeDepthConflictDisablesLiftedEntry) {
   const std::vector<uint8_t> Bytecode = {
       0x60, 0x01, // PUSH1 0x01
