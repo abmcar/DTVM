@@ -858,7 +858,7 @@ TEST(EVMLiftedStackMerge,
       << "both paths returned the same value";
 }
 
-TEST(EVMDeepEntryFallback, DeadCfgDoesNotBlockJITAndMatchesInterpreter) {
+TEST(EVMDeepEntry, DeadCfgDoesNotBlockJITAndMatchesInterpreter) {
   const std::vector<uint8_t> Bytecode = {
       0x00, // PC0 STOP
       0x5b, // PC1 JUMPDEST (dead dynamic source)
@@ -871,10 +871,6 @@ TEST(EVMDeepEntryFallback, DeadCfgDoesNotBlockJITAndMatchesInterpreter) {
       0x01, // PC8 ADD
       0x00, // PC9 STOP
   };
-  COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
-  ASSERT_TRUE(Analyzer.analyze(Bytecode.data(), Bytecode.size()));
-  ASSERT_FALSE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
-
   const auto Interp = runEvmBytecode("dead_deep_entry_interp", Bytecode,
                                      common::RunMode::InterpMode);
   const auto Multi = runEvmBytecode("dead_deep_entry_multipass", Bytecode,
@@ -886,8 +882,7 @@ TEST(EVMDeepEntryFallback, DeadCfgDoesNotBlockJITAndMatchesInterpreter) {
   EXPECT_EQ(Multi.OutputHex, Interp.OutputHex);
 }
 
-TEST(EVMDeepEntryFallback,
-     InvalidConstantJumpTrapsWithoutConservativeFallback) {
+TEST(EVMDeepEntry, InvalidConstantJumpJITsAndTraps) {
   const std::vector<uint8_t> Bytecode = {
       0x60, 0xff, // PC0 PUSH1 0xff (invalid jump destination)
       0x56,       // PC2 JUMP
@@ -904,15 +899,12 @@ TEST(EVMDeepEntryFallback,
   ASSERT_NE(SourceIt, Blocks.end());
   EXPECT_FALSE(Analyzer.hasUnknownDynamicJumpTargets());
   EXPECT_FALSE(SourceIt->second.HasDynamicJump);
-  EXPECT_FALSE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
-
   const auto Interp = runEvmBytecode("invalid_constant_jump_interp", Bytecode,
                                      common::RunMode::InterpMode);
   const auto Multi = runEvmBytecode("invalid_constant_jump_multipass", Bytecode,
                                     common::RunMode::MultipassMode);
 #ifdef ZEN_ENABLE_JIT
-  EXPECT_TRUE(Multi.JITCompiled)
-      << "constant-invalid jump incorrectly triggered interpreter fallback";
+  EXPECT_TRUE(Multi.JITCompiled) << "constant-invalid jump did not JIT";
 #endif
   EXPECT_NE(Interp.Status, EVMC_SUCCESS);
   EXPECT_EQ(Interp.Status, EVMC_BAD_JUMP_DESTINATION);
@@ -1009,16 +1001,13 @@ TEST(EVMLiftedStackDepth, BackwardDynamicEntryMatchesInterpreter) {
 //
 // One continuation (PC18) falls through to PC22, whose ADD reads two stack
 // slots -- a static successor of an unresolved-depth block that reads 2 slots.
-// The conservative admission predicate fires on this reachable pattern. A
-// forced-JIT control currently matches the interpreter for this bytecode, but
-// this local shape does not prove that every deeper caller frame is safe; the
-// mainnet tx46 storage divergence is the external evidence requiring the guard.
+// The non-lifted path reads its required values from the runtime stack and does
+// not need a statically resolved absolute entry depth.
 //
 // Execution: two calls into PC33 turn the initial 0x05 into 0x08 (0x05+1 in the
 // outer frame, 0x07+1 in the inner frame), which is MSTOREd and RETURNed as a
 // single 32-byte word.
-TEST(EVMDeepEntryFallback,
-     ReachableInternalCallUsesConservativeAdmissionFallback) {
+TEST(EVMDeepEntry, ReachableInternalCallJITsAndMatchesInterpreter) {
   const std::vector<uint8_t> Bytecode = {
       0x60, 0x08, // PC0  PUSH1 0x08
       0x60, 0x05, // PC2  PUSH1 0x05  (value threaded through the subroutine)
@@ -1050,7 +1039,10 @@ TEST(EVMDeepEntryFallback,
   };
   COMPILER::EVMAnalyzer Analyzer(EVMC_CANCUN);
   ASSERT_TRUE(Analyzer.analyze(Bytecode.data(), Bytecode.size()));
-  EXPECT_TRUE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
+  const auto DeepEntryIt = Analyzer.getBlockInfos().find(22);
+  ASSERT_NE(DeepEntryIt, Analyzer.getBlockInfos().end());
+  EXPECT_LT(DeepEntryIt->second.ResolvedEntryStackDepth, 0);
+  EXPECT_FALSE(DeepEntryIt->second.CanLiftStack);
 
   const std::vector<uint8_t> CallData;
   auto Interp = runEvmBytecode("deep_entry_interp", Bytecode,
@@ -1058,8 +1050,7 @@ TEST(EVMDeepEntryFallback,
   auto Multi = runEvmBytecode("deep_entry_multipass", Bytecode,
                               common::RunMode::MultipassMode, CallData);
 #ifdef ZEN_ENABLE_JIT
-  EXPECT_FALSE(Multi.JITCompiled)
-      << "conservative deep-entry admission guard did not fall back";
+  EXPECT_TRUE(Multi.JITCompiled) << "deep-entry module did not JIT-compile";
 #endif
   EXPECT_EQ(Interp.Status, EVMC_SUCCESS) << "interpreter did not succeed";
   EXPECT_EQ(Multi.Status, Interp.Status) << "status diverged";

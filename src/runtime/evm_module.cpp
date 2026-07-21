@@ -83,13 +83,7 @@ EVMModule::newEVMModule(Runtime &RT, CodeHolderUniquePtr CodeHolder,
     COMPILER::EVMAnalyzer Analyzer(Rev);
     Analyzer.analyze(reinterpret_cast<const uint8_t *>(Mod->Code),
                      Mod->CodeSize);
-    // Lifted-path boundary fixes do not cover unresolved non-lifted deep-entry
-    // shapes, including builds with ZEN_ENABLE_EVM_STACK_SSA_LIFT=OFF. Keep
-    // those modules on the interpreter until their deeper caller frames can be
-    // materialized soundly by the JIT.
-    Mod->ShouldFallbackToInterp =
-        Analyzer.getJITSuitability().ShouldFallback ||
-        Analyzer.hasUnresolvedNonLiftedDeepEntryRisk();
+    Mod->ShouldFallbackToInterp = Analyzer.getJITSuitability().ShouldFallback;
 
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
     if (RT.getConfig().EnableProfileGuidedJIT) {

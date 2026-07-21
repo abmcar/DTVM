@@ -1111,35 +1111,6 @@ TEST(EVMJITFrontendAnalyzerTest,
   EXPECT_TRUE(SuccessorBlock->EntryStackRanges.empty());
 }
 
-TEST(EVMJITFrontendAnalyzerTest, DeadDeepEntryBlocksDoNotTriggerFallbackRisk) {
-  // The dynamic source and deep-entry chain are both behind STOP. A module-
-  // global unknown-jump flag must not make their JUMPDESTs possibly reachable.
-  const std::vector<uint8_t> Bytecode = {
-      0x00, // PC0 STOP
-      0x5b, // PC1 JUMPDEST (dead dynamic source)
-      0x5f, // PC2 PUSH0
-      0x35, // PC3 CALLDATALOAD
-      0x56, // PC4 JUMP (unreachable dynamic jump)
-      0x5b, // PC5 JUMPDEST (dead predecessor)
-      0x50, // PC6 POP
-      0x5b, // PC7 JUMPDEST (dead, requires two entry slots)
-      0x01, // PC8 ADD
-      0x00, // PC9 STOP
-  };
-
-  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
-  const auto *DynamicSourceBlock = findBlock(Analyzer, 1);
-  const auto *DeepEntryBlock = findBlock(Analyzer, 7);
-  ASSERT_NE(DynamicSourceBlock, nullptr);
-  ASSERT_NE(DeepEntryBlock, nullptr);
-  EXPECT_TRUE(Analyzer.hasUnknownDynamicJumpTargets());
-  EXPECT_TRUE(DynamicSourceBlock->HasDynamicJump);
-  EXPECT_EQ(DynamicSourceBlock->ResolvedEntryStackDepth, -1);
-  EXPECT_EQ(DeepEntryBlock->ResolvedEntryStackDepth, -1);
-  EXPECT_EQ(DeepEntryBlock->MinStackHeight, -2);
-  EXPECT_FALSE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
-}
-
 TEST(EVMJITFrontendAnalyzerTest,
      InvalidConstantJumpDoesNotMakeDeadDeepEntryBlocksReachable) {
   const std::vector<uint8_t> Bytecode = {
@@ -1162,7 +1133,6 @@ TEST(EVMJITFrontendAnalyzerTest,
   EXPECT_FALSE(SourceBlock->HasConstantJump);
   EXPECT_TRUE(SourceBlock->Successors.empty());
   EXPECT_EQ(DeepEntryBlock->MinStackHeight, -2);
-  EXPECT_FALSE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
 }
 
 TEST(EVMJITFrontendAnalyzerTest,
@@ -1291,7 +1261,6 @@ TEST(EVMJITFrontendAnalyzerTest,
   EXPECT_EQ(PlainSuccessor->ResolvedEntryStackDepth, 0);
   EXPECT_FALSE(PlainSuccessor->IsDynamicJumpTargetCandidate);
   EXPECT_FALSE(PlainSuccessor->CanLiftStack);
-  EXPECT_FALSE(Analyzer.hasUnresolvedNonLiftedDeepEntryRisk());
 }
 
 TEST(EVMJITFrontendAnalyzerTest,

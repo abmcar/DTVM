@@ -414,41 +414,6 @@ public:
 
   const JITSuitabilityResult &getJITSuitability() const { return JITResult; }
 
-  bool hasUnresolvedNonLiftedDeepEntryRisk() const {
-    const std::unordered_set<uint64_t> PossiblyReachableBlockPCs =
-        collectPossiblyReachableBlockPCs();
-    for (const auto &[BlockPC, Info] : BlockInfos) {
-      if (PossiblyReachableBlockPCs.count(BlockPC) == 0 || Info.CanLiftStack ||
-          Info.ResolvedEntryStackDepth >= 0) {
-        continue;
-      }
-
-      const int32_t RequiredEntryDepth = -Info.MinStackHeight;
-      if (RequiredEntryDepth <= 1) {
-        continue;
-      }
-
-      for (uint64_t PredBlockPC : Info.Predecessors) {
-        if (PossiblyReachableBlockPCs.count(PredBlockPC) == 0) {
-          continue;
-        }
-        auto PredIt = BlockInfos.find(PredBlockPC);
-        if (PredIt == BlockInfos.end()) {
-          continue;
-        }
-
-        const BlockInfo &PredInfo = PredIt->second;
-        if (PredInfo.CanLiftStack || PredInfo.ResolvedEntryStackDepth >= 0) {
-          continue;
-        }
-
-        return true;
-      }
-    }
-
-    return false;
-  }
-
   bool hasCanonicalJumpDest(uint64_t PC) const {
     return JumpDestCanonicalPCs.count(PC) != 0;
   }
@@ -497,46 +462,6 @@ private:
     }
     auto PrevIt = JumpDestCanonicalPCs.find(PC - 1);
     return PrevIt != JumpDestCanonicalPCs.end() && PrevIt->second == PC;
-  }
-
-  std::unordered_set<uint64_t> collectPossiblyReachableBlockPCs() const {
-    std::unordered_set<uint64_t> Reachable;
-    if (BlockInfos.count(EntryBlockPC) == 0) {
-      return Reachable;
-    }
-
-    std::queue<uint64_t> WorkList;
-    Reachable.insert(EntryBlockPC);
-    WorkList.push(EntryBlockPC);
-    bool DynamicTargetsQueued = false;
-    while (!WorkList.empty()) {
-      const uint64_t BlockPC = WorkList.front();
-      WorkList.pop();
-      auto It = BlockInfos.find(BlockPC);
-      if (It == BlockInfos.end()) {
-        continue;
-      }
-
-      const BlockInfo &Info = It->second;
-      for (uint64_t SuccPC : Info.Successors) {
-        if (Reachable.insert(SuccPC).second) {
-          WorkList.push(SuccPC);
-        }
-      }
-
-      if (!Info.HasDynamicJump || DynamicTargetsQueued) {
-        continue;
-      }
-      DynamicTargetsQueued = true;
-      // Indirect-jump lowering can dispatch a reachable dynamic source to any
-      // canonical JUMPDEST, independent of analyzer region heuristics.
-      for (const auto &[TargetPC, TargetInfo] : BlockInfos) {
-        if (TargetInfo.IsJumpDest && Reachable.insert(TargetPC).second) {
-          WorkList.push(TargetPC);
-        }
-      }
-    }
-    return Reachable;
   }
 
   void markDynamicDispatchEntryDepthTaint() {

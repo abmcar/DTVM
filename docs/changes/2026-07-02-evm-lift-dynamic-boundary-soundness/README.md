@@ -12,21 +12,19 @@
 
 The multipass JIT previously used two whole-module interpreter guards for
 contracts with unresolved stack shapes. This change fixes the known lifted-stack
-boundary hazards and removes the compatible-dynamic-return guard. It retains the
-guard for reachable non-lifted blocks whose required entry stack cannot be
-resolved, because the lifted-path fixes do not cover that execution path.
+boundary hazards and removes both structural guards. Blocks whose absolute entry
+depth remains unresolved stay non-lifted and read their operands from the runtime
+stack. An unresolved entry depth therefore no longer rejects the whole module
+from JIT compilation.
 
-This distinction is required by mainnet replay evidence. With EVM stack SSA lift
-disabled, removing this guard made block `21800002`, transaction `46`, construct
-the wrong storage key. The replay requested slot
-`0xc51e32f45511c94086ad679bd468edb3b2197074a81a0ca3446204c99d92eb57`
-instead of
-`0xb6a8b75ae122bf609f843157cc59a3fda6034d110435651bb7f2869d45d7817b`.
-The exact corrected PR branch, built in Release mode with stack SSA lift
-disabled, reached transaction index `47` without an audit violation, the
-erroneous key, or `SIGABRT`. It also passed a continuous 100-block replay. The
-current implementation therefore sends affected modules to the interpreter
-until the JIT can materialize deeper caller frames soundly.
+The previously cited block `21800002`, transaction `46` divergence was not
+caused by unresolved non-lifted entry depth. The dynamic DIV/MOD lowering
+branched before materializing both tree-IR operands, which could leave the
+sibling branch with undefined virtual-register uses. Commit `458c5b5` fixes the
+shared DIV/MOD path by materializing both operands before the branch. The
+targeted replay no longer produces the erroneous storage key after that fix, so
+this transaction does not support retaining the unresolved-entry interpreter
+guard.
 
 ## What changed
 
@@ -62,9 +60,9 @@ The bytecode visitor now passes an explicit `HasLiveFallthrough` value to
 is true. Lifted `JUMPI` fallthroughs that enter a shared `JUMPDEST` remain live
 through the existing deferred-entry path.
 
-The current admission policy relies on these changes while omitting the
-compatible-dynamic-return guard. They do not establish that non-lifted
-execution with unresolved caller-frame slots is safe.
+The current admission policy relies on these changes while omitting both
+shape-based whole-module guards. A non-lifted block reads its inputs from the
+runtime stack and does not require a statically resolved absolute entry depth.
 
 The dynamic-source reachability check is intentionally a conservative CFG
 over-approximation. It does not prove a `JUMPI` condition constant before
@@ -80,9 +78,9 @@ depth cannot satisfy its own stack pops. Invalidation propagates to statically
 reachable successors before entry-shape metadata, liftability, and value-range
 analysis are finalized.
 
-This invalidation does not itself reject the whole module. The later
-reachable-risk predicate decides whether the unresolved non-lifted shape
-requires interpreter fallback.
+This invalidation does not reject the whole module. A block without a resolved
+absolute entry depth remains non-lifted and uses the runtime stack at execution
+time.
 
 If range propagation still encounters producer and successor vectors with
 different depths, it no longer depends on a Release assertion. The analyzer
@@ -93,21 +91,13 @@ aligned and used by a narrow-value lowering.
 Compiler errors raised while visiting EVM bytecode are propagated to the
 existing compile boundary, where the module can fall back to the interpreter.
 
-### Conservative admission for unresolved non-lifted stacks
+### JIT admission for unresolved non-lifted stacks
 
-`ShouldFallbackToInterp` still includes
-`hasUnresolvedNonLiftedDeepEntryRisk()`. The predicate is now restricted to
-blocks that may be reached from the function entry:
-
-- static successors are followed normally;
-- once a reachable unresolved dynamic jump is found, every canonical
-  `JUMPDEST` is treated as a possible target, matching indirect-dispatch
-  lowering;
-- dynamic jumps in dead code do not make unrelated dead blocks reachable.
-
-This removes false fallback caused only by unreachable control flow without
-weakening the guard on reachable blocks that require unresolved caller-frame
-slots.
+`ShouldFallbackToInterp` no longer includes
+`hasUnresolvedNonLiftedDeepEntryRisk()`, and the now-unused predicate and its
+reachability helper are removed. The analyzer still conservatively marks blocks
+that runtime indirect dispatch may enter. Those blocks remain non-lifted, but
+they no longer force the rest of the module onto the interpreter.
 
 ### Invalid constant jumps
 
@@ -126,19 +116,24 @@ map or expand possible dynamic reachability.
 
 The implementation changes the analyzer, bytecode visitor, MIR builder, module
 admission, and focused regression tests. It does not change the EVMC API. The
-runtime changes preserve the intended EVM semantics by selecting the
-interpreter when the JIT lacks a sound stack shape.
+runtime change allows modules with unresolved non-lifted entry depths to JIT.
+The focused internal-call regression now requires actual JIT compilation and
+checks its status, output, and ground-truth result against the interpreter.
 
-The policy is intentionally conservative. A small reachable internal-call
-fixture currently matches the interpreter when JIT execution is forced, but
-normal admission still selects the interpreter because the fixture contains a
-reachable unresolved non-lifted stack shape. One passing fixture does not
-establish safety for every deeper caller frame, while the mainnet transaction
-above is a counterexample to removing the guard globally.
+This does not disable every interpreter path. The following independent policies
+remain unchanged:
 
-Reducing this remaining interpreter population requires runtime stack
-materialization and reload logic for the non-lifted path. The admission
-predicate must not be relaxed from bytecode shape alone.
+- bytecode shorter than 64 bytes executes in the interpreter; in the current
+  evmone benchmark path, such modules are still eagerly JIT-compiled and the
+  generated code is unused, which is a separate existing inefficiency;
+- bytecode-size, MIR-size, and register-allocation complexity limits retain the
+  suitability fallback that bounds compilation cost;
+- compilation failure makes interpreter fallback sticky, and a module without
+  installed JIT code executes in the interpreter;
+- `CREATE` and `CREATE2` initcode, plus contracts created earlier in the same
+  transaction, execute in the interpreter;
+- profile-guided JIT executes initial calls in the interpreter until background
+  compilation publishes JIT code.
 
 ## Verification
 
@@ -166,7 +161,8 @@ The combined result is **298/298**. The tests cover under-resolved-depth
 invalidation, conservative range reset, dead dynamic control flow, invalid
 constant jumps, backward dynamic-entry depth taint, dead `RETURN` and `REVERT`
 fallthrough, shared-entry phi construction, the retained unresolved-stack
-admission decision, and interpreter/JIT result equality including gas.
+admission decision for that snapshot, and interpreter/JIT result equality
+including gas.
 
 Both builds completed without compiler errors. Each build emitted 14 compiler
 warning lines, with none attributed to a modified source file. The seven
@@ -176,13 +172,19 @@ returned 123 for pre-existing formatting issues outside the change.
 
 ### Post-review hardening verification
 
-The current worktree recompiled `evmJitFrontendTests`, `evmDifferentialTests`,
-and `dtvmapi` in the existing Release configurations with stack SSA lift
-disabled and enabled. Both configurations passed 46/46 frontend tests and 54/54
-differential tests. The added frontend test covers hidden-boundary fixed-point
-propagation.
+The current worktree recompiled `evmJitFrontendTests`, `evmRangeAnalyzerTests`,
+`evmDifferentialTests`, and `dtvmapi` in the existing Release configurations
+with stack SSA lift disabled and enabled. Each configuration passed 50/50
+frontend tests, 50/50 range-analyzer tests, and 64/64 differential tests. The
+internal-call differential regression confirms that an unresolved non-lifted
+block can remain on the runtime stack path while its module JIT-compiles. The
+dynamic-divisor regression exercises the corrected shared general-lowering
+branch through DIV.
 
-The project local gate produced:
+The earlier guarded post-review snapshot produced the following project local
+gate results. These counts cover the preceding boundary fixes in the listed
+suites, but do not by themselves validate removal of the unresolved-entry
+admission guard:
 
 | Suite | Result |
 |---|---:|
@@ -192,20 +194,20 @@ The project local gate produced:
 | CTest targets | 12/12 |
 
 `ctest` ran against the worktree's lift-disabled `build/` and passed 12/12.
-The lift-enabled configuration separately ran the two rebuilt JIT-dependent
-test binaries above. This avoids attributing the lift-disabled `ctest` result to
-both configurations.
+The lift-enabled configuration separately ran the rebuilt JIT-dependent test
+binaries. This avoids attributing the lift-disabled `ctest` result to both
+configurations.
 
 Post-review hardening also makes JIT compile failure a sticky, atomic module
 fallback decision. The shared compile boundary covers eager and profile-guided
 background compilation without adding a test-only failure hook. The focused
 frontend and differential suites above exercise both lift configurations.
 
-Both incremental builds completed without compiler errors or warnings from the
-changed files. The five changed C/C++ files pass clang-format dry-runs with the
-configured formatter and LLVM 15, and `git diff --check HEAD` passes. The full-
-repository format gate still fails on pre-existing `tests/evm_asm/*.evm.hex`
-files without final newlines; none is part of this change.
+Both current incremental builds completed without compiler errors or warnings
+from the changed files. The four C/C++ files changed by the admission-policy
+update pass clang-format dry-runs with the configured formatter and LLVM 15,
+and `git diff --check HEAD` passes. The full-repository format gate still reports
+pre-existing formatting violations outside this change.
 
 ### Mainnet replay evidence
 
@@ -240,6 +242,17 @@ The replay state is an offline stateless state rooted in a proof-backed parent
 state. It is not an independent full-node state-root recomputation, and its
 MDBX database is not a complete mainnet state database.
 
+These frozen VMs predate removal of the unresolved-entry guard. Their replay
+results cover the other compiler fixes within these fixtures, but not the new
+admission policy.
+Before `458c5b5`, block `21800002`, transaction `46` requested storage key
+`0xc51e32f45511c94086ad679bd468edb3b2197074a81a0ca3446204c99d92eb57`
+instead of
+`0xb6a8b75ae122bf609f843157cc59a3fda6034d110435651bb7f2869d45d7817b`.
+A targeted JIT execution no longer requested the wrong key after that commit.
+This result is consistent with the diagnosed DIV/MOD defect, but it does not
+replace a continuous replay of the current no-guard revision.
+
 ## Performance scope
 
 This correctness gate provides no end-to-end throughput conclusion. Its replay
@@ -252,16 +265,16 @@ representative Release run fell from 462,992 us to 3,908 us while producing the
 same liftability result. This isolates the analyzer regression mechanism; it is
 not an application benchmark.
 
-The dynamic-entry taint remains intentionally conservative. A frozen base and
-pre-hardening PR-head scan of 252 unique mainnet-v2 prestate runtime bytecodes
-found lifted-block coverage falling from 15,442 to 1,109, but 230 of those
-modules already failed whole-module JIT admission. In the PR-head 300-fixture
-load trace, applying the exact-base admission predicate admitted 7 unique
-modules over 18 load events; the PR head admitted 8 over 19, with no admission
-loss. Among the seven modules admitted by both versions, lifted-block coverage
-fell from 32 to 24 by unique module, or from 72 to 63 when weighted by module
-loads. The latter is a 12.5% reduction in optimization coverage, not a measured
-12.5% execution slowdown.
+The CI `external/total` corpus contains 194 benchmark cases. The removed guard
+matched seven unique real contracts represented by 12 cases. After removal, the
+full 194/194 corpus completed and those 12 cases executed through the JIT.
+
+For those 12 cases, a single-process cold probe increased from 0.20 seconds and
+36.9 MB peak RSS with the guard to 6.00 seconds and 301.3 MB without it. CI
+validation runs before the timed benchmark loop, so this cold compilation cost
+is not included in the reported benchmark result. A separate eager no-guard
+mainnet probe remained incomplete after 600 seconds and reached 2.44 GB peak
+RSS. This is an operational cold-load cost, not a correctness failure.
 
 PR 561 and subsequent compiler-scan optimizations require independent,
 controlled A/B measurements built from explicitly frozen source snapshots.
@@ -272,8 +285,9 @@ to aggregate mainnet performance.
 
 ## Follow-up
 
-- Materialize and reload the non-lifted runtime stack across unresolved
-  internal-return continuations, then re-evaluate the unresolved-stack guard.
+- Reduce cold-load compilation cost for modules newly admitted after removal of
+  the unresolved-entry guard, using profile-guided JIT or caching without
+  reintroducing the shape-based fallback.
 - Add condition-aware pruning for provably untaken dynamic-source CFG edges,
   while retaining taint for every runtime-feasible indirect entry.
 - Add the lift-enabled configuration to continuous integration so lifted-stack
