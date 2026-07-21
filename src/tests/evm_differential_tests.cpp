@@ -28,10 +28,43 @@ std::filesystem::path getEvmAsmDirPath() {
          std::filesystem::path("../../tests/evm_asm");
 }
 
+void appendHexByte(std::string &Out, uint8_t Byte) {
+  constexpr char Hex[] = "0123456789abcdef";
+  Out.push_back(Hex[Byte >> 4]);
+  Out.push_back(Hex[Byte & 0x0f]);
+}
+
+std::string
+logsSignature(const std::vector<evmc::MockedHost::log_record> &Logs) {
+  std::string Out;
+  Out += std::to_string(Logs.size());
+  Out.push_back('|');
+  for (const auto &Log : Logs) {
+    for (uint8_t Byte : Log.creator.bytes) {
+      appendHexByte(Out, Byte);
+    }
+    Out.push_back(':');
+    for (const auto &Topic : Log.topics) {
+      for (uint8_t Byte : Topic.bytes) {
+        appendHexByte(Out, Byte);
+      }
+      Out.push_back(',');
+    }
+    Out.push_back(':');
+    for (uint8_t Byte : Log.data) {
+      appendHexByte(Out, Byte);
+    }
+    Out.push_back('|');
+  }
+  return Out;
+}
+
 struct EVMExecutionResult {
   evmc_status_code Status = EVMC_INTERNAL_ERROR;
   int64_t GasLeft = 0;
   std::string OutputHex;
+  std::string LogsSignature;
+  size_t LogCount = 0;
   bool JITCompiled = false;
 };
 
@@ -40,11 +73,10 @@ struct EVMExecutionResult {
 // config can fall back to the interpreter for a single call, which would make
 // a differential test vacuous; DisableMultipassMultithread compiles before the
 // run so the JIT side is non-vacuous.
-EVMExecutionResult runEvmBytecode(const std::string &Label,
-                                  const std::vector<uint8_t> &Bytecode,
-                                  common::RunMode Mode,
-                                  const std::vector<uint8_t> &CallData = {},
-                                  bool EnableGasMetering = false) {
+EVMExecutionResult
+runEvmBytecode(const std::string &Label, const std::vector<uint8_t> &Bytecode,
+               common::RunMode Mode, const std::vector<uint8_t> &CallData = {},
+               uint32_t MessageFlags = 0u, bool EnableGasMetering = false) {
   EVMExecutionResult Empty;
 
   RuntimeConfig Config;
@@ -85,7 +117,7 @@ EVMExecutionResult runEvmBytecode(const std::string &Label,
 
   evmc_message Msg = {
       .kind = EVMC_CALL,
-      .flags = 0u,
+      .flags = MessageFlags,
       .depth = 0,
       .gas = static_cast<int64_t>(GasLimit),
       .recipient = {},
@@ -109,6 +141,8 @@ EVMExecutionResult runEvmBytecode(const std::string &Label,
   Exec.GasLeft = RawResult.gas_left;
   Exec.OutputHex =
       zen::utils::toHex(RawResult.output_data, RawResult.output_size);
+  Exec.LogCount = MockedHost->recorded_logs.size();
+  Exec.LogsSignature = logsSignature(MockedHost->recorded_logs);
   return Exec;
 }
 
@@ -153,7 +187,30 @@ bool expectInterpMatchesMultipass(const std::string &Label,
       << "interpreter did not succeed: " << Label;
   EXPECT_EQ(Multi.Status, Interp.Status) << "status diverged: " << Label;
   EXPECT_EQ(Multi.OutputHex, Interp.OutputHex) << "output diverged: " << Label;
+  EXPECT_EQ(Multi.LogCount, Interp.LogCount) << "log count diverged: " << Label;
+  EXPECT_EQ(Multi.LogsSignature, Interp.LogsSignature)
+      << "logs diverged: " << Label;
   return Interp.Status == EVMC_SUCCESS && Multi.Status == Interp.Status &&
+         Multi.OutputHex == Interp.OutputHex &&
+         Multi.LogCount == Interp.LogCount &&
+         Multi.LogsSignature == Interp.LogsSignature;
+}
+
+bool expectInterpStatusMatchesMultipass(const std::string &Label,
+                                        const std::vector<uint8_t> &Bytecode,
+                                        evmc_status_code ExpectedStatus) {
+  auto Interp =
+      runEvmBytecode(Label + "_interp", Bytecode, common::RunMode::InterpMode);
+  auto Multi = runEvmBytecode(Label + "_multipass", Bytecode,
+                              common::RunMode::MultipassMode);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Multi.JITCompiled) << "multipass did not JIT-compile: " << Label;
+#endif
+  EXPECT_EQ(Interp.Status, ExpectedStatus)
+      << "interpreter status mismatch: " << Label;
+  EXPECT_EQ(Multi.Status, Interp.Status) << "status diverged: " << Label;
+  EXPECT_EQ(Multi.OutputHex, Interp.OutputHex) << "output diverged: " << Label;
+  return Interp.Status == ExpectedStatus && Multi.Status == Interp.Status &&
          Multi.OutputHex == Interp.OutputHex;
 }
 
@@ -161,11 +218,12 @@ std::string
 expectInterpMatchesMultipassWithGas(const std::string &Label,
                                     const std::vector<uint8_t> &Bytecode,
                                     const std::vector<uint8_t> &CallData) {
-  const auto Interp = runEvmBytecode(
-      Label + "_interp", Bytecode, common::RunMode::InterpMode, CallData, true);
+  const auto Interp =
+      runEvmBytecode(Label + "_interp", Bytecode, common::RunMode::InterpMode,
+                     CallData, 0u, true);
   const auto Multi =
       runEvmBytecode(Label + "_multipass", Bytecode,
-                     common::RunMode::MultipassMode, CallData, true);
+                     common::RunMode::MultipassMode, CallData, 0u, true);
 #ifdef ZEN_ENABLE_JIT
   EXPECT_TRUE(Multi.JITCompiled) << "multipass did not JIT-compile: " << Label;
 #endif
@@ -220,6 +278,76 @@ class EVMFixtureDifferentialTest
 
 TEST_P(EVMFixtureDifferentialTest, InterpMatchesMultipass) {
   expectFixtureInterpMatchesMultipass(GetParam());
+}
+
+TEST(EVMMemoryTerminationDifferential, ReturnLargeRangeMatchesInterpreter) {
+  const std::vector<uint8_t> Bytecode = {0x60, 0x20, // PUSH1 32: return length
+                                         0x61, 0x10,
+                                         0x00,  // PUSH2 0x1000: return offset
+                                         0xf3}; // RETURN
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass("return_large_range", Bytecode,
+                                                 EVMC_SUCCESS));
+}
+
+TEST(EVMMemoryTerminationDifferential, RevertLargeRangeMatchesInterpreter) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x20,       // PUSH1 32: revert data length
+      0x61, 0x10, 0x00, // PUSH2 0x1000: revert data offset
+      0xfd};            // REVERT
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass("revert_large_range", Bytecode,
+                                                 EVMC_REVERT));
+}
+
+TEST(EVMMemoryTerminationDifferential, EmptyReturnIgnoresHighOffset) {
+  std::vector<uint8_t> Bytecode = {
+      0x5f, // PUSH0: return length
+      0x7f, // PUSH32: high offset must be ignored when length is zero
+  };
+  Bytecode.push_back(0x01);
+  Bytecode.insert(Bytecode.end(), 31, 0x00);
+  Bytecode.push_back(0xf3); // RETURN
+
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass("empty_return_high_offset",
+                                                 Bytecode, EVMC_SUCCESS));
+}
+
+TEST(EVMMemoryTerminationDifferential, EmptyRevertIgnoresHighOffset) {
+  std::vector<uint8_t> Bytecode = {
+      0x5f, // PUSH0: revert data length
+      0x7f, // PUSH32: high offset must be ignored when length is zero
+  };
+  Bytecode.push_back(0x01);
+  Bytecode.insert(Bytecode.end(), 31, 0x00);
+  Bytecode.push_back(0xfd); // REVERT
+
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass("empty_revert_high_offset",
+                                                 Bytecode, EVMC_REVERT));
+}
+
+TEST(EVMMemoryTerminationDifferential, DynamicEmptyReturnIgnoresHighOffset) {
+  std::vector<uint8_t> Bytecode = {
+      0x36, // CALLDATASIZE: dynamic zero return length
+      0x7f, // PUSH32: high offset must be ignored when length is zero
+  };
+  Bytecode.push_back(0x01);
+  Bytecode.insert(Bytecode.end(), 31, 0x00);
+  Bytecode.push_back(0xf3); // RETURN
+
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass(
+      "dynamic_empty_return_high_offset", Bytecode, EVMC_SUCCESS));
+}
+
+TEST(EVMMemoryTerminationDifferential, DynamicEmptyRevertIgnoresHighOffset) {
+  std::vector<uint8_t> Bytecode = {
+      0x36, // CALLDATASIZE: dynamic zero revert data length
+      0x7f, // PUSH32: high offset must be ignored when length is zero
+  };
+  Bytecode.push_back(0x01);
+  Bytecode.insert(Bytecode.end(), 31, 0x00);
+  Bytecode.push_back(0xfd); // REVERT
+
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass(
+      "dynamic_empty_revert_high_offset", Bytecode, EVMC_REVERT));
 }
 
 // Range-narrowed lowering paths: the range-narrowed ISZERO/JUMPI folds,
@@ -603,12 +731,12 @@ TEST(EVMLiftedStackMerge,
 
     std::vector<uint8_t> TerminatorCallData(64, 0);
     TerminatorCallData[31] = 1;
-    const auto Interp =
-        runEvmBytecode(std::string(Name) + "_terminator_interp", Bytecode,
-                       common::RunMode::InterpMode, TerminatorCallData, true);
+    const auto Interp = runEvmBytecode(std::string(Name) + "_terminator_interp",
+                                       Bytecode, common::RunMode::InterpMode,
+                                       TerminatorCallData, 0u, true);
     const auto Multi = runEvmBytecode(
         std::string(Name) + "_terminator_multipass", Bytecode,
-        common::RunMode::MultipassMode, TerminatorCallData, true);
+        common::RunMode::MultipassMode, TerminatorCallData, 0u, true);
 #ifdef ZEN_ENABLE_JIT
     EXPECT_TRUE(Multi.JITCompiled);
 #endif
@@ -922,6 +1050,103 @@ TEST(EVMDeepEntryFallback,
   // agreeing on a wrong value.
   EXPECT_EQ(Interp.OutputHex,
             "0000000000000000000000000000000000000000000000000000000000000008");
+}
+
+namespace {
+
+void appendPush2(std::vector<uint8_t> &Code, uint16_t Value) {
+  Code.push_back(0x61);
+  Code.push_back(static_cast<uint8_t>(Value >> 8));
+  Code.push_back(static_cast<uint8_t>(Value));
+}
+
+void appendPush32Pattern(std::vector<uint8_t> &Code, uint8_t Seed) {
+  Code.push_back(0x7f);
+  for (uint8_t I = 0; I < 32; ++I) {
+    Code.push_back(static_cast<uint8_t>(Seed + I));
+  }
+}
+
+void appendPush32HighOffset(std::vector<uint8_t> &Code) {
+  Code.push_back(0x7f);
+  Code.push_back(0x01);
+  Code.insert(Code.end(), 31, 0x00);
+}
+
+std::vector<uint8_t> log0LargeRangeBytecode() {
+  std::vector<uint8_t> Code;
+  appendPush32Pattern(Code, 0x11);
+  appendPush2(Code, 0x1000);
+  Code.push_back(0x52); // MSTORE(0x1000, pattern)
+  Code.push_back(0x60);
+  Code.push_back(0x20);
+  appendPush2(Code, 0x1000);
+  Code.push_back(0xa0); // LOG0(0x1000, 32)
+  return Code;
+}
+
+std::vector<uint8_t> log4LargeRangeBytecode() {
+  std::vector<uint8_t> Code;
+  appendPush32Pattern(Code, 0x41);
+  appendPush2(Code, 0x2000);
+  Code.push_back(0x52); // MSTORE(0x2000, pattern)
+  Code.insert(Code.end(), {0x60, 0x01, 0x60, 0x02, 0x60, 0x03, 0x60, 0x04});
+  Code.push_back(0x60);
+  Code.push_back(0x20);
+  appendPush2(Code, 0x2000);
+  Code.push_back(0xa4); // LOG4(0x2000, 32, topics)
+  return Code;
+}
+
+std::vector<uint8_t> log0DynamicEmptyHighOffsetBytecode() {
+  std::vector<uint8_t> Code;
+  Code.push_back(0x36); // CALLDATASIZE, zero in this test
+  appendPush32HighOffset(Code);
+  Code.push_back(0xa0); // LOG0(high_offset, calldata_size)
+  return Code;
+}
+
+std::vector<uint8_t> log0StaticHighOffsetBytecode() {
+  std::vector<uint8_t> Code;
+  Code.push_back(0x60);
+  Code.push_back(0x20);
+  appendPush32HighOffset(Code);
+  Code.push_back(0xa0); // must fail as static-mode violation, not OOG
+  return Code;
+}
+
+} // namespace
+
+TEST(EVMLogMemoryPreexpandDifferential, LogDataMatchesInterpreter) {
+  EXPECT_TRUE(expectInterpMatchesMultipass("log0_large_range",
+                                           log0LargeRangeBytecode(), {}));
+  EXPECT_TRUE(expectInterpMatchesMultipass("log4_large_range",
+                                           log4LargeRangeBytecode(), {}));
+}
+
+TEST(EVMLogMemoryPreexpandDifferential, EmptyDynamicRangeIgnoresHighOffset) {
+  EXPECT_TRUE(expectInterpMatchesMultipass("log0_dynamic_empty_high_offset",
+                                           log0DynamicEmptyHighOffsetBytecode(),
+                                           {}));
+}
+
+TEST(EVMLogMemoryPreexpandDifferential, StaticModePrecedesMemoryExpansion) {
+  const auto Bytecode = log0StaticHighOffsetBytecode();
+  auto Interp = runEvmBytecode("log0_static_high_offset_interp", Bytecode,
+                               common::RunMode::InterpMode, {},
+                               static_cast<uint32_t>(EVMC_STATIC));
+  auto Multi = runEvmBytecode("log0_static_high_offset_multipass", Bytecode,
+                              common::RunMode::MultipassMode, {},
+                              static_cast<uint32_t>(EVMC_STATIC));
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Multi.JITCompiled)
+      << "multipass did not JIT-compile static LOG test";
+#endif
+  EXPECT_EQ(Interp.Status, EVMC_STATIC_MODE_VIOLATION);
+  EXPECT_EQ(Multi.Status, Interp.Status);
+  EXPECT_EQ(Interp.LogCount, size_t{0});
+  EXPECT_EQ(Multi.LogCount, size_t{0});
+  EXPECT_EQ(Multi.LogsSignature, Interp.LogsSignature);
 }
 
 #endif

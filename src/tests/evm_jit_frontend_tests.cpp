@@ -168,6 +168,11 @@ struct MockMeterOpcodeRangeRecord {
   uint64_t EndPCExclusive = 0;
 };
 
+struct MockConstPrecheckPlanRecord {
+  uint64_t MaxRequiredSize = 0;
+  uint64_t CoveredDirectOps = 0;
+};
+
 struct MockMStoreRecord {
   MockOperand::U256Value Addr = {0, 0, 0, 0};
   MockOperand::U256Value Value = {0, 0, 0, 0};
@@ -437,6 +442,7 @@ public:
     ConstPrecheckPlanCount++;
     ConstPrecheckMaxRequiredSize = MaxRequiredSize;
     ConstPrecheckCoveredDirectOps = CoveredDirectOps;
+    ConstPrecheckPlans.push_back({MaxRequiredSize, CoveredDirectOps});
   }
   void setMemoryCompileBlockLinearPrecheckPlan(uint64_t AccessWidth,
                                                uint64_t CoveredDirectOps,
@@ -509,6 +515,10 @@ public:
 
   const std::vector<MockMeterOpcodeRangeRecord> &meteredRanges() const {
     return MeteredRanges;
+  }
+
+  const std::vector<MockConstPrecheckPlanRecord> &constPrecheckPlans() const {
+    return ConstPrecheckPlans;
   }
 
   uint32_t mstoreCount() const { return MStoreCount; }
@@ -612,6 +622,7 @@ private:
   std::array<MockStackAccessStats, 256> Stats = {};
   std::array<uint32_t, 256> MeteredOpcodeCounts = {};
   std::vector<MockMeterOpcodeRangeRecord> MeteredRanges;
+  std::vector<MockConstPrecheckPlanRecord> ConstPrecheckPlans;
   MockMStoreRecord LastMStore = {};
   uint32_t MStoreCount = 0;
   uint32_t MCopyCount = 0;
@@ -2086,6 +2097,166 @@ TEST(EVMJITFrontendVisitorTest,
   EXPECT_EQ(Builder.keccakCallDataSlotCount(), 0U);
   EXPECT_EQ(Builder.keccakCount(), 1U);
   EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 1U);
+}
+
+TEST(EVMJITFrontendVisitorTest, PrechecksGenericHashPrepMStoreRegion) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x11, // PUSH1 word0
+      0x5f,       // PUSH0 base
+      0x52,       // MSTORE
+      0x60, 0x22, // PUSH1 word1
+      0x60, 0x20, // PUSH1 base + 0x20
+      0x52,       // MSTORE
+      0x60, 0x40, // PUSH1 0x40
+      0x5f,       // PUSH0 base
+      0x20,       // KECCAK256
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  ASSERT_EQ(Builder.constPrecheckPlans().size(), 1U);
+  EXPECT_EQ(Builder.constPrecheckPlans()[0].MaxRequiredSize, 64U);
+  EXPECT_EQ(Builder.constPrecheckPlans()[0].CoveredDirectOps, 2U);
+  EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.keccakCount(), 1U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 1U);
+}
+
+TEST(EVMJITFrontendVisitorTest, PrechecksNonZeroHashPrepMStoreRegion) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x11, // PUSH1 word0
+      0x60, 0x40, // PUSH1 base
+      0x52,       // MSTORE
+      0x60, 0x22, // PUSH1 word1
+      0x60, 0x60, // PUSH1 base + 0x20
+      0x52,       // MSTORE
+      0x60, 0x40, // PUSH1 0x40
+      0x60, 0x40, // PUSH1 base
+      0x20,       // KECCAK256
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  ASSERT_EQ(Builder.constPrecheckPlans().size(), 1U);
+  EXPECT_EQ(Builder.constPrecheckPlans()[0].MaxRequiredSize, 128U);
+  EXPECT_EQ(Builder.constPrecheckPlans()[0].CoveredDirectOps, 2U);
+  EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.keccakCount(), 1U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 1U);
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     DoesNotPrecheckHashPrepWhenKeccakRangeIsNotCovered) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x11, // PUSH1 word0
+      0x5f,       // PUSH0 base
+      0x52,       // MSTORE
+      0x60, 0x22, // PUSH1 word1
+      0x5f,       // PUSH0 same base, leaves 0x20..0x3f untouched
+      0x52,       // MSTORE
+      0x60, 0x40, // PUSH1 0x40
+      0x5f,       // PUSH0 base
+      0x20,       // KECCAK256
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.constPrecheckPlans().empty());
+  EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.keccakCount(), 1U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 1U);
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     DoesNotPrecheckHashPrepWhenWordStoreOffsetsDoNotMatch) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x11, // PUSH1 word0
+      0x5f,       // PUSH0 base
+      0x52,       // MSTORE
+      0x60, 0x22, // PUSH1 unrelated word
+      0x60, 0x40, // PUSH1 outside the two-word preimage
+      0x52,       // MSTORE
+      0x60, 0x40, // PUSH1 0x40
+      0x5f,       // PUSH0 base
+      0x20,       // KECCAK256
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.constPrecheckPlans().empty());
+  EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.keccakCount(), 1U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 1U);
+}
+
+TEST(EVMJITFrontendVisitorTest, DoesNotPrecheckHashPrepWithoutTwoWordStores) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x11, // PUSH1 byte0
+      0x60, 0x3f, // PUSH1 last byte in the two-word range
+      0x53,       // MSTORE8
+      0x60, 0x22, // PUSH1 byte1
+      0x60, 0x3e, // PUSH1 previous byte in the two-word range
+      0x53,       // MSTORE8
+      0x60, 0x40, // PUSH1 0x40
+      0x5f,       // PUSH0 base
+      0x20,       // KECCAK256
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_TRUE(Builder.constPrecheckPlans().empty());
+  EXPECT_EQ(Builder.keccakCount(), 1U);
   EXPECT_EQ(Builder.runtimeStackDepth(), 1U);
 }
 

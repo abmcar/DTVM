@@ -50,6 +50,7 @@ private:
     bool Eligible = false;
     uint64_t MaxRequiredSize = 0;
     uint64_t CoveredDirectOps = 0;
+    std::vector<uint64_t> WordStoreOffsets;
   };
 
   struct BlockLinearPrecheckPlan {
@@ -1479,6 +1480,42 @@ private:
                                                          EntryPC);
   }
 
+  static bool isConstTwoWordKeccakHashPrepTail(
+      const std::vector<AbstractConstU64> &SimStack,
+      const BlockConstPrecheckPlan &Plan) {
+    // This only gates the direct-memory precheck. KECCAK itself still runs
+    // through the normal helper path.
+    if (Plan.CoveredDirectOps < 2 || SimStack.size() < 2) {
+      return false;
+    }
+
+    const AbstractConstU64 &Offset = SimStack.back();
+    const AbstractConstU64 &Length = SimStack[SimStack.size() - 2];
+    if (!Offset.Known || !Length.Known || Length.Value != 64) {
+      return false;
+    }
+
+    uint64_t RequiredSize = 0;
+    if (!addConstU64(Offset.Value, Length.Value, RequiredSize)) {
+      return false;
+    }
+
+    uint64_t SecondWordOffset = 0;
+    if (!addConstU64(Offset.Value, 32, SecondWordOffset)) {
+      return false;
+    }
+
+    bool HasFirstWordStore = false;
+    bool HasSecondWordStore = false;
+    for (uint64_t StoreOffset : Plan.WordStoreOffsets) {
+      HasFirstWordStore |= StoreOffset == Offset.Value;
+      HasSecondWordStore |= StoreOffset == SecondWordOffset;
+    }
+
+    return HasFirstWordStore && HasSecondWordStore &&
+           RequiredSize <= Plan.MaxRequiredSize;
+  }
+
   void maybePrepareLinearBlockMemoryPrecheck(evmc_opcode Opcode) {
     if (!CurBlockLinearPrecheckPlan.Eligible ||
         CurBlockLinearPrecheckPlan.CoveredOpcode != Opcode ||
@@ -1972,6 +2009,13 @@ private:
       if (ScanPC != EntryPC && Opcode == OP_JUMPDEST) {
         break;
       }
+      if (Opcode == OP_KECCAK256) {
+        if (isConstTwoWordKeccakHashPrepTail(SimStack, Plan)) {
+          Plan.Eligible = true;
+          return Plan;
+        }
+        return {};
+      }
       if (isHelperSensitiveOpcode(Opcode)) {
         return {};
       }
@@ -2156,6 +2200,7 @@ private:
         }
         Plan.MaxRequiredSize = std::max(Plan.MaxRequiredSize, RequiredSize);
         Plan.CoveredDirectOps++;
+        Plan.WordStoreOffsets.push_back(Addr.Value);
         SawDirectMemory = true;
         break;
       }
