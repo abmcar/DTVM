@@ -5216,30 +5216,41 @@ void EVMMirBuilder::handleLogWithTopics(Operand OffsetOp, Operand SizeOp,
                                         TopicArgs... Topics) {
   ZEN_STATIC_ASSERT(NumTopics <= 4);
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  normalizeOffsetWithSize(OffsetOp, SizeOp);
+
+  checkStaticModeIR();
+  preExpandMemoryRange(OffsetOp, SizeOp);
+
+  if (!SizeOp.isZeroConstant()) {
+    U256Inst SizeParts = extractU256Operand(SizeOp);
+    MInstruction *LogDataGasPerByte =
+        createIntConstInstruction(&Ctx.I64Type, 8);
+    MInstruction *LogDataCost = createInstruction<BinaryInstruction>(
+        false, OP_mul, &Ctx.I64Type, SizeParts[0], LogDataGasPerByte);
+    chargeDynamicGasIR(LogDataCost);
+  }
 
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemory();
 #endif
   if constexpr (NumTopics == 0) {
     callRuntimeForWithErrorCheck<void, uint64_t, uint64_t>(
-        RuntimeFunctions.EmitLog0, OffsetOp, SizeOp);
+        RuntimeFunctions.EmitLog0NoExpand, OffsetOp, SizeOp);
   } else if constexpr (NumTopics == 1) {
     callRuntimeForWithErrorCheck<void, uint64_t, uint64_t, const uint8_t *>(
-        RuntimeFunctions.EmitLog1, OffsetOp, SizeOp, Topics...);
+        RuntimeFunctions.EmitLog1NoExpand, OffsetOp, SizeOp, Topics...);
   } else if constexpr (NumTopics == 2) {
     callRuntimeForWithErrorCheck<void, uint64_t, uint64_t, const uint8_t *,
-                                 const uint8_t *>(RuntimeFunctions.EmitLog2,
-                                                  OffsetOp, SizeOp, Topics...);
+                                 const uint8_t *>(
+        RuntimeFunctions.EmitLog2NoExpand, OffsetOp, SizeOp, Topics...);
   } else if constexpr (NumTopics == 3) {
     callRuntimeForWithErrorCheck<void, uint64_t, uint64_t, const uint8_t *,
                                  const uint8_t *, const uint8_t *>(
-        RuntimeFunctions.EmitLog3, OffsetOp, SizeOp, Topics...);
+        RuntimeFunctions.EmitLog3NoExpand, OffsetOp, SizeOp, Topics...);
   } else { // NumTopics == 4
     callRuntimeForWithErrorCheck<void, uint64_t, uint64_t, const uint8_t *,
                                  const uint8_t *, const uint8_t *,
-                                 const uint8_t *>(RuntimeFunctions.EmitLog4,
-                                                  OffsetOp, SizeOp, Topics...);
+                                 const uint8_t *>(
+        RuntimeFunctions.EmitLog4NoExpand, OffsetOp, SizeOp, Topics...);
   }
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
@@ -6397,6 +6408,35 @@ void EVMMirBuilder::normalizeOffsetWithSize(Operand &Offset, Operand &Size) {
       false, I64Type, IsSizeZero, Zero, OffsetParts[0]);
   U256Inst NewVal = {SelectedLow, Zero, Zero, Zero};
   Offset = Operand(NewVal, EVMType::UINT256);
+}
+
+void EVMMirBuilder::checkStaticModeIR() {
+  MPointerType *VoidPtrType = createVoidPtrType();
+  MPointerType *I32PtrType = MPointerType::create(Ctx, Ctx.I32Type);
+
+  MInstruction *MsgPtr = getInstanceElement(
+      VoidPtrType, zen::runtime::EVMInstance::getCurrentMessagePointerOffset());
+  MInstruction *FlagsPtr = getProtectedFieldAddress(
+      MsgPtr, zen::runtime::EVMInstance::getMessageFlagsOffset(), I32PtrType);
+  MInstruction *Flags =
+      createInstruction<LoadInstruction>(false, &Ctx.I32Type, FlagsPtr);
+  MInstruction *StaticMask = createIntConstInstruction(
+      &Ctx.I32Type, static_cast<uint32_t>(EVMC_STATIC));
+  MInstruction *StaticBits = createInstruction<BinaryInstruction>(
+      false, OP_and, &Ctx.I32Type, Flags, StaticMask);
+  MInstruction *Zero = createIntConstInstruction(&Ctx.I32Type, 0);
+  MInstruction *IsStatic = createInstruction<CmpInstruction>(
+      false, CmpInstruction::Predicate::ICMP_NE, &Ctx.I32Type, StaticBits,
+      Zero);
+
+  MBasicBlock *StaticTrapBB =
+      getOrCreateExceptionSetBB(ErrorCode::EVMStaticModeViolation);
+  MBasicBlock *ContinueBB = createBasicBlock();
+  createInstruction<BrIfInstruction>(true, Ctx, IsStatic, StaticTrapBB,
+                                     ContinueBB);
+  addUniqueSuccessor(StaticTrapBB);
+  addSuccessor(ContinueBB);
+  setInsertBlock(ContinueBB);
 }
 
 void EVMMirBuilder::preExpandMemoryRange(Operand &Offset, Operand &Size) {

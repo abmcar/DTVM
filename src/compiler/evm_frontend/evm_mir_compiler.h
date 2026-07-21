@@ -1312,6 +1312,7 @@ private:
   void normalizeOperandU64NonConst(Operand &Param, uint64_t *Value = nullptr);
   MInstruction *anchorDirectMemoryPointer(MInstruction *Ptr);
   MInstruction *extractKnownU64LowOperand(const Operand &Opnd);
+  void checkStaticModeIR();
   void normalizeOffsetWithSize(Operand &Offset, Operand &Size);
   void preExpandMemoryRange(Operand &Offset, Operand &Size);
 
