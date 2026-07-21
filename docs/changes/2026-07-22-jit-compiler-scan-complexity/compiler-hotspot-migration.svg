@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="610"
+     viewBox="0 0 1120 610" role="img"
+     aria-labelledby="title description">
+  <title id="title">Historical compiler hotspot migration</title>
+  <desc id="description">
+    Horizontal grouped bars compare sampled-cycle shares from independent cold
+    diagnostic profiles. SetInsertBlock changes from 26.31 percent to not
+    sampled, isDead changes from 36.18 percent to 0.46 percent, and inclusive
+    DCE changes from 37.38 percent to 2.39 percent. The values are not
+    wall-clock speedups.
+  </desc>
+
+  <rect width="1120" height="610" fill="#ffffff"/>
+  <g font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+     fill="#0f172a">
+    <text x="32" y="42" font-size="25" font-weight="700">
+      Historical cold diagnostic profiles: target hotspot migration
+    </text>
+    <text x="32" y="70" font-size="14" fill="#475569">
+      Sampled-cycle share; each before/after pair uses independent, unequal windows
+    </text>
+
+    <rect x="32" y="92" width="18" height="12" rx="2" fill="#64748b"/>
+    <text x="59" y="103" font-size="13">Historical pre-change diagnostic</text>
+    <rect x="305" y="92" width="18" height="12" rx="2" fill="#0f766e"/>
+    <text x="332" y="103" font-size="13">Post-change diagnostic</text>
+
+    <g stroke="#e2e8f0" stroke-width="1">
+      <line x1="310" y1="120" x2="310" y2="470"/>
+      <line x1="460" y1="120" x2="460" y2="470"/>
+      <line x1="610" y1="120" x2="610" y2="470"/>
+      <line x1="760" y1="120" x2="760" y2="470"/>
+      <line x1="910" y1="120" x2="910" y2="470"/>
+    </g>
+
+    <g font-size="14" font-weight="600">
+      <text x="32" y="151">setInsertBlock</text>
+      <text x="32" y="170" font-size="12" font-weight="400" fill="#64748b">flat</text>
+
+      <text x="32" y="261">isDead</text>
+      <text x="32" y="280" font-size="12" font-weight="400" fill="#64748b">flat</text>
+
+      <text x="32" y="371">DCE pass</text>
+      <text x="32" y="390" font-size="12" font-weight="400" fill="#64748b">inclusive</text>
+    </g>
+
+    <rect x="310" y="130" width="394.65" height="18" rx="3" fill="#64748b"/>
+    <text x="713" y="144" font-size="13" font-weight="700">26.31%</text>
+    <circle cx="310" cy="168" r="4" fill="#0f766e"/>
+    <text x="322" y="173" font-size="13" font-weight="700" fill="#0f766e">
+      not sampled (0 leaf / 0 callchain)
+    </text>
+
+    <rect x="310" y="240" width="542.70" height="18" rx="3" fill="#64748b"/>
+    <text x="861" y="254" font-size="13" font-weight="700">36.18%</text>
+    <rect x="310" y="268" width="6.90" height="18" rx="2" fill="#0f766e"/>
+    <text x="326" y="282" font-size="13" font-weight="700" fill="#0f766e">0.46%</text>
+
+    <rect x="310" y="350" width="560.70" height="18" rx="3" fill="#64748b"/>
+    <text x="879" y="364" font-size="13" font-weight="700">37.38%</text>
+    <rect x="310" y="378" width="35.85" height="18" rx="3" fill="#0f766e"/>
+    <text x="355" y="392" font-size="13" font-weight="700" fill="#0f766e">2.39%</text>
+
+    <line x1="310" y1="470" x2="910" y2="470" stroke="#94a3b8" stroke-width="1.5"/>
+    <g font-size="12" fill="#64748b" text-anchor="middle">
+      <text x="310" y="491">0%</text>
+      <text x="460" y="491">10%</text>
+      <text x="610" y="491">20%</text>
+      <text x="760" y="491">30%</text>
+      <text x="910" y="491">40%</text>
+    </g>
+
+    <line x1="32" y1="516" x2="1088" y2="516" stroke="#cbd5e1"/>
+    <text x="32" y="541" font-size="12.5" fill="#475569">
+      Evidence boundary: historical composite baseline; independent cold profiles of the same logical workload,
+    </text>
+    <text x="32" y="562" font-size="12.5" fill="#475569">
+      not paired or equal-duration samples. Values show hotspot migration only; they are not wall-clock speedup,
+    </text>
+    <text x="32" y="583" font-size="12.5" fill="#475569">
+      current-branch timing, or evidence about JIT admission and interpreter fallback.
+    </text>
+  </g>
+</svg>
