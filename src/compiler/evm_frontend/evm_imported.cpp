@@ -255,9 +255,11 @@ const RuntimeFunctions &getRuntimeFunctionTable() {
       .HandleCall = &evmHandleCall,
       .HandleCallCode = &evmHandleCallCode,
       .SetReturn = &evmSetReturn,
+      .SetReturnNoExpand = &evmSetReturnNoExpand,
       .HandleDelegateCall = &evmHandleDelegateCall,
       .HandleStaticCall = &evmHandleStaticCall,
       .SetRevert = &evmSetRevert,
+      .SetRevertNoExpand = &evmSetRevertNoExpand,
       .HandleInvalid = &evmHandleInvalid,
       .HandleUndefined = &evmHandleUndefined,
       .HandleSelfDestruct = &evmHandleSelfDestruct,
@@ -644,11 +646,18 @@ const intx::uint256 *evmGetBlobBaseFee(zen::runtime::EVMInstance *Instance) {
 
 void evmSetReturn(zen::runtime::EVMInstance *Instance, uint64_t Offset,
                   uint64_t Len) {
-  std::vector<uint8_t> ReturnData;
   if (Len > 0) {
     if (!Instance->expandMemoryChecked(Offset, Len)) {
       return;
     }
+  }
+  evmSetReturnNoExpand(Instance, Offset, Len);
+}
+
+void evmSetReturnNoExpand(zen::runtime::EVMInstance *Instance, uint64_t Offset,
+                          uint64_t Len) {
+  std::vector<uint8_t> ReturnData;
+  if (Len > 0) {
     uint8_t *MemoryBase = Instance->getMemoryBase();
     ReturnData =
         std::vector<uint8_t>(MemoryBase + Offset, MemoryBase + Offset + Len);
@@ -660,9 +669,9 @@ void evmSetReturn(zen::runtime::EVMInstance *Instance, uint64_t Offset,
                          Instance ? Instance->getGasRefund() : 0,
                          ReturnData.data(), ReturnData.size());
   Instance->setExeResult(std::move(ExeResult));
-  // Immediately terminate the execution and return the success code (0)
   Instance->exit(0);
 }
+
 void evmSetCallDataCopy(zen::runtime::EVMInstance *Instance,
                         uint64_t DestOffset, uint64_t Offset, uint64_t Size) {
   // When Size is 0, no memory operations are needed
@@ -1272,11 +1281,18 @@ uint64_t evmHandleStaticCall(zen::runtime::EVMInstance *Instance, uint64_t Gas,
 
 void evmSetRevert(zen::runtime::EVMInstance *Instance, uint64_t Offset,
                   uint64_t Size) {
-  std::vector<uint8_t> ReturnData;
   if (Size > 0) {
     if (!Instance->expandMemoryChecked(Offset, Size)) {
       return;
     }
+  }
+  evmSetRevertNoExpand(Instance, Offset, Size);
+}
+
+void evmSetRevertNoExpand(zen::runtime::EVMInstance *Instance, uint64_t Offset,
+                          uint64_t Size) {
+  std::vector<uint8_t> ReturnData;
+  if (Size > 0) {
     uint8_t *MemoryBase = Instance->getMemoryBase();
     ReturnData =
         std::vector<uint8_t>(MemoryBase + Offset, MemoryBase + Offset + Size);
@@ -1285,7 +1301,6 @@ void evmSetRevert(zen::runtime::EVMInstance *Instance, uint64_t Offset,
   Instance->setReturnData(std::move(ReturnData));
   const int64_t GasLeft =
       Instance ? static_cast<int64_t>(Instance->getGas()) : 0;
-  // Immediately terminate the execution and return the revert code (2)
   evmc::Result ExeResult(
       EVMC_REVERT, GasLeft, Instance ? Instance->getGasRefund() : 0,
       Instance->getReturnData().data(), Instance->getReturnData().size());

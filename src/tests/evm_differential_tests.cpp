@@ -152,6 +152,24 @@ bool expectInterpMatchesMultipass(const std::string &Label,
          Multi.OutputHex == Interp.OutputHex;
 }
 
+bool expectInterpStatusMatchesMultipass(const std::string &Label,
+                                        const std::vector<uint8_t> &Bytecode,
+                                        evmc_status_code ExpectedStatus) {
+  auto Interp =
+      runEvmBytecode(Label + "_interp", Bytecode, common::RunMode::InterpMode);
+  auto Multi = runEvmBytecode(Label + "_multipass", Bytecode,
+                              common::RunMode::MultipassMode);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Multi.JITCompiled) << "multipass did not JIT-compile: " << Label;
+#endif
+  EXPECT_EQ(Interp.Status, ExpectedStatus)
+      << "interpreter status mismatch: " << Label;
+  EXPECT_EQ(Multi.Status, Interp.Status) << "status diverged: " << Label;
+  EXPECT_EQ(Multi.OutputHex, Interp.OutputHex) << "output diverged: " << Label;
+  return Interp.Status == ExpectedStatus && Multi.Status == Interp.Status &&
+         Multi.OutputHex == Interp.OutputHex;
+}
+
 // Fixture-file variant of the assertion above: load a hex fixture, run both
 // engines, and require the multipass JIT output to match the interpreter (the
 // full-width ground truth) for the named stem.
@@ -195,6 +213,76 @@ class EVMFixtureDifferentialTest
 
 TEST_P(EVMFixtureDifferentialTest, InterpMatchesMultipass) {
   expectFixtureInterpMatchesMultipass(GetParam());
+}
+
+TEST(EVMMemoryTerminationDifferential, ReturnLargeRangeMatchesInterpreter) {
+  const std::vector<uint8_t> Bytecode = {0x60, 0x20, // PUSH1 32: return length
+                                         0x61, 0x10,
+                                         0x00,  // PUSH2 0x1000: return offset
+                                         0xf3}; // RETURN
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass("return_large_range", Bytecode,
+                                                 EVMC_SUCCESS));
+}
+
+TEST(EVMMemoryTerminationDifferential, RevertLargeRangeMatchesInterpreter) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x20,       // PUSH1 32: revert data length
+      0x61, 0x10, 0x00, // PUSH2 0x1000: revert data offset
+      0xfd};            // REVERT
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass("revert_large_range", Bytecode,
+                                                 EVMC_REVERT));
+}
+
+TEST(EVMMemoryTerminationDifferential, EmptyReturnIgnoresHighOffset) {
+  std::vector<uint8_t> Bytecode = {
+      0x5f, // PUSH0: return length
+      0x7f, // PUSH32: high offset must be ignored when length is zero
+  };
+  Bytecode.push_back(0x01);
+  Bytecode.insert(Bytecode.end(), 31, 0x00);
+  Bytecode.push_back(0xf3); // RETURN
+
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass("empty_return_high_offset",
+                                                 Bytecode, EVMC_SUCCESS));
+}
+
+TEST(EVMMemoryTerminationDifferential, EmptyRevertIgnoresHighOffset) {
+  std::vector<uint8_t> Bytecode = {
+      0x5f, // PUSH0: revert data length
+      0x7f, // PUSH32: high offset must be ignored when length is zero
+  };
+  Bytecode.push_back(0x01);
+  Bytecode.insert(Bytecode.end(), 31, 0x00);
+  Bytecode.push_back(0xfd); // REVERT
+
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass("empty_revert_high_offset",
+                                                 Bytecode, EVMC_REVERT));
+}
+
+TEST(EVMMemoryTerminationDifferential, DynamicEmptyReturnIgnoresHighOffset) {
+  std::vector<uint8_t> Bytecode = {
+      0x36, // CALLDATASIZE: dynamic zero return length
+      0x7f, // PUSH32: high offset must be ignored when length is zero
+  };
+  Bytecode.push_back(0x01);
+  Bytecode.insert(Bytecode.end(), 31, 0x00);
+  Bytecode.push_back(0xf3); // RETURN
+
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass(
+      "dynamic_empty_return_high_offset", Bytecode, EVMC_SUCCESS));
+}
+
+TEST(EVMMemoryTerminationDifferential, DynamicEmptyRevertIgnoresHighOffset) {
+  std::vector<uint8_t> Bytecode = {
+      0x36, // CALLDATASIZE: dynamic zero revert data length
+      0x7f, // PUSH32: high offset must be ignored when length is zero
+  };
+  Bytecode.push_back(0x01);
+  Bytecode.insert(Bytecode.end(), 31, 0x00);
+  Bytecode.push_back(0xfd); // REVERT
+
+  ASSERT_TRUE(expectInterpStatusMatchesMultipass(
+      "dynamic_empty_revert_high_offset", Bytecode, EVMC_REVERT));
 }
 
 // Range-narrowed lowering paths: the range-narrowed ISZERO/JUMPI folds,

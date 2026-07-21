@@ -5344,19 +5344,16 @@ EVMMirBuilder::handleCallCode(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
 void EVMMirBuilder::handleReturn(Operand MemOffsetComponents,
                                  Operand LengthComponents) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
-  normalizeOperandU64(MemOffsetComponents, &Non64Value);
-  normalizeOperandU64(LengthComponents, &Non64Value);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemoryFull();
 #endif
+  preExpandMemoryRange(MemOffsetComponents, LengthComponents);
   callRuntimeForWithErrorCheck<void, uint64_t, uint64_t>(
-      RuntimeFunctions.SetReturn, MemOffsetComponents, LengthComponents);
+      RuntimeFunctions.SetReturnNoExpand, MemOffsetComponents,
+      LengthComponents);
 
-  // The runtime SetReturn may charge memory expansion gas via chargeGas(),
-  // which updates Instance->Gas directly. We must NOT branch to the shared
-  // ReturnBB because its syncGasToMemoryFull() would overwrite the correct
-  // Instance->Gas with the stale gas register value.
+  // RETURN terminates execution immediately. Keep the direct return path so no
+  // shared epilogue rewrites the gas/result state set by the runtime helper.
   MBasicBlock *ReturnDirectBB = createBasicBlock();
   createInstruction<BrInstruction>(true, Ctx, ReturnDirectBB);
   addSuccessor(ReturnDirectBB);
@@ -5423,19 +5420,15 @@ EVMMirBuilder::handleStaticCall(Operand GasOp, Operand ToAddrOp,
 
 void EVMMirBuilder::handleRevert(Operand OffsetOp, Operand SizeOp) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
-  normalizeOperandU64(OffsetOp, &Non64Value);
-  normalizeOperandU64(SizeOp, &Non64Value);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   syncGasToMemoryFull();
 #endif
+  preExpandMemoryRange(OffsetOp, SizeOp);
   callRuntimeForWithErrorCheck<void, uint64_t, uint64_t>(
-      RuntimeFunctions.SetRevert, OffsetOp, SizeOp);
+      RuntimeFunctions.SetRevertNoExpand, OffsetOp, SizeOp);
 
-  // The runtime SetRevert may charge memory expansion gas via chargeGas(),
-  // which updates Instance->Gas directly. We must NOT branch to the shared
-  // ReturnBB because its syncGasToMemoryFull() would overwrite the correct
-  // Instance->Gas with the stale gas register value.
+  // REVERT terminates execution immediately. Keep the direct return path so no
+  // shared epilogue rewrites the gas/result state set by the runtime helper.
   MBasicBlock *RevertReturnBB = createBasicBlock();
   createInstruction<BrInstruction>(true, Ctx, RevertReturnBB);
   addSuccessor(RevertReturnBB);
@@ -6407,6 +6400,13 @@ void EVMMirBuilder::normalizeOffsetWithSize(Operand &Offset, Operand &Size) {
 }
 
 void EVMMirBuilder::preExpandMemoryRange(Operand &Offset, Operand &Size) {
+  if (Size.isZeroConstant()) {
+    const U256Value ZeroValue = {0, 0, 0, 0};
+    Offset = Operand(ZeroValue);
+    Size = Operand(ZeroValue);
+    return;
+  }
+
   normalizeOffsetWithSize(Offset, Size);
 
   MType *I64Type = &Ctx.I64Type;
