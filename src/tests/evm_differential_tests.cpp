@@ -526,6 +526,24 @@ TEST(EVMRangeDifferential, BinaryOpsMatchInterpreterOnAdversarialOperands) {
   }
 }
 
+TEST(EVMRangeDifferential, DynamicExpDivisorMatchesInterpreter) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x20, 0x35,              // exponent = CALLDATALOAD(32)
+      0x61, 0x01, 0x00, 0x0a,        // divisor = 256**exponent
+      0x60, 0x00, 0x35,              // dividend = CALLDATALOAD(0)
+      0x04,                          // DIV
+      0x60, 0x00, 0x52,              // MSTORE(0, quotient)
+      0x60, 0x20, 0x60, 0x00, 0xf3}; // RETURN(0, 32)
+  std::vector<uint8_t> CallData(64, 0);
+  CallData[0] = 0x06;  // dividend = 6 * 2**248
+  CallData[63] = 0x1f; // exponent = 31, divisor = 2**248
+
+  const auto Output = expectInterpMatchesMultipassWithGas("dynamic_exp_divisor",
+                                                          Bytecode, CallData);
+  EXPECT_EQ(Output,
+            "0000000000000000000000000000000000000000000000000000000000000006");
+}
+
 // Sweep SHL/SHR/SAR with shift amounts that land inside the limb-crossing
 // region 2..255. The 11-value operand matrix, when fed as a shift amount, only
 // realizes {0, 1, >=2^64}; it never produces an amount in 2..255, so the

@@ -1861,16 +1861,16 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleDivModGeneral(
   U256Inst A = extractU256Operand(DividendOp);
   U256Inst B = extractU256Operand(DivisorOp);
 
-  // Materialize dividend limbs before branching.  The tree IR for A[i] may
-  // contain sub-expressions (e.g. cascading-division intermediates from a
-  // preceding MOD) that are also referenced inside SingleLimbBB.  Without
-  // materialisation the instruction-selection lowering can place the shared
-  // computations into only one branch, leaving the other branch with undefined
-  // virtual-register uses -- a miscompile observed as issue #525 (SHR after
-  // double MOD producing wrong shift counts).
+  // Materialize operand limbs before branching.  Their tree IR may contain
+  // sub-expressions that are referenced from both successor blocks.  Without
+  // materialization instruction selection can place a shared computation in
+  // only one branch, leaving the sibling with undefined virtual-register uses.
   for (size_t I = 0; I < EVM_ELEMENTS_COUNT; ++I) {
     A[I] = protectUnsafeValue(A[I], I64Type);
+    B[I] = protectUnsafeValue(B[I], I64Type);
   }
+  Operand ProtectedDividend(A, EVMType::UINT256, DividendOp.getRange());
+  Operand ProtectedDivisor(B, EVMType::UINT256, DivisorOp.getRange());
 
   // Check if divisor upper limbs are all zero (runtime 1-limb divisor)
   MInstruction *UpperOr = createInstruction<BinaryInstruction>(
@@ -1964,11 +1964,11 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleDivModGeneral(
   if (WantQuotient) {
     RuntimeResult = callRuntimeFor<const intx::uint256 *, const intx::uint256 &,
                                    const intx::uint256 &>(
-        RuntimeFunctions.GetDiv, DividendOp, DivisorOp);
+        RuntimeFunctions.GetDiv, ProtectedDividend, ProtectedDivisor);
   } else {
     RuntimeResult = callRuntimeFor<const intx::uint256 *, const intx::uint256 &,
                                    const intx::uint256 &>(
-        RuntimeFunctions.GetMod, DividendOp, DivisorOp);
+        RuntimeFunctions.GetMod, ProtectedDividend, ProtectedDivisor);
   }
   storeResult(extractU256Operand(RuntimeResult));
   createInstruction<BrInstruction>(true, Ctx, AfterBB);
