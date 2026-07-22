@@ -2187,6 +2187,10 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleDiv(Operand DividendOp,
         MType *I64Type = &Ctx.I64Type;
         MInstruction *Zero = createIntConstInstruction(I64Type, 0);
 
+        // A[0] is shared by both successors but is not consumed by HasUpper.
+        A[0] = protectUnsafeValue(A[0], I64Type);
+        Operand ProtectedDividend(A, EVMType::UINT256, DividendOp.getRange());
+
         MInstruction *UpperAny = createInstruction<BinaryInstruction>(
             false, OP_or, I64Type, A[1],
             createInstruction<BinaryInstruction>(false, OP_or, I64Type, A[2],
@@ -2233,7 +2237,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleDiv(Operand DividendOp,
 
         setInsertBlock(SlowBB);
         U256Inst SlowResult =
-            extractU256Operand(handleDivU64Divisor(DividendOp, D));
+            extractU256Operand(handleDivU64Divisor(ProtectedDividend, D));
         storeResult(SlowResult);
         createInstruction<BrInstruction>(true, Ctx, AfterBB);
         addSuccessor(AfterBB);
