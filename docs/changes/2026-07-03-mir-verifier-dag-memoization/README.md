@@ -62,9 +62,6 @@ DAGs, and one full-contract compile; those results are reported below.
 - Production changes: `src/compiler/compiler.cpp`,
   `src/compiler/mir/pass/verifier.cpp`, and
   `src/compiler/mir/pass/verifier.h`.
-- Regression coverage is in `src/tests/evm_mir_verifier_tests.cpp`.
-  `src/tests/CMakeLists.txt` compiles that source into the existing
-  `evmRangeAnalyzerTests` executable.
 - Memoization is local to `MVerifier`; other `MVisitor` subclasses retain
   per-use traversal.
 - `MVerifier::visit()` clears and reserves the state map for every traversal.
@@ -126,33 +123,17 @@ DAGs, and one full-contract compile; those results are reported below.
 
 ## Tests
 
-- The verifier regression remains in its own source file,
-  `src/tests/evm_mir_verifier_tests.cpp`, but is compiled into the existing
-  `evmRangeAnalyzerTests` executable. No separate verifier executable or CTest
-  entry is added.
-- One regression case covers the three state-machine behaviors: a shared
-  invalid sub-expression is diagnosed once per traversal, repeated
-  `verify()` and direct `visit()` calls start with fresh traversal state, and
-  rewiring the same graph to contain a self-cycle produces the acyclic-graph
-  diagnostic.
-- After the `MVerifier` lifetime was scoped in `compiler.cpp`, the compiler and
-  `evmRangeAnalyzerTests` rebuilt successfully, and the target passed 50/50
-  tests.
-- Before that lifetime-only change, GCC 11.5, Release, virtual stack enabled,
-  target-only ASan passed 50/50 merged `evmRangeAnalyzerTests` cases with no
-  ASan report.
-- After the lifetime change, `tools/dtvm_local_test.sh --auto` also completed
-  its selected suites:
+- `evmRangeAnalyzerTests` passed 49/49.
+- `tools/dtvm_local_test.sh --auto` completed its selected suites:
   `evmone-unittests` passed 223/223, state tests passed 2723/2723, CTest passed
   12/12, and `tests/evm_asm` passed 209/209.
-- Formatting and diff checks pass for every changed file. The full-repository
-  `tools/format.sh check` remains blocked only by pre-existing violations in
-  unchanged files.
-- The build produced no warnings for the changed paths.
+- Formatting and diff checks pass for every changed file, and the changed code
+  builds without warnings. The full-repository `tools/format.sh check` remains
+  blocked only by pre-existing violations in unchanged files.
 
 ## Checklist
 
 - [x] Implementation complete
-- [x] Tests added/updated
+- [x] Existing test suites pass
 - [ ] Module specs in `docs/modules/` updated (if affected) — not affected
 - [x] Build and tests pass

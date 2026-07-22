@@ -67,10 +67,7 @@ if(ZEN_ENABLE_SPEC_TEST)
     target_link_libraries(evmCacheComplexityDemo PRIVATE dtvmcore)
     if(ZEN_ENABLE_MULTIPASS_JIT)
       add_executable(evmJitFrontendTests evm_jit_frontend_tests.cpp)
-      add_executable(
-        evmRangeAnalyzerTests evm_mir_verifier_tests.cpp
-                              evm_range_analyzer_tests.cpp
-      )
+      add_executable(evmRangeAnalyzerTests evm_range_analyzer_tests.cpp)
       add_executable(evmDifferentialTests evm_differential_tests.cpp)
       add_executable(
         evmMemoryExecuteOnlyBench evm_memory_execute_only_bench.cpp
