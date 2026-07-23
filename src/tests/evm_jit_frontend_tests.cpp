@@ -68,6 +68,32 @@ public:
   EVMMirBuilder Builder;
 };
 
+TEST(MFunctionBasicBlockTest, MembershipUsesIndexAndPointerIdentity) {
+  COMPILER::EVMFrontendContext Ctx;
+  COMPILER::MFunction Func(Ctx, 0);
+  COMPILER::MBasicBlock *First = Func.createBasicBlock();
+  COMPILER::MBasicBlock *Second = Func.createBasicBlock();
+
+  EXPECT_FALSE(Func.containsBasicBlock(First));
+  Func.appendBlock(First);
+  EXPECT_TRUE(Func.containsBasicBlock(First));
+
+  EXPECT_EQ(Second->getIdx(), 0U);
+  EXPECT_FALSE(Func.containsBasicBlock(Second));
+  Func.appendBlock(Second);
+  EXPECT_TRUE(Func.containsBasicBlock(Second));
+
+  EXPECT_EQ(Func.getNumBasicBlocks(), 2U);
+  EXPECT_EQ(Func.getBasicBlock(First->getIdx()), First);
+  EXPECT_EQ(Func.getBasicBlock(Second->getIdx()), Second);
+}
+
+TEST(EVMMirBuilderBasicBlockTest, InitDoesNotReappendEntryBlock) {
+  MirBuilderConstFoldHarness Harness;
+
+  EXPECT_EQ(Harness.Func.getNumBasicBlocks(), 1U);
+}
+
 void expectPCList(const std::vector<uint64_t> &Actual,
                   std::initializer_list<uint64_t> Expected) {
   ASSERT_EQ(Actual.size(), Expected.size());
