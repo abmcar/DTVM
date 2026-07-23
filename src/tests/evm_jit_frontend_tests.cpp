@@ -148,6 +148,8 @@ struct MockOperand {
 
   void setRange(COMPILER::EVMValueRange) {}
 
+  bool isEmpty() const { return !Constant && !Slot; }
+
 private:
   U256Value Value = {0, 0, 0, 0};
   bool Constant = false;
@@ -495,7 +497,7 @@ public:
 
   void handleJump(Operand) {}
   void handleJumpI(Operand, Operand) {}
-  void handleJumpDest(const uint64_t &) {}
+  void handleJumpDest(const uint64_t &, bool) {}
   void handleStop() {}
   void handleUndefined() { Undefined = true; }
   void handleInvalid() { Undefined = true; }
@@ -649,6 +651,11 @@ private:
 #undef MOCK_VOID_STUB
 };
 
+class DynamicPushMockEVMBuilder : public MockEVMBuilder {
+public:
+  Operand handlePush(const zen::common::Bytes &) { return Operand(); }
+};
+
 TEST(EVMMirBuilderConstFoldTest, ExpFoldsConstantOperands) {
   MirBuilderConstFoldHarness Harness;
   using Operand = EVMMirBuilder::Operand;
@@ -744,6 +751,31 @@ bool compileWithMockBuilder(const std::vector<uint8_t> &Bytecode,
 
   COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
   return Visitor.compile();
+}
+
+TEST(EVMJITFrontendVisitorTest, DynamicJumpConsistencyErrorEscapesVisitor) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x04, // PC0 PUSH1 0x04 (analyzer resolves a constant destination)
+      0x56,       // PC2 JUMP
+      0xfe,       // PC3 INVALID padding
+      0x5b,       // PC4 JUMPDEST
+      0x00,       // PC5 STOP
+  };
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  DynamicPushMockEVMBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<DynamicPushMockEVMBuilder> Visitor(Builder,
+                                                                  &Ctx);
+  try {
+    (void)Visitor.compile();
+    FAIL() << "dynamic-jump consistency error was swallowed";
+  } catch (const zen::common::Error &Error) {
+    EXPECT_EQ(Error.getCode(),
+              zen::common::ErrorCode::EVMDynamicJumpConsistencyFailed);
+  }
 }
 
 TEST(EVMJITFrontendAnalyzerTest, ConstantJumpCanonicalizesJumpDestRuns) {
@@ -846,11 +878,178 @@ TEST(EVMJITFrontendAnalyzerTest,
 }
 
 TEST(EVMJITFrontendAnalyzerTest,
+     JumpiFallthroughSharedJumpDestRequiresLiftedMerge) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PC0  PUSH1 0xaa (first incoming value)
+      0x5f,       // PC2  PUSH0 (first condition offset)
+      0x35,       // PC3  CALLDATALOAD
+      0x60, 0x10, // PC4  PUSH1 16 (shared merge target)
+      0x57,       // PC6  JUMPI
+      0x50,       // PC7  POP
+      0x60, 0xbb, // PC8  PUSH1 0xbb (second incoming value)
+      0x60, 0x20, // PC10 PUSH1 32 (independent second condition offset)
+      0x35,       // PC12 CALLDATALOAD
+      0x60, 0x17, // PC13 PUSH1 23 (unused taken target)
+      0x57,       // PC15 JUMPI (fallthrough = shared target)
+      0x5b,       // PC16 JUMPDEST (shared merge target)
+      0x5f,       // PC17 PUSH0
+      0x52,       // PC18 MSTORE
+      0x60, 0x20, // PC19 PUSH1 32
+      0x5f,       // PC21 PUSH0
+      0xf3,       // PC22 RETURN
+      0x5b,       // PC23 JUMPDEST (unused taken target)
+      0x00,       // PC24 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *SecondPredBlock = findBlock(Analyzer, 7);
+  const auto *SharedTarget = findBlock(Analyzer, 16);
+  const auto *TakenTarget = findBlock(Analyzer, 23);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(SecondPredBlock, nullptr);
+  ASSERT_NE(SharedTarget, nullptr);
+  ASSERT_NE(TakenTarget, nullptr);
+
+  expectPCList(EntryBlock->Successors, {7, 16});
+  expectPCList(SecondPredBlock->Successors, {16, 23});
+
+  EXPECT_TRUE(SharedTarget->IsJumpDest);
+  EXPECT_EQ(SharedTarget->ResolvedEntryStackDepth, 1);
+  EXPECT_EQ(SharedTarget->FullEntryStateDepth, 1);
+  EXPECT_TRUE(SharedTarget->RequiresEntryMergeState);
+  EXPECT_TRUE(SharedTarget->CanLiftStack);
+  expectPCList(SharedTarget->Predecessors, {0, 7});
+  expectPCList(Analyzer.getPotentialEntryPredecessorsForBlock(16), {0, 7});
+
+  EXPECT_TRUE(TakenTarget->IsJumpDest);
+  EXPECT_EQ(TakenTarget->ResolvedEntryStackDepth, 1);
+  EXPECT_TRUE(TakenTarget->CanLiftStack);
+  expectPCList(TakenTarget->Predecessors, {7});
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     ConsecutiveJumpDestSharedMergeDisablesStackLifting) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PC0  PUSH1 0xaa (first incoming value)
+      0x5f,       // PC2  PUSH0 (first condition offset)
+      0x35,       // PC3  CALLDATALOAD
+      0x60, 0x11, // PC4  PUSH1 17 (canonical shared merge target)
+      0x57,       // PC6  JUMPI
+      0x50,       // PC7  POP
+      0x60, 0xbb, // PC8  PUSH1 0xbb (second incoming value)
+      0x60, 0x20, // PC10 PUSH1 32 (independent second condition offset)
+      0x35,       // PC12 CALLDATALOAD
+      0x60, 0x18, // PC13 PUSH1 24 (unused taken target)
+      0x57,       // PC15 JUMPI (fallthrough begins JUMPDEST run)
+      0x5b,       // PC16 JUMPDEST (alias of PC17)
+      0x5b,       // PC17 JUMPDEST (canonical shared merge target)
+      0x5f,       // PC18 PUSH0
+      0x52,       // PC19 MSTORE
+      0x60, 0x20, // PC20 PUSH1 32
+      0x5f,       // PC22 PUSH0
+      0xf3,       // PC23 RETURN
+      0x5b,       // PC24 JUMPDEST (unused taken target)
+      0x00,       // PC25 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *SecondPredBlock = findBlock(Analyzer, 7);
+  const auto *SharedTarget = findBlock(Analyzer, 17);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(SecondPredBlock, nullptr);
+  ASSERT_NE(SharedTarget, nullptr);
+
+  EXPECT_TRUE(Analyzer.hasCanonicalJumpDest(16));
+  EXPECT_EQ(Analyzer.getCanonicalJumpDestPC(16), 17U);
+  EXPECT_EQ(findBlock(Analyzer, 16), nullptr);
+  expectPCList(EntryBlock->Successors, {7, 17});
+  expectPCList(SecondPredBlock->Successors, {17, 24});
+
+  EXPECT_TRUE(SharedTarget->IsJumpDest);
+  EXPECT_EQ(SharedTarget->ResolvedEntryStackDepth, 1);
+  EXPECT_TRUE(SharedTarget->RequiresEntryMergeState);
+  EXPECT_FALSE(SharedTarget->CanLiftStack);
+  expectPCList(SharedTarget->Predecessors, {0, 7});
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     ConsecutiveJumpDestSinglePredecessorRemainsLiftable) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x03, // PC0 PUSH1 3 (raw alias destination)
+      0x56,       // PC2 JUMP
+      0x5b,       // PC3 JUMPDEST (alias of PC4)
+      0x5b,       // PC4 JUMPDEST (canonical target)
+      0x00,       // PC5 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *CanonicalTarget = findBlock(Analyzer, 4);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(CanonicalTarget, nullptr);
+
+  EXPECT_TRUE(Analyzer.hasCanonicalJumpDest(3));
+  EXPECT_EQ(Analyzer.getCanonicalJumpDestPC(3), 4U);
+  EXPECT_EQ(findBlock(Analyzer, 3), nullptr);
+  expectPCList(EntryBlock->Successors, {4});
+
+  EXPECT_TRUE(CanonicalTarget->IsJumpDest);
+  EXPECT_EQ(CanonicalTarget->ResolvedEntryStackDepth, 0);
+  EXPECT_FALSE(CanonicalTarget->RequiresEntryMergeState);
+  EXPECT_TRUE(CanonicalTarget->CanLiftStack);
+  expectPCList(CanonicalTarget->Predecessors, {0});
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     ConsecutiveJumpDestEmptySharedEntryRemainsLiftable) {
+  const std::vector<uint8_t> Bytecode = {
+      0x5f,       // PC0 PUSH0 (condition offset)
+      0x35,       // PC1 CALLDATALOAD
+      0x60, 0x09, // PC2 PUSH1 9 (canonical shared target)
+      0x57,       // PC4 JUMPI
+      0x60, 0x09, // PC5 PUSH1 9 (second edge target)
+      0x56,       // PC7 JUMP
+      0x5b,       // PC8 JUMPDEST (alias of PC9)
+      0x5b,       // PC9 JUMPDEST (canonical shared target)
+      0x00,       // PC10 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *SecondPredBlock = findBlock(Analyzer, 5);
+  const auto *CanonicalTarget = findBlock(Analyzer, 9);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(SecondPredBlock, nullptr);
+  ASSERT_NE(CanonicalTarget, nullptr);
+
+  EXPECT_TRUE(Analyzer.hasCanonicalJumpDest(8));
+  EXPECT_EQ(Analyzer.getCanonicalJumpDestPC(8), 9U);
+  EXPECT_EQ(findBlock(Analyzer, 8), nullptr);
+  expectPCList(EntryBlock->Successors, {5, 9});
+  expectPCList(SecondPredBlock->Successors, {9});
+
+  EXPECT_TRUE(CanonicalTarget->IsJumpDest);
+  EXPECT_EQ(CanonicalTarget->ResolvedEntryStackDepth, 0);
+  EXPECT_EQ(CanonicalTarget->FullEntryStateDepth, 0);
+  EXPECT_TRUE(CanonicalTarget->RequiresEntryMergeState);
+  EXPECT_TRUE(CanonicalTarget->CanLiftStack);
+  expectPCList(CanonicalTarget->Predecessors, {0, 5});
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
      DynamicJumpForcesReachableJumpDestsToFallback) {
+  // The dynamic-jump source block pushes the CALLDATALOAD offset itself so it
+  // does not underflow its resolved entry depth: an underflowing block (whose
+  // ResolvedEntryStackDepth + MinStackHeight < 0) is never lifted, which would
+  // otherwise mask the property under test -- that a *reachable JUMPDEST* is
+  // forced to fall back because it is a dynamic-jump target candidate.
   const std::vector<uint8_t> Bytecode = {
       0x60, 0x01, // PUSH1 0x01
-      0x60, 0x07, // PUSH1 0x07
+      0x60, 0x09, // PUSH1 0x09
       0x57,       // JUMPI
+      0x60, 0x00, // PUSH1 0x00 (CALLDATALOAD offset)
       0x35,       // CALLDATALOAD
       0x56,       // JUMP
       0x5b,       // JUMPDEST
@@ -861,7 +1060,7 @@ TEST(EVMJITFrontendAnalyzerTest,
 
   const auto *EntryBlock = findBlock(Analyzer, 0);
   const auto *DynamicJumpBlock = findBlock(Analyzer, 5);
-  const auto *JumpDestBlock = findBlock(Analyzer, 7);
+  const auto *JumpDestBlock = findBlock(Analyzer, 9);
   ASSERT_NE(EntryBlock, nullptr);
   ASSERT_NE(DynamicJumpBlock, nullptr);
   ASSERT_NE(JumpDestBlock, nullptr);
@@ -874,6 +1073,224 @@ TEST(EVMJITFrontendAnalyzerTest,
   EXPECT_TRUE(JumpDestBlock->IsJumpDest);
   EXPECT_EQ(JumpDestBlock->ResolvedEntryStackDepth, 0);
   EXPECT_FALSE(JumpDestBlock->CanLiftStack);
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     UnderResolvedEntryDepthInvalidatesStaticSuccessors) {
+  // A block whose resolved entry depth cannot cover its own stack pops
+  // (ResolvedEntryStackDepth + MinStackHeight < 0) has an untrustworthy
+  // absolute depth. Any static successor whose depth may depend on that exit
+  // is equally untrustworthy and must not feed entry-shape or range analysis.
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01, // PC0 PUSH1 0x01 (cond)
+      0x60, 0x0b, // PC2 PUSH1 0x0b (jumpi dest)
+      0x57,       // PC4 JUMPI
+      0x01,       // PC5 ADD (fallthrough block pops two slots at entry depth 0)
+      0x60, 0x00, // PC6 PUSH1 0x00
+      0x60, 0x0b, // PC8 PUSH1 0x0b
+      0x56,       // PC10 JUMP
+      0x5b,       // PC11 JUMPDEST
+      0x00        // PC12 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *UnderflowBlock = findBlock(Analyzer, 5);
+  const auto *SuccessorBlock = findBlock(Analyzer, 11);
+  ASSERT_NE(UnderflowBlock, nullptr);
+  ASSERT_NE(SuccessorBlock, nullptr);
+
+  EXPECT_EQ(UnderflowBlock->MinStackHeight, -2);
+  EXPECT_EQ(UnderflowBlock->ResolvedEntryStackDepth, -1);
+  EXPECT_TRUE(UnderflowBlock->HasInconsistentEntryDepth);
+  EXPECT_FALSE(UnderflowBlock->CanLiftStack);
+  EXPECT_TRUE(UnderflowBlock->EntryStackRanges.empty());
+
+  EXPECT_EQ(SuccessorBlock->ResolvedEntryStackDepth, -1);
+  EXPECT_TRUE(SuccessorBlock->HasInconsistentEntryDepth);
+  EXPECT_FALSE(SuccessorBlock->CanLiftStack);
+  EXPECT_TRUE(SuccessorBlock->EntryStackRanges.empty());
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     InvalidConstantJumpDoesNotMakeDeadDeepEntryBlocksReachable) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xff, // PC0 PUSH1 0xff (invalid jump destination)
+      0x56,       // PC2 JUMP
+      0x5b,       // PC3 JUMPDEST (dead predecessor)
+      0x50,       // PC4 POP
+      0x5b,       // PC5 JUMPDEST (dead, requires two entry slots)
+      0x01,       // PC6 ADD
+      0x00,       // PC7 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *SourceBlock = findBlock(Analyzer, 0);
+  const auto *DeepEntryBlock = findBlock(Analyzer, 5);
+  ASSERT_NE(SourceBlock, nullptr);
+  ASSERT_NE(DeepEntryBlock, nullptr);
+  EXPECT_FALSE(Analyzer.hasUnknownDynamicJumpTargets());
+  EXPECT_FALSE(SourceBlock->HasDynamicJump);
+  EXPECT_FALSE(SourceBlock->HasConstantJump);
+  EXPECT_TRUE(SourceBlock->Successors.empty());
+  EXPECT_EQ(DeepEntryBlock->MinStackHeight, -2);
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     HighLimbConstantJumpiKeepsOnlyFallthroughReachable) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01,                                     // PC0 condition
+      0x68, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PC2 PUSH9 2^64
+      0x00, 0x00,
+      0x57, // PC12 JUMPI
+      0x00, // PC13 STOP (fallthrough)
+      0x5b, // PC14 JUMPDEST (invalid taken target is not this block)
+      0x00, // PC15 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *SourceBlock = findBlock(Analyzer, 0);
+  ASSERT_NE(SourceBlock, nullptr);
+  EXPECT_FALSE(Analyzer.hasUnknownDynamicJumpTargets());
+  EXPECT_TRUE(SourceBlock->HasConditionalJump);
+  EXPECT_FALSE(SourceBlock->HasDynamicJump);
+  EXPECT_FALSE(SourceBlock->HasConstantJump);
+  expectPCList(SourceBlock->Successors, {13});
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     RegionHeuristicDepthTaintPropagatesAndBlocksLifting) {
+  // A block whose resolved entry depth was produced by the dynamic-jump region
+  // uniform-entry heuristic -- rather than by static propagation from the
+  // function entry -- must never be lifted, and the taint must follow the depth
+  // along static edges. Here the entry block ends in a dynamic JUMP, so the
+  // JUMPDEST region behind it (PC4) is not statically reachable and receives
+  // its entry depth from the heuristic. PC4 then flows statically into a plain
+  // continuation block (PC10) that inherits the heuristic depth by propagation.
+  // Both must be tainted and unlifted; PC10 -- a non-JUMPDEST block with a
+  // clean depth-0 entry that would otherwise lift -- is the observable proof
+  // that the taint propagated. Without the taint rule PC10 (entry depth 0,
+  // MinStackHeight 0) would satisfy the >= 0 sanity check and lift with a
+  // heuristic-derived absolute depth.
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x00, // PC0  PUSH1 0x00 (CALLDATALOAD offset)
+      0x35,       // PC2  CALLDATALOAD (dynamic jump value)
+      0x56,       // PC3  JUMP (dynamic; region entry = PC4)
+      0x5b,       // PC4  JUMPDEST (region target, reached only dynamically)
+      0x60, 0x01, // PC5  PUSH1 0x01 (cond)
+      0x60, 0x0b, // PC7  PUSH1 0x0b (jumpi dest = PC11)
+      0x57,       // PC9  JUMPI (fallthrough = PC10, taken = PC11)
+      0x00,       // PC10 STOP (static continuation, inherits heuristic depth)
+      0x5b,       // PC11 JUMPDEST
+      0x00        // PC12 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *RegionJumpDest = findBlock(Analyzer, 4);
+  const auto *Continuation = findBlock(Analyzer, 10);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(RegionJumpDest, nullptr);
+  ASSERT_NE(Continuation, nullptr);
+
+  EXPECT_TRUE(Analyzer.hasUnknownDynamicJumpTargets());
+
+  // The entry block resolves purely from the function entry (seed depth 0), so
+  // it is trusted -- never tainted -- even though it carries the dynamic jump.
+  EXPECT_TRUE(EntryBlock->HasDynamicJump);
+  EXPECT_FALSE(EntryBlock->EntryDepthMayComeFromDynamicDispatch);
+
+  // The region JUMPDEST's depth is the heuristic's guess: tainted and unlifted.
+  EXPECT_EQ(RegionJumpDest->ResolvedEntryStackDepth, 0);
+  EXPECT_TRUE(RegionJumpDest->EntryDepthMayComeFromDynamicDispatch);
+  EXPECT_FALSE(RegionJumpDest->CanLiftStack);
+
+  // The static successor inherits the tainted depth by propagation. It is not a
+  // JUMPDEST (not a dynamic-jump candidate) and enters at a clean depth 0, so
+  // only the taint keeps it out of lifting.
+  EXPECT_EQ(Continuation->ResolvedEntryStackDepth, 0);
+  EXPECT_EQ(Continuation->MinStackHeight, 0);
+  EXPECT_FALSE(Continuation->IsDynamicJumpTargetCandidate);
+  EXPECT_TRUE(Continuation->EntryDepthMayComeFromDynamicDispatch);
+  EXPECT_FALSE(Continuation->CanLiftStack);
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     BackwardDynamicTargetTaintsPlainStaticSuccessor) {
+  // PC23 is a reachable dynamic jump. At runtime it can jump backward to PC3
+  // with a hidden caller-frame value, even though PC3 also has a statically
+  // resolved depth-0 predecessor from PC14. PC8 is a plain (non-JUMPDEST)
+  // static successor of PC3, so the dynamic-entry depth taint must reach it and
+  // prevent lifting with the incorrect static depth.
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x0e, // PC0  PUSH1 14
+      0x56,       // PC2  JUMP
+      0x5b,       // PC3  JUMPDEST (backward dynamic target)
+      0x5f,       // PC4  PUSH0 (condition false)
+      0x60, 0x0b, // PC5  PUSH1 11
+      0x57,       // PC7  JUMPI
+      0x60, 0x0b, // PC8  PUSH1 11 (plain static successor)
+      0x56,       // PC10 JUMP
+      0x5b,       // PC11 JUMPDEST
+      0x50,       // PC12 POP
+      0x00,       // PC13 STOP
+      0x5b,       // PC14 JUMPDEST
+      0x5f,       // PC15 PUSH0 (condition false)
+      0x60, 0x03, // PC16 PUSH1 3
+      0x57,       // PC18 JUMPI (static depth-0 edge to PC3)
+      0x60, 0xaa, // PC19 PUSH1 0xaa (hidden caller-frame value)
+      0x5f,       // PC21 PUSH0 (CALLDATALOAD offset)
+      0x35,       // PC22 CALLDATALOAD
+      0x56,       // PC23 dynamic backward JUMP to PC3
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *EntryBlock = findBlock(Analyzer, 0);
+  const auto *BackwardTarget = findBlock(Analyzer, 3);
+  const auto *PlainSuccessor = findBlock(Analyzer, 8);
+  const auto *DynamicSource = findBlock(Analyzer, 19);
+  ASSERT_NE(EntryBlock, nullptr);
+  ASSERT_NE(BackwardTarget, nullptr);
+  ASSERT_NE(PlainSuccessor, nullptr);
+  ASSERT_NE(DynamicSource, nullptr);
+
+  EXPECT_TRUE(DynamicSource->HasDynamicJump);
+  EXPECT_FALSE(EntryBlock->EntryDepthMayComeFromDynamicDispatch);
+  EXPECT_TRUE(BackwardTarget->EntryDepthMayComeFromDynamicDispatch);
+  EXPECT_TRUE(PlainSuccessor->EntryDepthMayComeFromDynamicDispatch);
+  EXPECT_EQ(PlainSuccessor->ResolvedEntryStackDepth, 0);
+  EXPECT_FALSE(PlainSuccessor->IsDynamicJumpTargetCandidate);
+  EXPECT_FALSE(PlainSuccessor->CanLiftStack);
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     StaticallyDisconnectedDynamicSourceDoesNotTaintLiveSuccessor) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x04, // PC0 PUSH1 4
+      0x56,       // PC2 JUMP
+      0xfe,       // PC3 INVALID padding
+      0x5b,       // PC4 JUMPDEST
+      0x60, 0x01, // PC5 PUSH1 1
+      0x60, 0x0b, // PC7 PUSH1 11
+      0x57,       // PC9 JUMPI
+      0x00,       // PC10 STOP (live plain successor)
+      0x5b,       // PC11 JUMPDEST
+      0x00,       // PC12 STOP
+      0x5b,       // PC13 JUMPDEST (disconnected dynamic source)
+      0x5f,       // PC14 PUSH0
+      0x35,       // PC15 CALLDATALOAD
+      0x56,       // PC16 JUMP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *LiveSuccessor = findBlock(Analyzer, 10);
+  const auto *DynamicSource = findBlock(Analyzer, 13);
+  ASSERT_NE(LiveSuccessor, nullptr);
+  ASSERT_NE(DynamicSource, nullptr);
+
+  EXPECT_TRUE(DynamicSource->HasDynamicJump);
+  EXPECT_FALSE(LiveSuccessor->EntryDepthMayComeFromDynamicDispatch);
+  EXPECT_TRUE(LiveSuccessor->CanLiftStack);
 }
 
 TEST(EVMJITFrontendAnalyzerTest, HiddenEntryPrefixKeepsStaticMergesLiftable) {
@@ -901,6 +1318,44 @@ TEST(EVMJITFrontendAnalyzerTest, HiddenEntryPrefixKeepsStaticMergesLiftable) {
   EXPECT_EQ(JumpDestBlock->ResolvedEntryStackDepth, 1);
   EXPECT_EQ(JumpDestBlock->EntryStackDepth, 0);
   EXPECT_TRUE(JumpDestBlock->CanLiftStack);
+}
+
+TEST(EVMJITFrontendAnalyzerTest,
+     HiddenBoundaryUnliftingPropagatesAcrossMultipleBlocks) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0xaa, // PC0 PUSH1 preserved prefix
+      0x60, 0x05, // PC2 PUSH1 first block
+      0x56,       // PC4 JUMP
+      0x5b,       // PC5 JUMPDEST
+      0x60, 0x09, // PC6 PUSH1 second block
+      0x56,       // PC8 JUMP
+      0x5b,       // PC9 JUMPDEST
+      0x60, 0x0d, // PC10 PUSH1 third block
+      0x56,       // PC12 JUMP
+      0x5b,       // PC13 JUMPDEST
+      0x60, 0x11, // PC14 PUSH1 runtime boundary
+      0x56,       // PC16 JUMP
+      0x5b,       // PC17 JUMPDEST
+      0x0c,       // PC18 undefined instruction
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *FirstBlock = findBlock(Analyzer, 5);
+  const auto *SecondBlock = findBlock(Analyzer, 9);
+  const auto *ThirdBlock = findBlock(Analyzer, 13);
+  const auto *BoundaryBlock = findBlock(Analyzer, 17);
+  ASSERT_NE(FirstBlock, nullptr);
+  ASSERT_NE(SecondBlock, nullptr);
+  ASSERT_NE(ThirdBlock, nullptr);
+  ASSERT_NE(BoundaryBlock, nullptr);
+
+  EXPECT_GT(FirstBlock->HiddenLiveInPrefixDepth, 0);
+  EXPECT_GT(SecondBlock->HiddenLiveInPrefixDepth, 0);
+  EXPECT_GT(ThirdBlock->HiddenLiveInPrefixDepth, 0);
+  EXPECT_FALSE(BoundaryBlock->CanLiftStack);
+  EXPECT_FALSE(ThirdBlock->CanLiftStack);
+  EXPECT_FALSE(SecondBlock->CanLiftStack);
+  EXPECT_FALSE(FirstBlock->CanLiftStack);
 }
 
 TEST(EVMJITFrontendAnalyzerTest, MergeDepthConflictDisablesLiftedEntry) {
