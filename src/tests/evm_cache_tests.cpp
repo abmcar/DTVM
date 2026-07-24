@@ -27,6 +27,7 @@ constexpr uint8_t OP_CALLDATALOAD =
 constexpr uint8_t OP_POP = static_cast<uint8_t>(evmc_opcode::OP_POP);
 constexpr uint8_t OP_SSTORE = static_cast<uint8_t>(evmc_opcode::OP_SSTORE);
 constexpr uint8_t OP_JUMP = static_cast<uint8_t>(evmc_opcode::OP_JUMP);
+constexpr uint8_t OP_JUMPI = static_cast<uint8_t>(evmc_opcode::OP_JUMPI);
 constexpr uint8_t OP_JUMPDEST = static_cast<uint8_t>(evmc_opcode::OP_JUMPDEST);
 constexpr uint8_t OP_PUSH0 = static_cast<uint8_t>(evmc_opcode::OP_PUSH0);
 constexpr uint8_t OP_PUSH1 = static_cast<uint8_t>(evmc_opcode::OP_PUSH1);
@@ -100,6 +101,21 @@ TEST(EVMCacheSPP, DoesNotShiftSuccessorCostBeforeSstore) {
   ASSERT_GT(Cache.GasChunkCost[3], 0u);
   EXPECT_EQ(Cache.GasChunkCostSPP[0], Cache.GasChunkCost[0]);
   EXPECT_EQ(Cache.GasChunkCostSPP[3], Cache.GasChunkCost[3]);
+}
+
+TEST(EVMCacheSPP, DoesNotShiftFallthroughBeforeUnresolvedJumpi) {
+  const std::vector<uint8_t> Code = {
+      OP_PUSH1,    0x00,    OP_CALLDATALOAD, OP_PUSH1, 0x20, OP_CALLDATALOAD,
+      OP_JUMPI,             // unresolved target
+      OP_PUSH0,    OP_POP,  // explicit fallthrough
+      OP_JUMPDEST, OP_STOP, // implicit dynamic target
+  };
+  const EVMBytecodeCache Cache = buildSPPCache(Code);
+
+  ASSERT_EQ(Cache.GasChunkCostSPP.size(), Code.size());
+  ASSERT_EQ(Cache.GasChunkCost[7], 4u);
+  EXPECT_EQ(Cache.GasChunkCostSPP[0], Cache.GasChunkCost[0]);
+  EXPECT_EQ(Cache.GasChunkCostSPP[7], Cache.GasChunkCost[7]);
 }
 
 // Two dynamic JUMPs => ImplicitDynamicPredCount == 2 on each JUMPDEST.

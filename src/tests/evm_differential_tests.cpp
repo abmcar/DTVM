@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include "compiler/evm_frontend/evm_analyzer.h"
@@ -66,6 +67,7 @@ struct EVMExecutionResult {
   int64_t GasLeft = 0;
   std::string OutputHex;
   std::string LogsSignature;
+  std::unordered_map<evmc::bytes32, evmc::StorageValue> RecipientStorage;
   size_t LogCount = 0;
   bool JITCompiled = false;
 };
@@ -115,7 +117,8 @@ EVMExecutionResult runEvmBytecode(
   }
   MockedHost->setRuntime(RT.get());
 
-  auto ModRet = RT->loadEVMModule(Label, Bytecode.data(), Bytecode.size());
+  auto ModRet =
+      RT->loadEVMModule(Label, Bytecode.data(), Bytecode.size(), Revision);
   if (!ModRet) {
     ADD_FAILURE() << "module load failed: " << Label;
     return Empty;
@@ -164,6 +167,10 @@ EVMExecutionResult runEvmBytecode(
       zen::utils::toHex(RawResult.output_data, RawResult.output_size);
   Exec.LogCount = MockedHost->recorded_logs.size();
   Exec.LogsSignature = logsSignature(MockedHost->recorded_logs);
+  const auto RecipientIt = MockedHost->accounts.find(Recipient);
+  if (RecipientIt != MockedHost->accounts.end()) {
+    Exec.RecipientStorage = RecipientIt->second.storage;
+  }
   return Exec;
 }
 
@@ -716,11 +723,103 @@ TEST(EVMRangeDifferential, Block21800020Tx260MatchesInterpreter) {
   EXPECT_EQ(Interp.GasLeft, 1'122);
   EXPECT_EQ(Interp.LogCount, 3u);
   EXPECT_TRUE(Interp.OutputHex.empty());
+  constexpr char ExpectedLogsSignature[] =
+      "3|5742195a81349f1306361d71a050c4cddc5814fe:"
+      "8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0,"
+      "00000000000000000000000099aaecd05f9b699d1f07bee4eef40d64a2a5cb3d,"
+      "00000000000000000000000099aaecd05f9b699d1f07bee4eef40d64a2a5cb3d,"
+      ":|5742195a81349f1306361d71a050c4cddc5814fe:"
+      "8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0,"
+      "00000000000000000000000099aaecd05f9b699d1f07bee4eef40d64a2a5cb3d,"
+      "00000000000000000000000099aaecd05f9b699d1f07bee4eef40d64a2a5cb3d,"
+      ":|5742195a81349f1306361d71a050c4cddc5814fe:"
+      "7f26b83ff96e1f2b6a682f133852f6798a09c465da95921460cefb3847402498,"
+      ":0000000000000000000000000000000000000000000000000000000000000001|";
+  EXPECT_EQ(Interp.LogsSignature, ExpectedLogsSignature);
+
+  auto ExpectStorageOracle = [](const EVMExecutionResult &Result) {
+    const evmc::bytes32 Slot0{};
+    evmc::bytes32 Slot33{};
+    Slot33.bytes[31] = 0x33;
+
+    ASSERT_EQ(Result.RecipientStorage.size(), 2u);
+    const auto Slot0It = Result.RecipientStorage.find(Slot0);
+    ASSERT_NE(Slot0It, Result.RecipientStorage.end());
+    EXPECT_EQ(
+        zen::utils::toHex(Slot0It->second.current.bytes,
+                          sizeof(Slot0It->second.current.bytes)),
+        "0000000000000000000000000000000000000000000000000000000000000001");
+
+    const auto Slot33It = Result.RecipientStorage.find(Slot33);
+    ASSERT_NE(Slot33It, Result.RecipientStorage.end());
+    EXPECT_EQ(
+        zen::utils::toHex(Slot33It->second.current.bytes,
+                          sizeof(Slot33It->second.current.bytes)),
+        "00000000000000000000000099AAECD05F9B699D1F07BEE4EEF40D64A2A5CB3D");
+  };
+  ExpectStorageOracle(Interp);
   EXPECT_EQ(Multi.Status, Interp.Status);
   EXPECT_EQ(Multi.GasLeft, Interp.GasLeft);
   EXPECT_EQ(Multi.OutputHex, Interp.OutputHex);
   EXPECT_EQ(Multi.LogCount, Interp.LogCount);
   EXPECT_EQ(Multi.LogsSignature, Interp.LogsSignature);
+  EXPECT_EQ(Multi.LogsSignature, ExpectedLogsSignature);
+  ExpectStorageOracle(Multi);
+}
+
+TEST(EVMRangeDifferential, UnresolvedJumpiTakenTargetPreservesGas) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x00, 0x35, // PC0  condition = calldata[0]
+      0x60, 0x20, 0x35, // PC3  destination = calldata[32]
+      0x57,             // PC6  dynamic JUMPI
+      0x5f, 0x50,       // PC7  untaken-only fallthrough cost
+      0x5b, 0x5a,       // PC9  dynamic target; observe GAS
+      0x5f, 0x52,       // PC11 MSTORE(0, gas)
+      0x60, 0x20, 0x5f, 0xf3,
+  };
+  std::vector<uint8_t> TakenCallData(64, 0);
+  TakenCallData[31] = 1;
+  TakenCallData[63] = 9;
+
+  const auto TakenInterp =
+      runEvmBytecode("unresolved_jumpi_taken_target_interp", Bytecode,
+                     common::RunMode::InterpMode, TakenCallData, 0u, true,
+                     0x2210, evmc_revision::EVMC_CANCUN);
+  const auto TakenMulti =
+      runEvmBytecode("unresolved_jumpi_taken_target_multipass", Bytecode,
+                     common::RunMode::MultipassMode, TakenCallData, 0u, true,
+                     0x2210, evmc_revision::EVMC_CANCUN);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(TakenMulti.JITCompiled);
+#endif
+  constexpr char ExpectedTakenGasOutput[] =
+      "00000000000000000000000000000000000000000000000000000000000021F7";
+  EXPECT_EQ(TakenInterp.Status, EVMC_SUCCESS);
+  EXPECT_EQ(TakenInterp.OutputHex, ExpectedTakenGasOutput);
+  EXPECT_EQ(TakenMulti.Status, TakenInterp.Status);
+  EXPECT_EQ(TakenMulti.GasLeft, TakenInterp.GasLeft);
+  EXPECT_EQ(TakenMulti.OutputHex, ExpectedTakenGasOutput);
+
+  std::vector<uint8_t> FallthroughCallData = TakenCallData;
+  FallthroughCallData[31] = 0;
+  const auto FallthroughInterp =
+      runEvmBytecode("unresolved_jumpi_fallthrough_interp", Bytecode,
+                     common::RunMode::InterpMode, FallthroughCallData, 0u, true,
+                     0x2210, evmc_revision::EVMC_CANCUN);
+  const auto FallthroughMulti =
+      runEvmBytecode("unresolved_jumpi_fallthrough_multipass", Bytecode,
+                     common::RunMode::MultipassMode, FallthroughCallData, 0u,
+                     true, 0x2210, evmc_revision::EVMC_CANCUN);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(FallthroughMulti.JITCompiled);
+#endif
+  constexpr char ExpectedFallthroughGasOutput[] =
+      "00000000000000000000000000000000000000000000000000000000000021F3";
+  EXPECT_EQ(FallthroughInterp.Status, EVMC_SUCCESS);
+  EXPECT_EQ(FallthroughInterp.OutputHex, ExpectedFallthroughGasOutput);
+  EXPECT_EQ(FallthroughMulti.Status, FallthroughInterp.Status);
+  EXPECT_EQ(FallthroughMulti.GasLeft, FallthroughInterp.GasLeft);
+  EXPECT_EQ(FallthroughMulti.OutputHex, ExpectedFallthroughGasOutput);
 }
 
 // Sweep SHL/SHR/SAR with shift amounts that land inside the limb-crossing
