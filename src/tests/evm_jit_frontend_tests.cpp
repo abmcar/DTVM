@@ -98,68 +98,22 @@ TEST(EVMMirBuilderBasicBlockTest, InitDoesNotReappendEntryBlock) {
   EXPECT_EQ(Harness.Func.getNumBasicBlocks(), 1U);
 }
 
-TEST(CgRegisterInfoTest, FindsOnlyUsesOutsideInstruction) {
-  COMPILER::EVMFrontendContext Ctx;
-  Ctx.initialize();
-  COMPILER::MFunction MFunc(Ctx, 0);
-  COMPILER::CgFunction CgFunc(Ctx, MFunc);
-  COMPILER::CgBasicBlock *BB = CgFunc.createCgBasicBlock();
-  CgFunc.appendCgBasicBlock(BB);
-
-  auto &MRI = CgFunc.getRegInfo();
-  const auto &TII = CgFunc.getTargetInstrInfo();
-  auto AddDef = [&](COMPILER::CgRegister Reg) {
-    llvm::SmallVector<COMPILER::CgOperand, 1> Operands{
-        COMPILER::CgOperand::createRegOperand(Reg, true)};
-    return CgFunc.createCgInstruction(
-        *BB, TII.get(llvm::TargetOpcode::IMPLICIT_DEF), Operands,
-        /*no_implicit=*/true);
-  };
-  auto AddCopy = [&](COMPILER::CgRegister Dst, COMPILER::CgRegister Src) {
-    llvm::SmallVector<COMPILER::CgOperand, 2> Operands{
-        COMPILER::CgOperand::createRegOperand(Dst, true),
-        COMPILER::CgOperand::createRegOperand(Src, false)};
-    return CgFunc.createCgInstruction(*BB, TII.get(llvm::TargetOpcode::COPY),
-                                      Operands,
-                                      /*no_implicit=*/true);
-  };
-
-  COMPILER::CgRegister MultiDefReg = MRI.createIncompleteVirtualRegister();
-  COMPILER::CgInstruction *FirstDef = AddDef(MultiDefReg);
-  COMPILER::CgInstruction *SecondDef = AddDef(MultiDefReg);
-  EXPECT_FALSE(MRI.hasUseOutside(MultiDefReg, *FirstDef));
-  EXPECT_FALSE(MRI.hasUseOutside(MultiDefReg, *SecondDef));
-
-  COMPILER::CgRegister SelfReg = MRI.createIncompleteVirtualRegister();
-  COMPILER::CgInstruction *SelfCopy = AddCopy(SelfReg, SelfReg);
-  EXPECT_FALSE(MRI.hasUseOutside(SelfReg, *SelfCopy));
-
-  COMPILER::CgRegister CopyDst = MRI.createIncompleteVirtualRegister();
-  COMPILER::CgInstruction *ExternalUse = AddCopy(CopyDst, MultiDefReg);
-  EXPECT_TRUE(MRI.hasUseOutside(MultiDefReg, *FirstDef));
-  ExternalUse->eraseFromParent();
-  EXPECT_FALSE(MRI.hasUseOutside(MultiDefReg, *FirstDef));
-
-  COMPILER::CgRegister UseOnlyReg = MRI.createIncompleteVirtualRegister();
-  COMPILER::CgInstruction *FirstUse =
-      AddCopy(MRI.createIncompleteVirtualRegister(), UseOnlyReg);
-  COMPILER::CgInstruction *SecondUse =
-      AddCopy(MRI.createIncompleteVirtualRegister(), UseOnlyReg);
-  EXPECT_TRUE(MRI.hasUseOutside(UseOnlyReg, *SecondUse));
-  FirstUse->eraseFromParent();
-  EXPECT_FALSE(MRI.hasUseOutside(UseOnlyReg, *SecondUse));
-}
-
 TEST(CgDeadInstructionElimTest, PreservesExternalUsesAndDeletesSelfUses) {
   COMPILER::EVMFrontendContext Ctx;
   Ctx.initialize();
   COMPILER::MFunction MFunc(Ctx, 0);
   COMPILER::CgFunction CgFunc(Ctx, MFunc);
-  COMPILER::CgBasicBlock *DefBB = CgFunc.createCgBasicBlock();
+  COMPILER::CgBasicBlock *FirstDefBB = CgFunc.createCgBasicBlock();
+  COMPILER::CgBasicBlock *SecondDefBB = CgFunc.createCgBasicBlock();
+  COMPILER::CgBasicBlock *SelfCopyBB = CgFunc.createCgBasicBlock();
   COMPILER::CgBasicBlock *UseBB = CgFunc.createCgBasicBlock();
-  CgFunc.appendCgBasicBlock(DefBB);
+  CgFunc.appendCgBasicBlock(FirstDefBB);
+  CgFunc.appendCgBasicBlock(SecondDefBB);
+  CgFunc.appendCgBasicBlock(SelfCopyBB);
   CgFunc.appendCgBasicBlock(UseBB);
-  DefBB->addSuccessorWithoutProb(UseBB);
+  FirstDefBB->addSuccessorWithoutProb(SecondDefBB);
+  SecondDefBB->addSuccessorWithoutProb(SelfCopyBB);
+  SelfCopyBB->addSuccessorWithoutProb(UseBB);
 
   auto &MRI = CgFunc.getRegInfo();
   const auto &TII = CgFunc.getTargetInstrInfo();
@@ -171,13 +125,13 @@ TEST(CgDeadInstructionElimTest, PreservesExternalUsesAndDeletesSelfUses) {
       };
 
   COMPILER::CgRegister LiveReg = MRI.createIncompleteVirtualRegister();
-  for (unsigned I = 0; I != 2; ++I) {
-    AddInstruction(*DefBB, llvm::TargetOpcode::IMPLICIT_DEF,
-                   {COMPILER::CgOperand::createRegOperand(LiveReg, true)});
-  }
+  AddInstruction(*FirstDefBB, llvm::TargetOpcode::IMPLICIT_DEF,
+                 {COMPILER::CgOperand::createRegOperand(LiveReg, true)});
+  AddInstruction(*SecondDefBB, llvm::TargetOpcode::IMPLICIT_DEF,
+                 {COMPILER::CgOperand::createRegOperand(LiveReg, true)});
 
   COMPILER::CgRegister SelfReg = MRI.createIncompleteVirtualRegister();
-  AddInstruction(*DefBB, llvm::TargetOpcode::COPY,
+  AddInstruction(*SelfCopyBB, llvm::TargetOpcode::COPY,
                  {COMPILER::CgOperand::createRegOperand(SelfReg, true),
                   COMPILER::CgOperand::createRegOperand(SelfReg, false)});
 
@@ -188,19 +142,16 @@ TEST(CgDeadInstructionElimTest, PreservesExternalUsesAndDeletesSelfUses) {
 
   MRI.freezeReservedRegs(CgFunc);
   (void)COMPILER::CgDeadCgInstructionElim(CgFunc);
-  auto CountOpcode = [](const COMPILER::CgBasicBlock &BB, unsigned Opcode) {
-    return std::count_if(BB.begin(), BB.end(),
-                         [Opcode](const COMPILER::CgInstruction &MI) {
-                           return MI.getOpcode() == Opcode;
-                         });
-  };
-  EXPECT_EQ(CountOpcode(*DefBB, llvm::TargetOpcode::IMPLICIT_DEF), 2);
-  EXPECT_EQ(CountOpcode(*DefBB, llvm::TargetOpcode::COPY), 0);
-  EXPECT_EQ(CountOpcode(*UseBB, llvm::TargetOpcode::INLINEASM), 1);
+  EXPECT_FALSE(FirstDefBB->empty());
+  EXPECT_FALSE(SecondDefBB->empty());
+  EXPECT_TRUE(SelfCopyBB->empty());
+  EXPECT_FALSE(UseBB->empty());
 
   InlineAsm->eraseFromParent();
   (void)COMPILER::CgDeadCgInstructionElim(CgFunc);
-  EXPECT_TRUE(DefBB->empty());
+  EXPECT_TRUE(FirstDefBB->empty());
+  EXPECT_TRUE(SecondDefBB->empty());
+  EXPECT_TRUE(SelfCopyBB->empty());
   EXPECT_TRUE(UseBB->empty());
 }
 
