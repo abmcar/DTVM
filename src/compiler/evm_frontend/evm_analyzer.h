@@ -213,6 +213,11 @@ public:
     uint32_t ShapeClassId = 0;
   };
 
+  struct DynamicJumpDispatchCandidateSet {
+    bool SafeForRuntimeDispatch = false;
+    std::vector<uint64_t> TargetBlocks;
+  };
+
   const std::map<uint64_t, DynamicJumpRegionInfo> &
   getDynamicJumpRegions() const {
     return DynamicJumpRegions;
@@ -404,6 +409,45 @@ public:
       return {};
     }
     return RegionInfo->TargetBlocks;
+  }
+
+  DynamicJumpDispatchCandidateSet
+  getRuntimeDispatchCandidateTargetsForSourceBlock(uint64_t BlockPC) const {
+    DynamicJumpDispatchCandidateSet Result;
+    const auto It = BlockInfos.find(BlockPC);
+    if (It == BlockInfos.end() || !It->second.HasDynamicJump) {
+      return Result;
+    }
+
+    Result.TargetBlocks =
+        getCompatibleDynamicJumpTargetBlocksForSourceBlock(BlockPC);
+    if (Result.TargetBlocks.empty()) {
+      return Result;
+    }
+
+    // Compatible target sets are currently a stack-state transfer aid.  They
+    // are safe to use for runtime dispatch shrinking only when they still cover
+    // every valid JUMPDEST for this source; otherwise an otherwise-valid
+    // computed jump could be rejected.
+    std::vector<uint64_t> RequiredJumpDests;
+    for (const auto &[EntryPC, Info] : BlockInfos) {
+      if (Info.IsJumpDest) {
+        appendUniqueBlockPC(RequiredJumpDests, EntryPC);
+      }
+    }
+
+    Result.SafeForRuntimeDispatch =
+        !RequiredJumpDests.empty() &&
+        std::all_of(RequiredJumpDests.begin(), RequiredJumpDests.end(),
+                    [&Result](uint64_t TargetPC) {
+                      return std::find(Result.TargetBlocks.begin(),
+                                       Result.TargetBlocks.end(),
+                                       TargetPC) != Result.TargetBlocks.end();
+                    });
+    if (!Result.SafeForRuntimeDispatch) {
+      Result.TargetBlocks.clear();
+    }
+    return Result;
   }
 
   bool hasDeferredLiftedEntryMerge(uint64_t BlockPC) const {

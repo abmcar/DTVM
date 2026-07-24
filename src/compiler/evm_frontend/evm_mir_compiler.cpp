@@ -300,15 +300,42 @@ void EVMMirBuilder::loadEVMInstanceAttr() {
   ExceptionReturnBB = CurFunc->createExceptionReturnBB();
 }
 
-MBasicBlock *EVMMirBuilder::getOrCreateIndirectJumpBB(uint64_t SourceBlockPC) {
+bool EVMMirBuilder::shouldUseSharedDynamicDispatch() const {
+#ifdef ZEN_ENABLE_EVM_STACK_SSA_LIFT
+  return false;
+#else
+  return true;
+#endif
+}
+
+MBasicBlock *EVMMirBuilder::getOrCreateIndirectJumpBB(
+    uint64_t SourceBlockPC, const JumpTargetPCList *CandidateTargets) {
   auto ExistingIt = IndirectJumpBBs.find(SourceBlockPC);
   if (ExistingIt != IndirectJumpBBs.end()) {
     return ExistingIt->second;
   }
 
+  MBasicBlock *IndirectJumpBB =
+      buildIndirectJumpBB(SourceBlockPC, CandidateTargets, true);
+  IndirectJumpBBs[SourceBlockPC] = IndirectJumpBB;
+  return IndirectJumpBB;
+}
+
+MBasicBlock *EVMMirBuilder::getOrCreateSharedIndirectJumpBB() {
+  if (SharedIndirectJumpBB != nullptr) {
+    return SharedIndirectJumpBB;
+  }
+
+  SharedIndirectJumpBB = buildIndirectJumpBB(0, nullptr, false);
+  return SharedIndirectJumpBB;
+}
+
+MBasicBlock *
+EVMMirBuilder::buildIndirectJumpBB(uint64_t SourceBlockPC,
+                                   const JumpTargetPCList *CandidateTargets,
+                                   bool RegisterDynamicPhi) {
   MBasicBlock *FromBB = CurBB;
   MBasicBlock *IndirectJumpBB = CurFunc->createBasicBlock();
-  IndirectJumpBBs[SourceBlockPC] = IndirectJumpBB;
   setInsertBlock(IndirectJumpBB);
 #ifdef ZEN_ENABLE_LINUX_PERF
   CurBB->setSourceOffset(CurPC);
@@ -321,6 +348,43 @@ MBasicBlock *EVMMirBuilder::getOrCreateIndirectJumpBB(uint64_t SourceBlockPC) {
   MInstruction *JumpTarget = loadVariable(JumpTargetVar);
   MType *UInt64Type =
       EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
+
+  if (CandidateTargets != nullptr && !CandidateTargets->empty()) {
+    std::set<uint64_t> CandidateTargetPCs(CandidateTargets->begin(),
+                                          CandidateTargets->end());
+    std::vector<std::pair<uint64_t, MBasicBlock *>> FilteredTargets;
+    FilteredTargets.reserve(CandidateTargets->size());
+    for (const auto &[DestPC, DestBB] : JumpDestTable) {
+      if (!CandidateTargetPCs.count(DestPC) &&
+          !CandidateTargetPCs.count(getCanonicalJumpDestPC(DestPC))) {
+        continue;
+      }
+      FilteredTargets.emplace_back(DestPC, DestBB);
+    }
+
+    if (!FilteredTargets.empty() &&
+        FilteredTargets.size() < JumpDestTable.size()) {
+      CompileVector<std::pair<ConstantInstruction *, MBasicBlock *>> Cases(
+          FilteredTargets.size(), Ctx.MemPool);
+      for (size_t I = 0; I < FilteredTargets.size(); ++I) {
+        const uint64_t DestPC = FilteredTargets[I].first;
+        MBasicBlock *DestBB = FilteredTargets[I].second;
+        Cases[I].first = createIntConstInstruction(UInt64Type, DestPC);
+        Cases[I].second = DestBB;
+        if (RegisterDynamicPhi) {
+          registerDynamicJumpPhiIncomingBlock(DestPC, SourceBlockPC,
+                                              IndirectJumpBB);
+        }
+        addSuccessor(DestBB);
+      }
+
+      createInstruction<SwitchInstruction>(true, Ctx, JumpTarget, FailureBB,
+                                           Cases);
+      addUniqueSuccessor(FailureBB);
+      setInsertBlock(FromBB);
+      return IndirectJumpBB;
+    }
+  }
 
   // If hash table is used, create mir to calculate hash index of JumpTarget
   // PC and create switch instruction with hash index
@@ -367,8 +431,10 @@ MBasicBlock *EVMMirBuilder::getOrCreateIndirectJumpBB(uint64_t SourceBlockPC) {
             false, CmpInstruction::Predicate::ICMP_EQ, &Ctx.I64Type, JumpTarget,
             ExpectedPC);
         MBasicBlock *DestBB = JumpHashTable[HashEntry][0];
-        registerDynamicJumpPhiIncomingBlock(JumpHashReverse[HashEntry][0],
-                                            SourceBlockPC, CheckBB);
+        if (RegisterDynamicPhi) {
+          registerDynamicJumpPhiIncomingBlock(JumpHashReverse[HashEntry][0],
+                                              SourceBlockPC, CheckBB);
+        }
         createInstruction<BrIfInstruction>(true, Ctx, IsMatch, DestBB,
                                            FailureBB);
         addSuccessor(DestBB);
@@ -391,8 +457,10 @@ MBasicBlock *EVMMirBuilder::getOrCreateIndirectJumpBB(uint64_t SourceBlockPC) {
           SubCases[I].first =
               createIntConstInstruction(UInt64Type, SubPCVec[I]);
           SubCases[I].second = SubDestBBVec[I];
-          registerDynamicJumpPhiIncomingBlock(SubPCVec[I], SourceBlockPC,
-                                              SubCaseBB);
+          if (RegisterDynamicPhi) {
+            registerDynamicJumpPhiIncomingBlock(SubPCVec[I], SourceBlockPC,
+                                                SubCaseBB);
+          }
           addSuccessor(SubDestBBVec[I]);
         }
         createInstruction<SwitchInstruction>(true, Ctx, JumpTarget, FailureBB,
@@ -418,7 +486,10 @@ MBasicBlock *EVMMirBuilder::getOrCreateIndirectJumpBB(uint64_t SourceBlockPC) {
   for (const auto &[DestPC, DestBB] : JumpDestTable) {
     Cases[Index].first = createIntConstInstruction(UInt64Type, DestPC);
     Cases[Index].second = DestBB;
-    registerDynamicJumpPhiIncomingBlock(DestPC, SourceBlockPC, IndirectJumpBB);
+    if (RegisterDynamicPhi) {
+      registerDynamicJumpPhiIncomingBlock(DestPC, SourceBlockPC,
+                                          IndirectJumpBB);
+    }
     addSuccessor(DestBB);
     Index++;
   }
@@ -1468,8 +1539,9 @@ void EVMMirBuilder::implementConstantJump(uint64_t ConstDest,
   }
 }
 
-void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
-                                          MBasicBlock *FailureBB) {
+void EVMMirBuilder::implementIndirectJump(
+    MInstruction *JumpTarget, MBasicBlock *FailureBB,
+    const JumpTargetPCList *CandidateTargets) {
   if (JumpDestTable.empty()) {
     createInstruction<BrInstruction>(true, Ctx, FailureBB);
     addUniqueSuccessor(FailureBB);
@@ -1477,7 +1549,15 @@ void EVMMirBuilder::implementIndirectJump(MInstruction *JumpTarget,
   }
   HasIndirectJump = true;
 
-  MBasicBlock *TargetBB = getOrCreateIndirectJumpBB(CurrentBlockPC);
+  const bool UseFilteredPerSource =
+      CandidateTargets != nullptr && !CandidateTargets->empty() &&
+      CandidateTargets->size() < JumpDestTable.size();
+  MBasicBlock *TargetBB =
+      UseFilteredPerSource
+          ? getOrCreateIndirectJumpBB(CurrentBlockPC, CandidateTargets)
+          : (shouldUseSharedDynamicDispatch()
+                 ? getOrCreateSharedIndirectJumpBB()
+                 : getOrCreateIndirectJumpBB(CurrentBlockPC));
   createInstruction<DassignInstruction>(true, &(Ctx.VoidType), JumpTarget,
                                         JumpTargetVar->getVarIdx());
   createInstruction<BrInstruction>(true, Ctx, TargetBB);
@@ -1528,7 +1608,8 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handlePush(const Bytes &Data) {
 
 // ==================== Control Flow Instruction Handlers ====================
 
-void EVMMirBuilder::handleJump(Operand Dest) {
+void EVMMirBuilder::handleJump(Operand Dest,
+                               const JumpTargetPCList *CandidateTargets) {
   MBasicBlock *InvalidJumpBB =
       getOrCreateExceptionSetBB(ErrorCode::EVMBadJumpDestination);
   if (Dest.isConstant()) {
@@ -1560,7 +1641,7 @@ void EVMMirBuilder::handleJump(Operand Dest) {
   addSuccessor(InvalidJumpBB);
   addSuccessor(ValidJumpBB);
   setInsertBlock(ValidJumpBB);
-  implementIndirectJump(JumpTarget, InvalidJumpBB);
+  implementIndirectJump(JumpTarget, InvalidJumpBB, CandidateTargets);
 }
 
 MInstruction *EVMMirBuilder::createJumpCondition(const Operand &Cond) {
@@ -1602,7 +1683,8 @@ MInstruction *EVMMirBuilder::createJumpCondition(const Operand &Cond) {
       false, CmpInstruction::Predicate::ICMP_NE, &Ctx.I64Type, OrResult, Zero);
 }
 
-void EVMMirBuilder::handleJumpI(Operand Dest, Operand Cond) {
+void EVMMirBuilder::handleJumpI(Operand Dest, Operand Cond,
+                                const JumpTargetPCList *CandidateTargets) {
   U256Inst DestComponents = extractU256Operand(Dest);
   MInstruction *JumpTarget = DestComponents[0];
 
@@ -1663,7 +1745,7 @@ void EVMMirBuilder::handleJumpI(Operand Dest, Operand Cond) {
     addSuccessor(InvalidJumpBB);
     addSuccessor(ValidJumpBB);
     setInsertBlock(ValidJumpBB);
-    implementIndirectJump(JumpTarget, InvalidJumpBB);
+    implementIndirectJump(JumpTarget, InvalidJumpBB, CandidateTargets);
   }
 
   setInsertBlock(FallThroughBB);

@@ -496,7 +496,9 @@ public:
   void endMemoryCompileBlock() {}
 
   void handleJump(Operand) {}
+  void handleJump(Operand, const std::vector<uint64_t> *) {}
   void handleJumpI(Operand, Operand) {}
+  void handleJumpI(Operand, Operand, const std::vector<uint64_t> *) {}
   void handleJumpDest(const uint64_t &, bool) {}
   void handleStop() {}
   void handleUndefined() { Undefined = true; }
