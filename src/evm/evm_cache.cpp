@@ -103,6 +103,10 @@ static bool isControlFlowTerminator(uint8_t OpcodeU8) {
 static bool isGasSensitiveTerminator(uint8_t OpcodeU8) {
   switch (static_cast<evmc_opcode>(OpcodeU8)) {
   case evmc_opcode::OP_GAS:
+  // EIP-2200 makes SSTORE fail when gas left is at or below the call stipend.
+  // Moving successor cost before SSTORE can therefore change success to OOG
+  // even when the total path cost is preserved.
+  case evmc_opcode::OP_SSTORE:
   case evmc_opcode::OP_CREATE:
   case evmc_opcode::OP_CREATE2:
   case evmc_opcode::OP_CALL:

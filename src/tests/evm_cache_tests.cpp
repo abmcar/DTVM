@@ -25,8 +25,10 @@ constexpr uint8_t OP_ADD = static_cast<uint8_t>(evmc_opcode::OP_ADD);
 constexpr uint8_t OP_CALLDATALOAD =
     static_cast<uint8_t>(evmc_opcode::OP_CALLDATALOAD);
 constexpr uint8_t OP_POP = static_cast<uint8_t>(evmc_opcode::OP_POP);
+constexpr uint8_t OP_SSTORE = static_cast<uint8_t>(evmc_opcode::OP_SSTORE);
 constexpr uint8_t OP_JUMP = static_cast<uint8_t>(evmc_opcode::OP_JUMP);
 constexpr uint8_t OP_JUMPDEST = static_cast<uint8_t>(evmc_opcode::OP_JUMPDEST);
+constexpr uint8_t OP_PUSH0 = static_cast<uint8_t>(evmc_opcode::OP_PUSH0);
 constexpr uint8_t OP_PUSH1 = static_cast<uint8_t>(evmc_opcode::OP_PUSH1);
 
 EVMBytecodeCache buildSPPCache(const std::vector<uint8_t> &Code) {
@@ -84,6 +86,20 @@ TEST(EVMCacheImplicitDynPred, InterpreterOnly_LeavesSPPArrayEmpty) {
 
   ASSERT_EQ(Cache.GasChunkCost.size(), Code.size());
   EXPECT_TRUE(Cache.GasChunkCostSPP.empty());
+}
+
+TEST(EVMCacheSPP, DoesNotShiftSuccessorCostBeforeSstore) {
+  const std::vector<uint8_t> Code = {
+      OP_PUSH0,    OP_PUSH0, OP_SSTORE, // block [0, 3)
+      OP_PUSH0,    OP_POP,              // block [3, 5)
+      OP_JUMPDEST, OP_STOP,
+  };
+  const EVMBytecodeCache Cache = buildSPPCache(Code);
+
+  ASSERT_EQ(Cache.GasChunkCostSPP.size(), Code.size());
+  ASSERT_GT(Cache.GasChunkCost[3], 0u);
+  EXPECT_EQ(Cache.GasChunkCostSPP[0], Cache.GasChunkCost[0]);
+  EXPECT_EQ(Cache.GasChunkCostSPP[3], Cache.GasChunkCost[3]);
 }
 
 // Two dynamic JUMPs => ImplicitDynamicPredCount == 2 on each JUMPDEST.

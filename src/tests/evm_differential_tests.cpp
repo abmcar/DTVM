@@ -1,5 +1,6 @@
 // Copyright (C) 2025 the DTVM authors. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -78,7 +79,9 @@ EVMExecutionResult runEvmBytecode(
     const std::string &Label, const std::vector<uint8_t> &Bytecode,
     common::RunMode Mode, const std::vector<uint8_t> &CallData = {},
     uint32_t MessageFlags = 0u, bool EnableGasMetering = false,
-    uint64_t GasLimit = 0xFFFF'FFFF'FFFF - zen::evm::BASIC_EXECUTION_COST) {
+    uint64_t GasLimit = 0xFFFF'FFFF'FFFF - zen::evm::BASIC_EXECUTION_COST,
+    evmc_revision Revision = evmc_revision::EVMC_OSAKA,
+    bool SeedBlock21800020Tx260State = false) {
   EVMExecutionResult Empty;
 
   RuntimeConfig Config;
@@ -87,7 +90,24 @@ EVMExecutionResult runEvmBytecode(
   Config.EnableEvmGasMetering = EnableGasMetering;
 
   auto MockedHost = std::make_unique<zen::evm::ZenMockedEVMHost>();
-  MockedHost->tx_context.tx_origin = zen::evm::DEFAULT_DEPLOYER_ADDRESS;
+  auto Sender = zen::evm::DEFAULT_DEPLOYER_ADDRESS;
+  evmc::address Recipient{};
+  if (SeedBlock21800020Tx260State) {
+    Sender = evmc::literals::operator""_address(
+        "99aaecd05f9b699d1f07bee4eef40d64a2a5cb3d");
+    Recipient = evmc::literals::operator""_address(
+        "5742195a81349f1306361d71a050c4cddc5814fe");
+
+    evmc::bytes32 Slot33{};
+    Slot33.bytes[31] = 0x33;
+    evmc::bytes32 SenderValue{};
+    std::copy(Sender.bytes, Sender.bytes + sizeof(Sender.bytes),
+              SenderValue.bytes + 12);
+    evmc::MockedAccount ContractAccount;
+    ContractAccount.storage[Slot33] = evmc::StorageValue{SenderValue};
+    MockedHost->accounts[Recipient] = std::move(ContractAccount);
+  }
+  MockedHost->tx_context.tx_origin = Sender;
   auto RT = Runtime::newEVMRuntime(Config, MockedHost.get());
   if (!RT) {
     ADD_FAILURE() << "runtime create failed: " << Label;
@@ -114,20 +134,20 @@ EVMExecutionResult runEvmBytecode(
     return Empty;
   }
   EVMInstance *Inst = *InstRet;
-  Inst->setRevision(evmc_revision::EVMC_OSAKA);
+  Inst->setRevision(Revision);
 
   evmc_message Msg = {
       .kind = EVMC_CALL,
       .flags = MessageFlags,
       .depth = 0,
       .gas = static_cast<int64_t>(GasLimit),
-      .recipient = {},
-      .sender = zen::evm::DEFAULT_DEPLOYER_ADDRESS,
+      .recipient = Recipient,
+      .sender = Sender,
       .input_data = CallData.empty() ? nullptr : CallData.data(),
       .input_size = CallData.size(),
       .value = {},
       .create2_salt = {},
-      .code_address = {},
+      .code_address = Recipient,
       .code = reinterpret_cast<const uint8_t *>(Mod->Code),
       .code_size = Mod->CodeSize,
   };
@@ -147,9 +167,12 @@ EVMExecutionResult runEvmBytecode(
   return Exec;
 }
 
-EVMExecutionResult
-runEvmBytecodeFile(const std::string &FilePath, common::RunMode Mode,
-                   const std::vector<uint8_t> &CallData = {}) {
+EVMExecutionResult runEvmBytecodeFile(
+    const std::string &FilePath, common::RunMode Mode,
+    const std::vector<uint8_t> &CallData = {}, bool EnableGasMetering = false,
+    uint64_t GasLimit = 0xFFFF'FFFF'FFFF - zen::evm::BASIC_EXECUTION_COST,
+    evmc_revision Revision = evmc_revision::EVMC_OSAKA,
+    bool SeedBlock21800020Tx260State = false) {
   EVMExecutionResult Empty;
 
   std::ifstream Fin(FilePath);
@@ -166,8 +189,9 @@ runEvmBytecodeFile(const std::string &FilePath, common::RunMode Mode,
     ADD_FAILURE() << "Failed to convert hex to bytecode: " << FilePath;
     return Empty;
   }
-
-  return runEvmBytecode(FilePath, *BytecodeBuf, Mode, CallData);
+  return runEvmBytecode(FilePath, *BytecodeBuf, Mode, CallData, 0u,
+                        EnableGasMetering, GasLimit, Revision,
+                        SeedBlock21800020Tx260State);
 }
 
 // Run `Bytecode` through interpreter and multipass, assert the interpreter
@@ -663,6 +687,40 @@ TEST(EVMRangeDifferential,
       "constant_u64_divisor", Bytecode, CallData);
   EXPECT_EQ(Output,
             "0000000000000000000000000000000000000000000000005555555555555555");
+}
+
+TEST(EVMRangeDifferential, Block21800020Tx260MatchesInterpreter) {
+  const auto FixtureDir =
+      getEvmAsmDirPath().parent_path() /
+      std::filesystem::path("evm_regression_data/block21800020_tx260");
+  const auto BytecodePath = (FixtureDir / "runtime.hex").string();
+  const auto CallDataPath = (FixtureDir / "calldata.hex").string();
+
+  std::ifstream CallDataFile(CallDataPath);
+  ASSERT_TRUE(CallDataFile.is_open());
+  std::string CallDataHex;
+  CallDataFile >> CallDataHex;
+  auto CallData = zen::utils::fromHex(CallDataHex);
+  ASSERT_TRUE(CallData);
+
+  const auto Interp =
+      runEvmBytecodeFile(BytecodePath, common::RunMode::InterpMode, *CallData,
+                         true, 31'922, evmc_revision::EVMC_CANCUN, true);
+  const auto Multi = runEvmBytecodeFile(
+      BytecodePath, common::RunMode::MultipassMode, *CallData, true, 31'922,
+      evmc_revision::EVMC_CANCUN, true);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Multi.JITCompiled);
+#endif
+  EXPECT_EQ(Interp.Status, EVMC_SUCCESS);
+  EXPECT_EQ(Interp.GasLeft, 1'122);
+  EXPECT_EQ(Interp.LogCount, 3u);
+  EXPECT_TRUE(Interp.OutputHex.empty());
+  EXPECT_EQ(Multi.Status, Interp.Status);
+  EXPECT_EQ(Multi.GasLeft, Interp.GasLeft);
+  EXPECT_EQ(Multi.OutputHex, Interp.OutputHex);
+  EXPECT_EQ(Multi.LogCount, Interp.LogCount);
+  EXPECT_EQ(Multi.LogsSignature, Interp.LogsSignature);
 }
 
 // Sweep SHL/SHR/SAR with shift amounts that land inside the limb-crossing
