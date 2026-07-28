@@ -2,6 +2,11 @@
 
 This document describes the bytecode cache built by `buildBytecodeCache()` in `src/evm/evm_cache.cpp` and used by `BaseInterpreter::interpret()` in `src/evm/interpreter.cpp` as well as the EVM JIT compiler in `src/compiler/evm_compiler.cpp`.
 
+The current SPP design fixes two unsafe gas-shifting boundary classes with 0%
+`GasBlock` size growth; the structure remains 32 bytes. Retain both the
+unresolved-source guard and the implicit-target predecessor guard because
+removing either can make gas placement unsound.
+
 ## Layout
 
 - `JumpDestMap[pc]` (`uint8_t`): `1` if `Code[pc]` is `OP_JUMPDEST` and this byte is an opcode byte (not inside PUSH data).
@@ -32,6 +37,7 @@ We still partition the bytecode into straight-line "gas blocks":
   - `INVALID`
   - `JUMP`, `JUMPI`
   - `GAS`
+  - `SSTORE`
   - `CREATE`, `CREATE2`
   - `CALL`, `CALLCODE`, `DELEGATECALL`, `STATICCALL`
 
@@ -51,9 +57,12 @@ every execution path.
 We build a CFG of gas blocks and compute a *shifted* metering function `m`
 using a linear-time SPP pass:
 
-- Edges: fallthrough edges (including `JUMPI` fallthrough) and constant-jump
-  edges (validated by `JumpDestMap`). Dynamic jumps are conservatively
-  over-approximated to all `JUMPDEST` blocks.
+- Edges: fallthrough edges, including `JUMPI` fallthrough, are explicit.
+  Resolved jump-target edges are also explicit after validation by
+  `JumpDestMap`. Target edges for an unresolved dynamic `JUMP` or `JUMPI` are
+  omitted. The source is marked with `HasUnresolvedDynamicSuccessor`, and each
+  possible `JUMPDEST` target carries the corresponding
+  `ImplicitDynamicPredCount`.
 - Critical edges are split before SPP to preserve the local update rules.
 - Dominators are computed by the Cooper-Harvey-Kennedy (CHK) algorithm
   (`computeDomInfo` in `evm_cache.cpp`): iterate `IDom[b] = NCA(p, IDom[b])`
@@ -82,14 +91,14 @@ emits a CSV row per named phase to stderr:
 
     EVM_CACHE_PROFILE,<phase>,<microseconds>
 
-Named phases: `buildGasBlocks`, `collectJumpDests`, `buildCFGEdges`,
-`splitCriticalEdges`, `computeReachable`, `computeDomInfo`, `findBackEdges`,
-`computeReverseTopo`, `computeInCycle`, `buildLoopsUsingDominance`,
-`meteringInit`, `lemma614Schedule`, `writeback`. When `OFF` (default), the
-macros expand to `((void)0)` and the release build is bytecode-identical to
-the un-instrumented variant — used to drive `tools/bench_evm_cache.sh` and
-`tools/analyze_evm_cache_bench.py` for paired-ratio cluster-bootstrap BCa
-analysis (see `tests/corpus/evm-cache/`).
+Named phases: `buildJumpDestMap`, `buildGasBlocks`, `buildCFGEdges`,
+`splitCriticalEdges`, `buildCSR`, `computeReachable`, `computeDomInfo`,
+`findBackEdges`, `computeReverseTopo`, `buildLoopsUsingDominance`,
+`computeInCycle`, `meteringInit`, `lemma614Schedule`, `writeback`. When `OFF`
+(default), the macros expand to `((void)0)` and the release build is
+bytecode-identical to the un-instrumented variant — used to drive
+`tools/bench_evm_cache.sh` and `tools/analyze_evm_cache_bench.py` for
+paired-ratio cluster-bootstrap BCa analysis (see `tests/corpus/evm-cache/`).
 
 This moves common costs earlier, reducing the number of non-zero charge points.
 The resulting shifted value `m(s)` is stored in `GasChunkCostSPP[s]` at each
@@ -99,8 +108,11 @@ modules that will be JIT-compiled (gated by `EnableSPP` in
 `buildBytecodeCache`); for interpreter-only modules `GasChunkCostSPP` is
 left empty and the CFG / metering work is skipped.
 
-If the CFG is not suitable for linear SPP (e.g., dominance-based loop analysis
-fails), we still run SPP updates once per node in reverse topological order
+`UseLinearSPP=true` means only that the detected dominance-based natural loops
+passed their body-dominance and nesting checks; it is not a general CFG
+reducibility proof. In this path, `InCycle` is the union of the detected loop
+masks. If those checks fail, a two-pass Kosaraju-style SCC traversal computes
+`InCycle`, and SPP updates only non-cycle nodes in reverse topological order
 without loop fast-forward.
 
 ## Design Goal
@@ -135,12 +147,15 @@ zero bytes on the right, matching the EVM encoding.
 interpreter's fast path enters a chunk only when `gas_left >= GasChunkCost[s]`
 and base-cost out-of-gas cannot occur inside a block. The multipass JIT reads
 the shifted value `m(s)` from `GasChunkCostSPP[s]`. Lemma 6.14 updates move
-cost along CFG edges while preserving total base cost on every path.
-Over-approximating dynamic jumps to all `JUMPDEST`s keeps the optimization
-safe — narrowing those edges with partial call-site resolution would
-under-approximate the CFG and let the SPP pass shift gas along edges that
-don't exist at runtime, producing unsafe metering. Splitting critical edges
-ensures that cost is only moved along edges where the local update is valid.
-When loop analysis fails, the reverse-topological updates still preserve
-correctness without fast-forward. Dynamic/extra gas is charged inside opcode
-handlers as before (memory expansion, cold access, keccak word cost, etc).
+cost along represented CFG edges while preserving total base cost on accepted
+paths. An unresolved dynamic source has
+`HasUnresolvedDynamicSuccessor != 0`, so it cannot receive shifted successor
+cost when runtime targets are absent from the explicit CFG.
+`effectivePredCount` includes `ImplicitDynamicPredCount`, so a possible dynamic
+target cannot receive a shift from only one represented predecessor. `SSTORE`
+is also a gas-sensitive boundary because the EIP-2200 sentry depends on the gas
+remaining at that instruction. Splitting critical edges and the loop schedule
+retain the local update preconditions; the SCC fallback skips cycle nodes and
+applies per-node updates without fast-forward. Dynamic and extra gas remain
+charged inside opcode handlers as before (memory expansion, cold access,
+keccak word cost, and related charges).

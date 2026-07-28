@@ -13,6 +13,7 @@
 
 #include "compiler/evm_frontend/evm_analyzer.h"
 #include "evm/evm.h"
+#include "evm_spp_gas_regression_data.h"
 #include "evm_test_host.hpp"
 #include "runtime/evm_module.h"
 #include "utils/evm.h"
@@ -697,25 +698,22 @@ TEST(EVMRangeDifferential,
 }
 
 TEST(EVMRangeDifferential, Block21800020Tx260MatchesInterpreter) {
-  const auto FixtureDir =
-      getEvmAsmDirPath().parent_path() /
-      std::filesystem::path("evm_regression_data/block21800020_tx260");
-  const auto BytecodePath = (FixtureDir / "runtime.hex").string();
-  const auto CallDataPath = (FixtureDir / "calldata.hex").string();
-
-  std::ifstream CallDataFile(CallDataPath);
-  ASSERT_TRUE(CallDataFile.is_open());
-  std::string CallDataHex;
-  CallDataFile >> CallDataHex;
-  auto CallData = zen::utils::fromHex(CallDataHex);
+  const auto Bytecode =
+      zen::utils::fromHex(zen::evm::test_data::Block21800020Tx260RuntimeHex);
+  const auto CallData =
+      zen::utils::fromHex(zen::evm::test_data::Block21800020Tx260CalldataHex);
+  ASSERT_TRUE(Bytecode);
   ASSERT_TRUE(CallData);
+  ASSERT_EQ(Bytecode->size(), 7'005u);
+  ASSERT_EQ(CallData->size(), 164u);
 
-  const auto Interp =
-      runEvmBytecodeFile(BytecodePath, common::RunMode::InterpMode, *CallData,
-                         true, 31'922, evmc_revision::EVMC_CANCUN, true);
-  const auto Multi = runEvmBytecodeFile(
-      BytecodePath, common::RunMode::MultipassMode, *CallData, true, 31'922,
-      evmc_revision::EVMC_CANCUN, true);
+  const auto Interp = runEvmBytecode(
+      "block21800020_tx260_interp", *Bytecode, common::RunMode::InterpMode,
+      *CallData, 0u, true, 31'922, evmc_revision::EVMC_CANCUN, true);
+  const auto Multi =
+      runEvmBytecode("block21800020_tx260_multipass", *Bytecode,
+                     common::RunMode::MultipassMode, *CallData, 0u, true,
+                     31'922, evmc_revision::EVMC_CANCUN, true);
 #ifdef ZEN_ENABLE_JIT
   EXPECT_TRUE(Multi.JITCompiled);
 #endif
