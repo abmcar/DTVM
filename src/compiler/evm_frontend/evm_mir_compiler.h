@@ -1351,6 +1351,7 @@ private:
                                    const JumpTargetPCList *CandidateTargets,
                                    bool RegisterDynamicPhi);
   bool shouldUseSharedDynamicDispatch() const;
+  void linkJumpDestEntryThunkIfNeeded(MBasicBlock *TargetBB);
   void registerPhiIncomingBlock(uint64_t TargetBlockPC, uint64_t PredBlockPC,
                                 MBasicBlock *PredBB);
   void registerDynamicJumpPhiIncomingBlock(uint64_t TargetBlockPC,
@@ -1391,6 +1392,11 @@ private:
   std::map<uint64_t, uint64_t> JumpDestCanonicalPCTable;
   // Canonical execution blocks for JUMPDEST opcodes in linear decode.
   std::map<uint64_t, MBasicBlock *> JumpDestBodyTable;
+  // Lazily linked entry thunks for non-canonical JUMPDEST targets in a merged
+  // consecutive-JUMPDEST run. The thunk block exists so JumpDestTable can point
+  // at the raw target, but its CFG edge to the shared body is only registered
+  // when a real jump/dispatch edge targets the thunk.
+  std::map<MBasicBlock *, MBasicBlock *> JumpDestEntryThunkBodyTable;
   // Cached skipped-metering for merged consecutive JUMPDEST runs.
   // Cache it so meterOpcodeRange(S, E) doesn't have to re-scan the same run.
   std::vector<uint32_t> JumpDestRunLastPC;   // [S] = E, else invalid sentinel

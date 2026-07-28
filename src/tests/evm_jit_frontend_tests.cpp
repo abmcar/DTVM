@@ -4,7 +4,10 @@
 #include "action/evm_bytecode_visitor.h"
 #include "compiler/evm_frontend/evm_analyzer.h"
 #include "compiler/evm_frontend/evm_mir_compiler.h"
+#include "compiler/mir/module.h"
+#include "compiler/mir/pass/verifier.h"
 
+#include "llvm/Support/raw_ostream.h"
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -13,6 +16,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace {
@@ -36,6 +40,42 @@ analyzeSuitabilityOnlyBytecode(const std::vector<uint8_t> &Bytecode) {
   const uint8_t *Data = Bytecode.empty() ? nullptr : Bytecode.data();
   Analyzer.analyzeSuitabilityOnly(Data, Bytecode.size());
   return Analyzer;
+}
+
+bool verifyMirForBytecode(const std::vector<uint8_t> &Bytecode,
+                          bool EnableGasMetering, std::string *VerifierOutput) {
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setGasMeteringEnabled(EnableGasMetering);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  COMPILER::MModule Mod(Ctx);
+  std::array<COMPILER::MType *, 1> ParamTypes = {
+      COMPILER::MPointerType::create(Ctx, Ctx.VoidType)};
+  COMPILER::MFunctionType *FuncType = COMPILER::MFunctionType::create(
+      Ctx, Ctx.VoidType, llvm::ArrayRef<COMPILER::MType *>(ParamTypes));
+  Mod.addFuncType(FuncType);
+
+  COMPILER::MFunction Func(Ctx, 0);
+  Func.setFunctionType(FuncType);
+  EVMMirBuilder Builder(Ctx, Func);
+  if (!Builder.compile(&Ctx)) {
+    if (VerifierOutput) {
+      *VerifierOutput = "EVM frontend compile failed";
+    }
+    return false;
+  }
+
+  std::string Output;
+  llvm::raw_string_ostream OS(Output);
+  COMPILER::MVerifier Verifier(Mod, Func, OS);
+  const bool Ok = Verifier.verify();
+  OS.flush();
+  if (VerifierOutput) {
+    *VerifierOutput = Output;
+  }
+  return Ok;
 }
 
 const EVMAnalyzer::BlockInfo *findBlock(const EVMAnalyzer &Analyzer,
@@ -128,6 +168,7 @@ struct MockOperand {
       : Slot(std::move(Slot)) {}
 
   bool isConstant() const { return Constant; }
+  bool isEmpty() const { return !Constant && !Slot; }
 
   const U256Value &getConstValue() const {
     ZEN_ASSERT(Constant && "mock operand must be constant");
@@ -147,8 +188,6 @@ struct MockOperand {
   }
 
   void setRange(COMPILER::EVMValueRange) {}
-
-  bool isEmpty() const { return !Constant && !Slot; }
 
 private:
   U256Value Value = {0, 0, 0, 0};
@@ -808,6 +847,38 @@ TEST(EVMJITFrontendAnalyzerTest, ConstantJumpCanonicalizesJumpDestRuns) {
 
   EXPECT_TRUE(JumpDestBlock->IsJumpDest);
   expectPCList(JumpDestBlock->Predecessors, {0});
+}
+
+TEST(EVMJITFrontendMirVerifierTest,
+     OrphanJumpDestEntryThunkDoesNotBecomePhiPredecessor) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x11, // PC0  PUSH1 0x11  (taken-edge stack value)
+      0x60, 0x01, // PC2  PUSH1 cond
+      0x60, 0x10, // PC4  PUSH1 canonical JUMPDEST PC
+      0x57,       // PC6  JUMPI
+      0x50,       // PC7  POP
+      0x60, 0x22, // PC8  PUSH1 0x22  (fallthrough-edge stack value)
+      0x60, 0x10, // PC10 PUSH1 canonical JUMPDEST PC
+      0x56,       // PC12 JUMP
+      0xfe,       // PC13 INVALID padding
+      0xfe,       // PC14 INVALID padding
+      0x5b,       // PC15 JUMPDEST (non-canonical entry thunk, unreferenced)
+      0x5b,       // PC16 JUMPDEST (shared body)
+      0x50,       // PC17 POP merged stack value
+      0x00        // PC18 STOP
+  };
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *MergeBlock = findBlock(Analyzer, 16);
+  ASSERT_NE(MergeBlock, nullptr);
+  EXPECT_FALSE(MergeBlock->CanLiftStack);
+  expectPCList(MergeBlock->Predecessors, {0, 7});
+
+  std::string VerifierOutput;
+  EXPECT_TRUE(verifyMirForBytecode(Bytecode, true, &VerifierOutput))
+      << VerifierOutput;
+  EXPECT_TRUE(verifyMirForBytecode(Bytecode, false, &VerifierOutput))
+      << VerifierOutput;
 }
 
 TEST(EVMJITFrontendAnalyzerTest,
