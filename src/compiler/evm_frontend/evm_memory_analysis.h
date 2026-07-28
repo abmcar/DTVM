@@ -831,6 +831,11 @@ public:
     return It == EntryBytes.end() ? 0 : It->second;
   }
 
+  uint64_t getGuaranteedMinBytesAtExit(uint64_t EntryPC) const {
+    auto It = ExitBytes.find(EntryPC);
+    return It == ExitBytes.end() ? 0 : It->second;
+  }
+
   uint64_t getGuaranteedMinBytesBeforeOp(uint32_t OpId) const {
     auto It = BeforeOpBytes.find(OpId);
     return It == BeforeOpBytes.end() ? 0 : It->second;
@@ -904,6 +909,9 @@ private:
 
   uint64_t transfer(const MemoryBlockFacts &Block,
                     uint64_t EntryBytesValue) const {
+    if (!Block.HasCompleteOpcodeFacts) {
+      return 0;
+    }
     uint64_t Current = EntryBytesValue;
     for (size_t I = Block.OpsBegin; I < Block.OpsEnd && I < Facts.Ops.size();
          ++I) {
@@ -921,6 +929,9 @@ private:
 
   void recordBeforeOpBytes(const MemoryBlockFacts &Block,
                            uint64_t EntryBytesValue) {
+    if (!Block.HasCompleteOpcodeFacts) {
+      return;
+    }
     uint64_t Current = EntryBytesValue;
     bool SeenBarrier = false;
     for (size_t I = Block.OpsBegin; I < Block.OpsEnd && I < Facts.Ops.size();
@@ -942,6 +953,9 @@ private:
   }
 
   uint64_t computeEntryFromPredecessors(const MemoryBlockFacts &Block) const {
+    if (!Block.HasCompleteOpcodeFacts) {
+      return 0;
+    }
     if (Block.Predecessors.empty()) {
       return 0;
     }

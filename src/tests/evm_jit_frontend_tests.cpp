@@ -253,13 +253,22 @@ collectAnalyzerMemoryFacts(const std::vector<uint8_t> &Bytecode) {
   COMPILER::MemoryFactsBuilder FactsBuilder;
   const auto &Blocks = Analyzer.getBlockInfos();
   for (const auto &[EntryPC, BlockInfo] : Blocks) {
-    const int32_t EntryDepth = std::max(BlockInfo.ResolvedEntryStackDepth, 0);
+    const bool HasReliableEntryStack =
+        BlockInfo.ResolvedEntryStackDepth >= 0 &&
+        !BlockInfo.HasInconsistentEntryDepth &&
+        !BlockInfo.EntryDepthMayComeFromDynamicDispatch;
+    const int32_t EntryDepth =
+        HasReliableEntryStack ? BlockInfo.ResolvedEntryStackDepth : 0;
     std::vector<COMPILER::MemoryEntryValue> EntryValues =
         EntryAddresses.getEntryValues(EntryPC,
                                       static_cast<uint32_t>(EntryDepth));
     FactsBuilder.beginBlock(EntryPC, BlockInfo.BodyStartPC, BlockInfo.BodyEndPC,
                             EntryValues, BlockInfo.Successors,
-                            BlockInfo.Predecessors);
+                            BlockInfo.Predecessors, HasReliableEntryStack);
+
+    if (!HasReliableEntryStack) {
+      continue;
+    }
 
     size_t PC = static_cast<size_t>(BlockInfo.BodyStartPC);
     const size_t EndPC = std::min<size_t>(BlockInfo.BodyEndPC, Bytecode.size());
@@ -281,6 +290,7 @@ struct MemoryFactBlockSpec {
   uint64_t BodyEndPC = 0;
   std::vector<uint64_t> Successors;
   std::vector<uint64_t> Predecessors;
+  bool HasCompleteOpcodeFacts = true;
 };
 
 COMPILER::MemoryFacts
@@ -290,7 +300,12 @@ collectManualBlockMemoryFacts(const std::vector<uint8_t> &Bytecode,
   const uint8_t *Data = Bytecode.empty() ? nullptr : Bytecode.data();
   for (const MemoryFactBlockSpec &Block : Blocks) {
     FactsBuilder.beginBlock(Block.EntryPC, Block.BodyStartPC, Block.BodyEndPC,
-                            {}, Block.Successors, Block.Predecessors);
+                            {}, Block.Successors, Block.Predecessors,
+                            Block.HasCompleteOpcodeFacts);
+
+    if (!Block.HasCompleteOpcodeFacts) {
+      continue;
+    }
 
     size_t PC = static_cast<size_t>(Block.BodyStartPC);
     const size_t EndPC = std::min<size_t>(Block.BodyEndPC, Bytecode.size());
@@ -350,6 +365,62 @@ TEST(EVMMemoryFactsBuilderTest, AttributesOpsToAnalyzerBlocks) {
   ASSERT_NE(JumpTarget, nullptr);
   EXPECT_EQ(JumpTarget->OpsEnd - JumpTarget->OpsBegin, 1u);
   EXPECT_EQ(JumpTarget->MaxConstRequiredSize, 0x60u);
+}
+
+TEST(EVMMemoryFactsBuilderTest,
+     IncompleteBlockIgnoresOpcodesWithoutPollutingNextBlock) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,        0x01, OP_PUSH1, 0x00,     OP_MSTORE,
+      OP_PUSH1,        0x40, OP_PUSH0, OP_SWAP1, OP_KECCAK256,
+      OP_CALLDATASIZE, // PC10: first opcode in the complete block.
+      OP_MLOAD,        // PC11
+      OP_STOP};
+
+  COMPILER::MemoryFactsBuilder FactsBuilder;
+  FactsBuilder.beginBlock(0, 0, 10, {}, {}, {}, false);
+  size_t PC = 0;
+  while (PC < 10) {
+    evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[PC]);
+    FactsBuilder.observeOpcode(Opcode, PC, Bytecode.data(), Bytecode.size());
+    ++PC;
+    if (Opcode >= OP_PUSH0 && Opcode <= OP_PUSH32) {
+      PC += static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+    }
+  }
+
+  const COMPILER::MemoryFacts &IncompleteOnlyFacts = FactsBuilder.getFacts();
+  const COMPILER::MemoryBlockFacts *IncompleteOnly =
+      IncompleteOnlyFacts.getBlock(0);
+  ASSERT_NE(IncompleteOnly, nullptr);
+  EXPECT_FALSE(IncompleteOnly->HasCompleteOpcodeFacts);
+  EXPECT_EQ(IncompleteOnly->OpsBegin, IncompleteOnly->OpsEnd);
+  EXPECT_TRUE(IncompleteOnlyFacts.Ops.empty());
+
+  FactsBuilder.beginBlock(10, 10, Bytecode.size(), {});
+  while (PC < Bytecode.size()) {
+    evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[PC]);
+    FactsBuilder.observeOpcode(Opcode, PC, Bytecode.data(), Bytecode.size());
+    ++PC;
+    if (Opcode >= OP_PUSH0 && Opcode <= OP_PUSH32) {
+      PC += static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+    }
+  }
+
+  COMPILER::MemoryFacts Facts = FactsBuilder.takeFacts();
+  const COMPILER::MemoryBlockFacts *Incomplete = Facts.getBlock(0);
+  const COMPILER::MemoryBlockFacts *Complete = Facts.getBlock(10);
+  ASSERT_NE(Incomplete, nullptr);
+  ASSERT_NE(Complete, nullptr);
+  EXPECT_FALSE(Incomplete->HasCompleteOpcodeFacts);
+  EXPECT_EQ(Incomplete->OpsBegin, Incomplete->OpsEnd);
+  EXPECT_TRUE(Complete->HasCompleteOpcodeFacts);
+  ASSERT_EQ(Facts.Ops.size(), 1u);
+  ASSERT_EQ(Facts.Ops[0].Pc, 11u);
+  ASSERT_EQ(Facts.Ops[0].Kind, COMPILER::MemoryOpKind::MLoad);
+  ASSERT_EQ(Facts.Ops[0].Reads.size(), 1u);
+  EXPECT_EQ(Facts.Ops[0].Reads[0].Addr.Kind,
+            COMPILER::AddressBaseKind::StackValue);
+  EXPECT_EQ(Facts.Ops[0].Reads[0].Addr.ValueId, 1u);
 }
 
 TEST(EVMMemoryEntryAddressAnalysisTest,
@@ -630,6 +701,31 @@ TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, IgnoresZeroLengthCallDataCopy) {
   COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
 
   ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0u);
+}
+
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
+     IncompleteBlockResetsGuaranteeAndBlocksSuccessorPropagation) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,    OP_PUSH1, 0x80,     OP_MSTORE, OP_STOP,  OP_STOP,
+      OP_STOP,  OP_STOP, OP_STOP,  OP_PUSH1, 0x00,      OP_MLOAD, OP_STOP};
+  const std::vector<MemoryFactBlockSpec> Blocks = {
+      {0, 0, 5, {5}, {}},
+      {5, 5, 10, {10}, {0}, false},
+      {10, 10, 14, {}, {5}},
+  };
+
+  COMPILER::MemoryFacts Facts = collectManualBlockMemoryFacts(Bytecode, Blocks);
+  const COMPILER::MemoryBlockFacts *Incomplete = Facts.getBlock(5);
+  ASSERT_NE(Incomplete, nullptr);
+  ASSERT_FALSE(Incomplete->HasCompleteOpcodeFacts);
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesAtExit(0), 0xa0u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesAtEntry(5), 0u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesAtExit(5), 0u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesAtEntry(10), 0u);
   EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0u);
 }
 
@@ -994,6 +1090,73 @@ TEST(EVMMemoryDeadStoreAnalysisTest, RejectsSameBasePartialOverlap) {
   EXPECT_EQ(View.alias(Facts.Ops[1], Facts.Ops[2]),
             COMPILER::MemoryAliasResult::PartialAlias);
   EXPECT_FALSE(DeadStores.isDeadStore(Facts.Ops[1].Id));
+}
+
+TEST(EVMMemoryDeadStoreAnalysisTest,
+     SelectorStoreObservedByTwoWordKeccakIsNotDead) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH0, OP_CALLDATALOAD, OP_PUSH1, 0x20, OP_CALLDATALOAD, OP_PUSH1,
+      0x40, OP_CALLDATALOAD,
+      // Exact selector-to-storage-key stack motif used by the failing proxy.
+      OP_PUSH32, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, OP_SWAP3,
+      OP_SWAP1, OP_SWAP3, OP_AND, OP_PUSH0, OP_SWAP1, OP_DUP2, OP_MSTORE,
+      OP_PUSH1, 0x20, OP_SWAP3, OP_SWAP1, OP_SWAP3, OP_MSTORE, OP_POP, OP_PUSH1,
+      0x40, OP_SWAP1, OP_KECCAK256};
+
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryDeadStoreAnalysis DeadStores(Facts);
+
+  ASSERT_GE(Facts.Ops.size(), 6u);
+  const COMPILER::MemoryOp &SelectorStore = Facts.Ops[Facts.Ops.size() - 3];
+  const COMPILER::MemoryOp &SlotStore = Facts.Ops[Facts.Ops.size() - 2];
+  const COMPILER::MemoryOp &Keccak = Facts.Ops.back();
+  ASSERT_EQ(SelectorStore.Kind, COMPILER::MemoryOpKind::MStore);
+  ASSERT_EQ(SlotStore.Kind, COMPILER::MemoryOpKind::MStore);
+  ASSERT_EQ(Keccak.Kind, COMPILER::MemoryOpKind::Keccak);
+  ASSERT_EQ(SelectorStore.Writes.size(), 1u);
+  ASSERT_EQ(SlotStore.Writes.size(), 1u);
+  ASSERT_EQ(Keccak.Reads.size(), 1u);
+  EXPECT_EQ(SelectorStore.Writes[0].Addr.Offset, 0);
+  EXPECT_EQ(SlotStore.Writes[0].Addr.Offset, 32);
+  EXPECT_EQ(Keccak.Reads[0].Addr.Offset, 0);
+  ASSERT_TRUE(Keccak.Reads[0].Size.Known);
+  EXPECT_EQ(Keccak.Reads[0].Size.Value, 64u);
+  EXPECT_FALSE(DeadStores.isDeadStore(SelectorStore.Id));
+}
+
+TEST(EVMMemoryDeadStoreAnalysisTest,
+     UnresolvedDynamicEntryDoesNotProduceFalseSelectorAliasFacts) {
+  const std::vector<uint8_t> Bytecode = {
+      // Two reachable dynamic-JUMP sources enter PC24 with different hidden
+      // live-in depths, so its absolute entry stack is unresolved.
+      OP_PUSH0, OP_CALLDATALOAD, OP_PUSH1, 0x0d, OP_JUMPI, OP_PUSH1, 0x11,
+      OP_PUSH1, 0x22, OP_PUSH1, 0x20, OP_CALLDATALOAD, OP_JUMP, OP_JUMPDEST,
+      OP_PUSH1, 0x11, OP_PUSH1, 0x22, OP_PUSH1, 0x33, OP_PUSH1, 0x20,
+      OP_CALLDATALOAD, OP_JUMP, OP_JUMPDEST,
+      // Exact selector-to-storage-key motif from the failing proxy.
+      OP_PUSH32, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, OP_SWAP3,
+      OP_SWAP1, OP_SWAP3, OP_AND, OP_PUSH0, OP_SWAP1, OP_DUP2, OP_MSTORE,
+      OP_PUSH1, 0x20, OP_SWAP3, OP_SWAP1, OP_SWAP3, OP_MSTORE, OP_POP, OP_PUSH1,
+      0x40, OP_SWAP1, OP_KECCAK256, OP_STOP};
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *TargetBlock = findBlock(Analyzer, 24);
+  ASSERT_NE(TargetBlock, nullptr);
+  ASSERT_LT(TargetBlock->ResolvedEntryStackDepth, 0);
+
+  COMPILER::MemoryFacts Facts = collectAnalyzerMemoryFacts(Bytecode);
+  const COMPILER::MemoryBlockFacts *TargetFacts = Facts.getBlock(24);
+  ASSERT_NE(TargetFacts, nullptr);
+  EXPECT_FALSE(TargetFacts->HasCompleteOpcodeFacts);
+  for (const COMPILER::MemoryOp &Op : Facts.Ops) {
+    EXPECT_NE(Op.Pc, 65u);
+    EXPECT_NE(Op.Pc, 71u);
+    EXPECT_NE(Op.Pc, 76u);
+  }
 }
 
 TEST(EVMMemoryLoadForwardingAnalysisTest, FindsExactReachingMStore) {
@@ -1372,6 +1535,35 @@ TEST(EVMMemoryConsumerFrameworkTest,
   EXPECT_EQ(Plan->RequiredMemorySize, 0x60u);
   EXPECT_EQ(Planner.getGuaranteedMinBytesAtEntry(Middle->EntryPC), 0x60u);
   EXPECT_EQ(Planner.getGuaranteedMinBytesAtEntry(Tail->EntryPC), 0x60u);
+}
+
+TEST(EVMMemoryConsumerFrameworkTest, LinearRegionDoesNotCrossIncompleteBlock) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,    OP_PUSH1,  0x00,    OP_MSTORE, OP_STOP,
+      OP_STOP,  OP_STOP, OP_STOP,   OP_STOP, OP_PUSH1,  0x02,
+      OP_PUSH1, 0x20,    OP_MSTORE, OP_STOP};
+  const std::vector<MemoryFactBlockSpec> Blocks = {
+      {0, 0, 5, {5}, {}},
+      {5, 5, 10, {10}, {0}, false},
+      {10, 10, 16, {}, {5}},
+  };
+
+  COMPILER::MemoryFacts Facts = collectManualBlockMemoryFacts(Bytecode, Blocks);
+  COMPILER::MemoryAnalysisView View(Facts);
+  COMPILER::MemoryPrecheckConsumer Prechecks(View);
+  COMPILER::MemoryGroupingConsumer Grouping(View, Prechecks);
+  COMPILER::MemoryExpansionPlanner Planner(View);
+
+  EXPECT_FALSE(Prechecks.buildMemoryExpansionPlan(5, 10).has_value());
+  EXPECT_FALSE(Grouping.buildMemoryExpansionPlan(5, 10).has_value());
+  EXPECT_FALSE(Planner.isDeadStore(5));
+  EXPECT_FALSE(Planner.getForwardingStorePC(5).has_value());
+  EXPECT_FALSE(Planner.buildMemoryExpansionPlan(0, 5).has_value());
+  EXPECT_EQ(Planner.getGuaranteedMinBytesAtEntry(5), 0u);
+  EXPECT_EQ(Planner.getGuaranteedMinBytesAtEntry(10), 0u);
+  EXPECT_EQ(
+      Planner.getLastDiagnostics().LinearRegionRejectedBarrierUnknownEffect,
+      1u);
 }
 
 TEST(EVMMemoryConsumerFrameworkTest, LinearRegionRejectsBranchingHead) {
@@ -1783,6 +1975,14 @@ public:
   }
 
   void finalizeEVMBase() {}
+
+  void setMemoryFacts(const COMPILER::MemoryFacts &Facts) {
+    CapturedMemoryFacts = Facts;
+  }
+
+  const COMPILER::MemoryFacts &memoryFacts() const {
+    return CapturedMemoryFacts;
+  }
 
   bool isOpcodeDefined(evmc_opcode Opcode) const {
     const auto *InstructionNames =
@@ -2206,6 +2406,7 @@ public:
   uint64_t LargeStaticWorkspaceLoweringCoveredMStore8Ops = 0;
 
 private:
+  COMPILER::MemoryFacts CapturedMemoryFacts;
   bool EnableRuntimeStackChecks = false;
   uint8_t CurrentOpcode = 0xff;
   std::array<MockStackAccessStats, 256> Stats = {};
@@ -2360,6 +2561,87 @@ TEST(EVMJITFrontendVisitorTest, TerminatingMemoryHelpersRetainExactOpcodePC) {
   ASSERT_EQ(RevertBuilder.helperOpcodes().size(), 1u);
   EXPECT_EQ(RevertBuilder.helperOpcodes()[0].Opcode, OP_REVERT);
   EXPECT_EQ(RevertBuilder.helperOpcodes()[0].PC, 2u);
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     DynamicDispatchTaintedEntryRetainsTopologyWithoutMemoryOps) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH0,    OP_CALLDATALOAD,
+      OP_JUMP,
+      OP_JUMPDEST, // PC3: dynamically dispatched region target.
+      OP_PUSH1,    0x01,
+      OP_PUSH0,
+      OP_MSTORE, // PC7
+      OP_STOP};
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *TargetBlock = findBlock(Analyzer, 3);
+  ASSERT_NE(TargetBlock, nullptr);
+  ASSERT_EQ(TargetBlock->ResolvedEntryStackDepth, 0);
+  ASSERT_TRUE(TargetBlock->EntryDepthMayComeFromDynamicDispatch);
+
+  MockEVMBuilder Builder;
+  ASSERT_TRUE(compileWithMockBuilder(Bytecode, Builder));
+
+  const COMPILER::MemoryFacts &Facts = Builder.memoryFacts();
+  const COMPILER::MemoryBlockFacts *TargetFacts = Facts.getBlock(3);
+  ASSERT_NE(TargetFacts, nullptr);
+  EXPECT_FALSE(TargetFacts->HasCompleteOpcodeFacts);
+  for (const COMPILER::MemoryOp &Op : Facts.Ops) {
+    EXPECT_NE(Op.Pc, 7u);
+  }
+}
+
+TEST(EVMJITFrontendVisitorTest,
+     UnresolvedDynamicEntryRetainsTopologyWithoutMemoryOps) {
+  const std::vector<uint8_t> Bytecode = {
+      // Two dynamic sources reach PC24 with different hidden live-in depths.
+      OP_PUSH0,
+      OP_CALLDATALOAD,
+      OP_PUSH1,
+      0x0d,
+      OP_JUMPI,
+      OP_PUSH1,
+      0x11,
+      OP_PUSH1,
+      0x22,
+      OP_PUSH1,
+      0x20,
+      OP_CALLDATALOAD,
+      OP_JUMP,
+      OP_JUMPDEST,
+      OP_PUSH1,
+      0x11,
+      OP_PUSH1,
+      0x22,
+      OP_PUSH1,
+      0x33,
+      OP_PUSH1,
+      0x20,
+      OP_CALLDATALOAD,
+      OP_JUMP,
+      OP_JUMPDEST, // PC24: unresolved dynamic-dispatch target.
+      OP_PUSH1,
+      0x01,
+      OP_PUSH0,
+      OP_MSTORE, // PC28
+      OP_STOP};
+
+  const EVMAnalyzer Analyzer = analyzeBytecode(Bytecode);
+  const auto *TargetBlock = findBlock(Analyzer, 24);
+  ASSERT_NE(TargetBlock, nullptr);
+  ASSERT_LT(TargetBlock->ResolvedEntryStackDepth, 0);
+
+  MockEVMBuilder Builder;
+  ASSERT_TRUE(compileWithMockBuilder(Bytecode, Builder));
+
+  const COMPILER::MemoryFacts &Facts = Builder.memoryFacts();
+  const COMPILER::MemoryBlockFacts *TargetFacts = Facts.getBlock(24);
+  ASSERT_NE(TargetFacts, nullptr);
+  EXPECT_FALSE(TargetFacts->HasCompleteOpcodeFacts);
+  for (const COMPILER::MemoryOp &Op : Facts.Ops) {
+    EXPECT_NE(Op.Pc, 28u);
+  }
 }
 
 TEST(EVMJITFrontendVisitorTest, DynamicJumpConsistencyErrorEscapesVisitor) {

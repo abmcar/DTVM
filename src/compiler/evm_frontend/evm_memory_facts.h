@@ -197,6 +197,7 @@ struct MemoryBlockFacts {
   uint64_t BodyEndPC = 0;
   size_t OpsBegin = 0;
   size_t OpsEnd = 0;
+  bool HasCompleteOpcodeFacts = true;
   bool HasBarrier = false;
   MemoryHardBarrierKind FirstHardBarrierKind = MemoryHardBarrierKind::None;
   evmc_opcode FirstHardBarrierOpcode = OP_STOP;
@@ -251,7 +252,8 @@ public:
   void beginBlock(uint64_t EntryPC, uint64_t BodyStartPC, uint64_t BodyEndPC,
                   const std::vector<MemoryEntryValue> &EntryValues,
                   const std::vector<uint64_t> &Successors = {},
-                  const std::vector<uint64_t> &Predecessors = {}) {
+                  const std::vector<uint64_t> &Predecessors = {},
+                  bool HasCompleteOpcodeFacts = true) {
     endBlock();
     HasCurrentBlock = true;
     CurrentBlockEntryPC = EntryPC;
@@ -262,6 +264,7 @@ public:
     Block.BodyEndPC = BodyEndPC;
     Block.OpsBegin = Facts.Ops.size();
     Block.OpsEnd = Facts.Ops.size();
+    Block.HasCompleteOpcodeFacts = HasCompleteOpcodeFacts;
     Block.Successors = Successors;
     Block.Predecessors = Predecessors;
     Facts.Blocks[EntryPC] = std::move(Block);
@@ -289,6 +292,12 @@ public:
 
   void observeOpcode(evmc_opcode Opcode, uint64_t Pc, const uint8_t *Bytecode,
                      size_t BytecodeSize) {
+    if (HasCurrentBlock) {
+      auto It = Facts.Blocks.find(CurrentBlockEntryPC);
+      if (It == Facts.Blocks.end() || !It->second.HasCompleteOpcodeFacts) {
+        return;
+      }
+    }
     if (Opcode >= OP_PUSH0 && Opcode <= OP_PUSH32) {
       observePush(Opcode, Pc, Bytecode, BytecodeSize);
       return;

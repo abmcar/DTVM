@@ -362,6 +362,9 @@ private:
   getHardBarrierRejectReason(const MemoryAnalysisView &View,
                              const MemoryBlockFacts &Block,
                              const MemoryFacts &Facts) {
+    if (!Block.HasCompleteOpcodeFacts) {
+      return MemoryLinearRegionRejectReason::BarrierUnknownEffect;
+    }
     if (Block.HasBarrier) {
       return mapHardBarrierKind(Block.FirstHardBarrierKind);
     }
