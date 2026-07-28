@@ -1,6 +1,6 @@
 # Change: Preserve gas semantics at EVM SPP boundaries
 
-- **Status**: Implemented
+- **Status**: Accepted
 - **Date**: 2026-07-28
 - **Tier**: Light
 - **PR**: #579
