@@ -200,6 +200,8 @@ public:
     return BlockInfos;
   }
 
+  evmc_revision getRevision() const { return Revision; }
+
   struct DynamicJumpRegionInfo {
     uint64_t RegionEntryPC = 0;
     std::vector<uint64_t> SourceBlocks;

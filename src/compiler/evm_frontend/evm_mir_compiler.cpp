@@ -11,6 +11,7 @@
 #include "utils/hash_utils.h"
 #include "utils/logging.h"
 #include "llvm/Support/Casting.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -4929,10 +4930,17 @@ EVMMirBuilder::handleMLoad(Operand AddrComponents) {
   }
   bool UsedSharedPrecheck =
       UsedLinearPrecheck || UsedConstPrecheck || UsedLargeStaticPrecheck;
+  bool UsedGuaranteedMinBytesElision = false;
+  if (!UsedSharedPrecheck) {
+    UsedGuaranteedMinBytesElision = tryUseGuaranteedMinBytesExpansionElision(
+        OffsetWasConst, OriginalConstOffset, 32);
+  }
+  const bool ExpansionCovered =
+      UsedSharedPrecheck || UsedGuaranteedMinBytesElision;
   noteSmallFrameMemoryOp(SmallFrameMemoryOp::MLoad, OffsetWasConst,
                          OriginalConstOffset, OffsetKnownU64, 32,
-                         UsedSharedPrecheck);
-  if (!UsedSharedPrecheck) {
+                         ExpansionCovered);
+  if (!ExpansionCovered) {
     MInstruction *SizeConst = createIntConstInstruction(I64Type, 32);
     MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
         false, OP_add, I64Type, Offset, SizeConst);
@@ -4946,6 +4954,29 @@ EVMMirBuilder::handleMLoad(Operand AddrComponents) {
     }
 #endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
     expandMemoryIR(RequiredSize, Overflow);
+  }
+
+  std::optional<uint64_t> ForwardingStorePC;
+  if (MemoryExpansionPlans) {
+    ForwardingStorePC =
+        MemoryExpansionPlans->getForwardingStorePC(CurrentMemoryOpPC);
+  }
+  auto ForwardedIt = ForwardingStorePC
+                         ? CurrentBlockMStoreValues.find(*ForwardingStorePC)
+                         : CurrentBlockMStoreValues.end();
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (MemoryExpansionPlans) {
+    ++MemStats.MemoryLoadForwardCandidates;
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (ForwardedIt != CurrentBlockMStoreValues.end()) {
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+    ++MemStats.MemoryLoadForwarded;
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+    reloadGasFromMemory();
+#endif
+    return ForwardedIt->second;
   }
 
   Operand Result;
@@ -5060,10 +5091,17 @@ void EVMMirBuilder::handleMStore(Operand AddrComponents,
   }
   bool UsedSharedPrecheck =
       UsedLinearPrecheck || UsedConstPrecheck || UsedLargeStaticPrecheck;
+  bool UsedGuaranteedMinBytesElision = false;
+  if (!UsedSharedPrecheck) {
+    UsedGuaranteedMinBytesElision = tryUseGuaranteedMinBytesExpansionElision(
+        OffsetWasConst, OriginalConstOffset, 32);
+  }
+  const bool ExpansionCovered =
+      UsedSharedPrecheck || UsedGuaranteedMinBytesElision;
   noteSmallFrameMemoryOp(SmallFrameMemoryOp::MStore, OffsetWasConst,
                          OriginalConstOffset, OffsetKnownU64, 32,
-                         UsedSharedPrecheck);
-  if (!UsedSharedPrecheck) {
+                         ExpansionCovered);
+  if (!ExpansionCovered) {
     ValueParts = extractU256Operand(ValueComponents);
     HasValueParts = true;
     MInstruction *SizeConst = createIntConstInstruction(I64Type, 32);
@@ -5092,6 +5130,25 @@ void EVMMirBuilder::handleMStore(Operand AddrComponents,
     }
 #endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
     expandMemoryIR(RequiredSize, Overflow);
+  }
+
+  CurrentBlockMStoreValues.insert_or_assign(CurrentMemoryOpPC, ValueComponents);
+  const bool ElideDeadWrite =
+      MemoryExpansionPlans &&
+      MemoryExpansionPlans->isDeadStore(CurrentMemoryOpPC);
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (MemoryExpansionPlans) {
+    ++MemStats.MemoryDSEStoreCandidates;
+  }
+  if (ElideDeadWrite) {
+    ++MemStats.MemoryDSEEliminatedWrites;
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (ElideDeadWrite) {
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+    reloadGasFromMemory();
+#endif
+    return;
   }
 
   if (!HasValueParts && UsedSharedPrecheck && CanReuseAddrAsValue) {
@@ -5218,10 +5275,17 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
   }
   bool UsedSharedPrecheck =
       UsedLinearPrecheck || UsedConstPrecheck || UsedLargeStaticPrecheck;
+  bool UsedGuaranteedMinBytesElision = false;
+  if (!UsedSharedPrecheck) {
+    UsedGuaranteedMinBytesElision = tryUseGuaranteedMinBytesExpansionElision(
+        OffsetWasConst, OriginalConstOffset, 1);
+  }
+  const bool ExpansionCovered =
+      UsedSharedPrecheck || UsedGuaranteedMinBytesElision;
   noteSmallFrameMemoryOp(SmallFrameMemoryOp::MStore8, OffsetWasConst,
                          OriginalConstOffset, OffsetKnownU64, 1,
-                         UsedSharedPrecheck);
-  if (!UsedSharedPrecheck) {
+                         ExpansionCovered);
+  if (!ExpansionCovered) {
     MInstruction *SizeConst = createIntConstInstruction(I64Type, 1);
     MInstruction *RequiredSize = createInstruction<BinaryInstruction>(
         false, OP_add, I64Type, Offset, SizeConst);
@@ -5241,6 +5305,24 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
     }
 #endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
     expandMemoryIR(RequiredSize, Overflow);
+  }
+
+  const bool ElideDeadWrite =
+      MemoryExpansionPlans &&
+      MemoryExpansionPlans->isDeadStore(CurrentMemoryOpPC);
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (MemoryExpansionPlans) {
+    ++MemStats.MemoryDSEStoreCandidates;
+  }
+  if (ElideDeadWrite) {
+    ++MemStats.MemoryDSEEliminatedWrites;
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (ElideDeadWrite) {
+#ifdef ZEN_ENABLE_EVM_GAS_REGISTER
+    reloadGasFromMemory();
+#endif
+    return;
   }
 
   MInstruction *Low64 = ValueParts[0];
@@ -5264,6 +5346,14 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
     createInstruction<StoreInstruction>(true, &Ctx.VoidType, ByteValue,
                                         AddrPtr);
   }
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (UsedSharedPrecheck) {
+    ++MemStats.PrecheckedMStore8OpCount;
+    if (CurBlockMemStats.Active) {
+      ++CurBlockMemStats.PrecheckedMStore8OpCount;
+    }
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
@@ -5271,15 +5361,21 @@ void EVMMirBuilder::handleMStore8(Operand AddrComponents,
 void EVMMirBuilder::handleMCopy(Operand DestAddrComponents,
                                 Operand SrcAddrComponents,
                                 Operand LengthComponents) {
+  const bool DestWasConst = DestAddrComponents.isConstU64();
+  const bool SrcWasConst = SrcAddrComponents.isConstU64();
+  const bool LengthWasConst = LengthComponents.isConstU64();
+  const uint64_t ConstDest =
+      DestWasConst ? DestAddrComponents.getConstValue()[0] : 0;
+  const uint64_t ConstSrc =
+      SrcWasConst ? SrcAddrComponents.getConstValue()[0] : 0;
+  const uint64_t ConstLength =
+      LengthWasConst ? LengthComponents.getConstValue()[0] : 0;
   if (LengthComponents.isConstU64() &&
       LengthComponents.getConstValue()[0] == 0) {
     return;
   }
 
   MType *I64Type = &Ctx.I64Type;
-  const bool LengthWasConst = LengthComponents.isConstU64();
-  const uint64_t ConstLength =
-      LengthWasConst ? LengthComponents.getConstValue()[0] : 0;
   const bool LengthIsKnownNonZero = LengthWasConst && ConstLength != 0;
 
   MBasicBlock *DoneBB = nullptr;
@@ -5331,9 +5427,14 @@ void EVMMirBuilder::handleMCopy(Operand DestAddrComponents,
       false, OP_mul, I64Type, Words, WordCopyCost);
   chargeDynamicGasIR(CopyGas);
 
-  bool UsedSharedPrecheck =
-      LengthIsKnownNonZero && tryConsumeConstBlockMemoryPrecheck();
-  if (!UsedSharedPrecheck) {
+  bool UsedSharedPrecheck = LengthIsKnownNonZero &&
+                            CurBlockConstPrecheckPlan.HasOpPCRange &&
+                            tryConsumeConstBlockMemoryPrecheck();
+  const bool UsedGuaranteedElision =
+      !UsedSharedPrecheck && DestWasConst && SrcWasConst && LengthWasConst &&
+      tryUseGuaranteedMinBytesExpansionElision(true, ConstDest, ConstLength) &&
+      tryUseGuaranteedMinBytesExpansionElision(true, ConstSrc, ConstLength);
+  if (!UsedSharedPrecheck && !UsedGuaranteedElision) {
     // Expand memory for both source and destination ranges.
     MInstruction *DestEnd = createInstruction<BinaryInstruction>(
         false, OP_add, I64Type, DestOffset, Len);
@@ -5359,6 +5460,17 @@ void EVMMirBuilder::handleMCopy(Operand DestAddrComponents,
 #endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
     expandMemoryIR(RequiredSize, Overflow);
   }
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (UsedGuaranteedElision) {
+    ++MemStats.MCopyGuaranteedElisionCount;
+  }
+  if (UsedSharedPrecheck) {
+    ++MemStats.PrecheckedMCopyOpCount;
+    if (CurBlockMemStats.Active) {
+      ++CurBlockMemStats.PrecheckedMCopyOpCount;
+    }
+  }
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
 
   MInstruction *MemBase = getDirectMemoryDataPointer(UsedSharedPrecheck);
   MInstruction *DestBase = createInstruction<BinaryInstruction>(
@@ -7201,6 +7313,7 @@ bool EVMMirBuilder::hasMemoryCompileStats() const {
   return MemStats.MLoadExpandCount != 0 || MemStats.MStoreExpandCount != 0 ||
          MemStats.MStore8ExpandCount != 0 || MemStats.MCopyExpandCount != 0 ||
          MemStats.BlockConstPrecheckCount != 0 ||
+         MemStats.MemoryExpansionPlanCount != 0 ||
          MemStats.LinearU64AddrFastPathCount != 0 ||
          MemStats.ConstBasePtrInitCount != 0 ||
          MemStats.ConstBasePtrReuseCount != 0 ||
@@ -7214,6 +7327,75 @@ bool EVMMirBuilder::hasMemoryCompileStats() const {
          MemStats.ReloadMemorySizeCount != 0 ||
          MemStats.GetMemoryDataPointerCount != 0 ||
          MemStats.ExpandNeedExpandCFGCount != 0 ||
+         MemStats.MemoryExpansionPlanGroupingCandidates != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionCandidates != 0 ||
+         MemStats.MemoryExpansionPlanPrecheckCandidates != 0 ||
+         MemStats.MemoryExpansionPlanRejectedNoCandidate != 0 ||
+         MemStats.MemoryExpansionPlanRejectedUnknownInterval != 0 ||
+         MemStats.MemoryExpansionPlanRejectedInvalidRange != 0 ||
+         MemStats.MemoryExpansionPlanRejectedOverflow != 0 ||
+         MemStats.MemoryExpansionPlanRejectedTooLarge != 0 ||
+         MemStats.MemoryExpansionPlanRejectedZeroSize != 0 ||
+         MemStats.MemoryExpansionPlanRejectedUnprofitable != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedNotStraightLine != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBranchingHead != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedMergeSuccessor != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBackedgeOrNonForward !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedHardBarrier != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierMSize != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierGas != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierCall != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierCreate != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierReturn != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierRevert != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierLog != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierStorage != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierSelfDestruct !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierInvalid != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierUnknownEffect !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierEscape != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixCandidateBlocks != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixCandidateOps != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixAcceptedBlocks != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixAcceptedOps != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixRejectedTooShort != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixRejectedNoHeadMemoryOp !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixBranchingAfterSafePrefix !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixMergeAfterSafePrefix !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixTerminalAfterSafePrefix !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixMissingSuccessorBlock !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixBackedgeAfterSafePrefix !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionPrefixBarrierAfterSafePrefix !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedBranchingHeadNoSafePrefix !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedMergeSuccessorNoSafePrefix !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionHeadCandidateBlocks != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionHeadSkippedEmptyBlocks != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionHeadSelectedNonEntryBlock !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionHeadRejectedPredecessorNotStraight !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionHeadRejectedHeadNotDominatingChain !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionHeadRejectedEntryGuaranteeMissing !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedNoHeadMemoryOp != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedUnknownInterval != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedNonDirectMemoryOp !=
+             0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedTooFewOps != 0 ||
+         MemStats.MemoryExpansionPlanLinearRegionRejectedUnprofitable != 0 ||
          MemStats.SmallFrameCandidateTotal != 0 ||
          MemStats.SmallFramePrecheckedTotal != 0 ||
          MemStats.SmallFrameOffsetConstTotal != 0 ||
@@ -7491,11 +7673,88 @@ void EVMMirBuilder::dumpMemoryCompileStats() const {
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
   ZEN_LOG_DEBUG(
       "[EVM-MEM-SUMMARY] mload_expand=%llu mstore_expand=%llu "
-      "mstore8_expand=%llu mcopy_expand=%llu block_const_precheck=%llu "
+      "mstore8_expand=%llu mcopy_expand=%llu "
+      "mcopy_guaranteed_elision=%llu memory_dse_candidates=%llu "
+      "memory_dse_eliminated_writes=%llu memory_load_forward_candidates=%llu "
+      "memory_load_forwarded=%llu block_const_precheck=%llu "
       "block_linear_precheck=%llu prechecked_mload_ops=%llu "
-      "prechecked_mstore_ops=%llu prechecked_mcopy_ops=%llu "
-      "reload_mem_size=%llu get_mem_ptr=%llu mem_base_instance_loads=%llu "
-      "mem_base_cache_uses=%llu "
+      "prechecked_mstore_ops=%llu prechecked_mstore8_ops=%llu "
+      "prechecked_mcopy_ops=%llu memory_expansion_plan_count=%llu "
+      "memory_expansion_plan_precheck=%llu "
+      "memory_expansion_plan_grouping=%llu "
+      "memory_expansion_plan_linear_region=%llu "
+      "memory_expansion_plan_reusable=%llu "
+      "memory_expansion_plan_covered_ops=%llu "
+      "memory_expansion_plan_covered_mload_ops=%llu "
+      "memory_expansion_plan_covered_mstore_ops=%llu "
+      "memory_expansion_plan_covered_mstore8_ops=%llu "
+      "memory_expansion_plan_covered_mcopy_ops=%llu "
+      "memory_expansion_plan_required_size_sum=%llu "
+      "memory_expansion_plan_required_size_max=%llu "
+      "memory_expansion_plan_estimated_reduced_expansions=%llu "
+      "memory_expansion_plan_grouping_candidates=%llu "
+      "memory_expansion_plan_linear_region_candidates=%llu "
+      "memory_expansion_plan_precheck_candidates=%llu "
+      "memory_expansion_plan_rejected_no_candidate=%llu "
+      "memory_expansion_plan_rejected_unknown_interval=%llu "
+      "memory_expansion_plan_rejected_invalid_range=%llu "
+      "memory_expansion_plan_rejected_overflow=%llu "
+      "memory_expansion_plan_rejected_too_large=%llu "
+      "memory_expansion_plan_rejected_zero_size=%llu "
+      "memory_expansion_plan_rejected_unprofitable=%llu "
+      "memory_expansion_plan_linear_region_rejected_not_straight_line=%llu "
+      "memory_expansion_plan_linear_region_rejected_branching_head=%llu "
+      "memory_expansion_plan_linear_region_rejected_merge_successor=%llu "
+      "memory_expansion_plan_linear_region_rejected_backedge_or_non_forward=%"
+      "llu "
+      "memory_expansion_plan_linear_region_rejected_hard_barrier=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_msize=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_gas=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_call=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_create=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_return=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_revert=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_log=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_storage=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_selfdestruct=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_invalid=%llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_unknown_effect=%"
+      "llu "
+      "memory_expansion_plan_linear_region_rejected_barrier_escape=%llu "
+      "memory_expansion_plan_linear_region_rejected_no_head_memory_op=%llu "
+      "memory_expansion_plan_linear_region_rejected_unknown_interval=%llu "
+      "memory_expansion_plan_linear_region_rejected_non_direct_memory_op=%llu "
+      "memory_expansion_plan_linear_region_rejected_too_few_ops=%llu "
+      "memory_expansion_plan_linear_region_rejected_unprofitable=%llu "
+      "memory_expansion_plan_linear_region_prefix_candidate_blocks=%llu "
+      "memory_expansion_plan_linear_region_prefix_candidate_ops=%llu "
+      "memory_expansion_plan_linear_region_prefix_accepted_blocks=%llu "
+      "memory_expansion_plan_linear_region_prefix_accepted_ops=%llu "
+      "memory_expansion_plan_linear_region_prefix_rejected_too_short=%llu "
+      "memory_expansion_plan_linear_region_prefix_rejected_no_head_memory_op=%"
+      "llu "
+      "memory_expansion_plan_linear_region_prefix_branching_after_safe_prefix=%"
+      "llu "
+      "memory_expansion_plan_linear_region_prefix_merge_after_safe_prefix=%llu "
+      "memory_expansion_plan_linear_region_prefix_terminal_after_safe_prefix=%"
+      "llu "
+      "memory_expansion_plan_linear_region_prefix_missing_successor_block=%llu "
+      "memory_expansion_plan_linear_region_prefix_backedge_after_safe_prefix=%"
+      "llu "
+      "memory_expansion_plan_linear_region_prefix_barrier_after_safe_prefix=%"
+      "llu "
+      "memory_expansion_plan_linear_region_rejected_branching_head_no_safe_"
+      "prefix=%llu "
+      "memory_expansion_plan_linear_region_rejected_merge_successor_no_safe_"
+      "prefix=%llu "
+      "linear_region_head_candidate_blocks=%llu "
+      "linear_region_head_skipped_empty_blocks=%llu "
+      "linear_region_head_selected_non_entry_block=%llu "
+      "linear_region_head_rejected_predecessor_not_straight=%llu "
+      "linear_region_head_rejected_head_not_dominating_chain=%llu "
+      "linear_region_head_rejected_entry_guarantee_missing=%llu "
+      "reload_mem_size=%llu get_mem_ptr=%llu "
+      "mem_base_instance_loads=%llu mem_base_cache_uses=%llu "
       "linear_u64_addr_fast_ops=%llu linear_u64_mload_fast_ops=%llu "
       "linear_u64_mstore_fast_ops=%llu "
       "const_base_ptr_inits=%llu const_base_ptr_reuses=%llu "
@@ -7508,11 +7767,153 @@ void EVMMirBuilder::dumpMemoryCompileStats() const {
       static_cast<unsigned long long>(MemStats.MStoreExpandCount),
       static_cast<unsigned long long>(MemStats.MStore8ExpandCount),
       static_cast<unsigned long long>(MemStats.MCopyExpandCount),
+      static_cast<unsigned long long>(MemStats.MCopyGuaranteedElisionCount),
+      static_cast<unsigned long long>(MemStats.MemoryDSEStoreCandidates),
+      static_cast<unsigned long long>(MemStats.MemoryDSEEliminatedWrites),
+      static_cast<unsigned long long>(MemStats.MemoryLoadForwardCandidates),
+      static_cast<unsigned long long>(MemStats.MemoryLoadForwarded),
       static_cast<unsigned long long>(MemStats.BlockConstPrecheckCount),
       static_cast<unsigned long long>(MemStats.BlockLinearPrecheckCount),
       static_cast<unsigned long long>(MemStats.PrecheckedMLoadOpCount),
       static_cast<unsigned long long>(MemStats.PrecheckedMStoreOpCount),
+      static_cast<unsigned long long>(MemStats.PrecheckedMStore8OpCount),
       static_cast<unsigned long long>(MemStats.PrecheckedMCopyOpCount),
+      static_cast<unsigned long long>(MemStats.MemoryExpansionPlanCount),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanPrecheckCount),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanGroupingCount),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionCount),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanReusableCount),
+      static_cast<unsigned long long>(MemStats.MemoryExpansionPlanCoveredOps),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanCoveredMLoadOps),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanCoveredMStoreOps),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanCoveredMStore8Ops),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanCoveredMCopyOps),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanRequiredSizeSum),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanRequiredSizeMax),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanEstimatedReducedExpansions),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanGroupingCandidates),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionCandidates),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanPrecheckCandidates),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanRejectedNoCandidate),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanRejectedUnknownInterval),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanRejectedInvalidRange),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanRejectedOverflow),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanRejectedTooLarge),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanRejectedZeroSize),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanRejectedUnprofitable),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedNotStraightLine),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBranchingHead),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedMergeSuccessor),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBackedgeOrNonForward),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedHardBarrier),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierMSize),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierGas),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierCall),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierCreate),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierReturn),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierRevert),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierLog),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierStorage),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierSelfDestruct),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierInvalid),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierUnknownEffect),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierEscape),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedNoHeadMemoryOp),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedUnknownInterval),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedNonDirectMemoryOp),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedTooFewOps),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionRejectedUnprofitable),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionPrefixCandidateBlocks),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionPrefixCandidateOps),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionPrefixAcceptedBlocks),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionPrefixAcceptedOps),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionPrefixRejectedTooShort),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionPrefixRejectedNoHeadMemoryOp),
+      static_cast<unsigned long long>(
+          MemStats
+              .MemoryExpansionPlanLinearRegionPrefixBranchingAfterSafePrefix),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionPrefixMergeAfterSafePrefix),
+      static_cast<unsigned long long>(
+          MemStats
+              .MemoryExpansionPlanLinearRegionPrefixTerminalAfterSafePrefix),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionPrefixMissingSuccessorBlock),
+      static_cast<unsigned long long>(
+          MemStats
+              .MemoryExpansionPlanLinearRegionPrefixBackedgeAfterSafePrefix),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionPrefixBarrierAfterSafePrefix),
+      static_cast<unsigned long long>(
+          MemStats
+              .MemoryExpansionPlanLinearRegionRejectedBranchingHeadNoSafePrefix),
+      static_cast<unsigned long long>(
+          MemStats
+              .MemoryExpansionPlanLinearRegionRejectedMergeSuccessorNoSafePrefix),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionHeadCandidateBlocks),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionHeadSkippedEmptyBlocks),
+      static_cast<unsigned long long>(
+          MemStats.MemoryExpansionPlanLinearRegionHeadSelectedNonEntryBlock),
+      static_cast<unsigned long long>(
+          MemStats
+              .MemoryExpansionPlanLinearRegionHeadRejectedPredecessorNotStraight),
+      static_cast<unsigned long long>(
+          MemStats
+              .MemoryExpansionPlanLinearRegionHeadRejectedHeadNotDominatingChain),
+      static_cast<unsigned long long>(
+          MemStats
+              .MemoryExpansionPlanLinearRegionHeadRejectedEntryGuaranteeMissing),
       static_cast<unsigned long long>(MemStats.ReloadMemorySizeCount),
       static_cast<unsigned long long>(MemStats.GetMemoryDataPointerCount),
       static_cast<unsigned long long>(MemStats.MemoryBaseInstanceLoadCount),
@@ -7787,14 +8188,28 @@ void EVMMirBuilder::dumpMemoryCompileStats() const {
 #endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
 }
 
-void EVMMirBuilder::beginMemoryCompileBlock(uint64_t EntryPC) {
+void EVMMirBuilder::beginMemoryCompileBlock(uint64_t EntryPC,
+                                            uint64_t BodyEndPC) {
   CurBlockMemStats = MemoryBlockCompileStats();
   CurBlockConstPrecheckPlan = MemoryBlockConstPrecheckPlan();
   CurBlockLinearPrecheckPlan = MemoryBlockLinearPrecheckPlan();
   CurBlockLargeStaticWorkspacePrecheckPlan =
       MemoryBlockLargeStaticWorkspacePrecheckPlan();
   CurrentMemoryOpPC = 0;
+  CurrentBlockGuaranteedMinBytes = 0;
+  CurrentBlockMStoreValues.clear();
   CurBlockMemStats.Active = true;
+  if (MemoryExpansionPlans) {
+    CurrentBlockGuaranteedMinBytes =
+        MemoryExpansionPlans->getGuaranteedMinBytesAtEntry(EntryPC);
+    std::optional<MemoryExpansionPlan> Plan =
+        MemoryExpansionPlans->buildMemoryExpansionPlan(EntryPC, BodyEndPC);
+    noteMemoryExpansionPlanDiagnostics(
+        MemoryExpansionPlans->getLastDiagnostics());
+    if (Plan) {
+      applyMemoryExpansionPlan(*Plan);
+    }
+  }
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
   CurBlockMemStats.BlockSeqId = ++NextMemoryBlockSeqId;
   CurBlockMemStats.BlockEntryPC = EntryPC;
@@ -7805,7 +8220,8 @@ void EVMMirBuilder::beginMemoryCompileBlock(uint64_t EntryPC) {
 
 void EVMMirBuilder::setMemoryCompileBlockConstPrecheckPlan(
     uint64_t MaxRequiredSize, uint64_t CoveredDirectOps) {
-  if (!CurBlockMemStats.Active || CoveredDirectOps < 2) {
+  if (!CurBlockMemStats.Active || CoveredDirectOps < 2 ||
+      CurBlockConstPrecheckPlan.Active || CurBlockLinearPrecheckPlan.Active) {
     return;
   }
   CurBlockConstPrecheckPlan = MemoryBlockConstPrecheckPlan();
@@ -7815,10 +8231,223 @@ void EVMMirBuilder::setMemoryCompileBlockConstPrecheckPlan(
   CurBlockConstPrecheckPlan.CoveredDirectOpsRemaining = CoveredDirectOps;
 }
 
+void EVMMirBuilder::applyMemoryExpansionPlan(const MemoryExpansionPlan &Plan) {
+  if (Plan.CoveredOps < 2 || Plan.RequiredMemorySize == 0 || !Plan.Reusable) {
+    return;
+  }
+  noteMemoryExpansionPlan(Plan);
+  CurBlockConstPrecheckPlan = MemoryBlockConstPrecheckPlan();
+  CurBlockConstPrecheckPlan.Active = true;
+  CurBlockConstPrecheckPlan.MaxRequiredSize = Plan.RequiredMemorySize;
+  CurBlockConstPrecheckPlan.CoveredDirectOpsTotal = Plan.CoveredOps;
+  CurBlockConstPrecheckPlan.CoveredDirectOpsRemaining = Plan.CoveredOps;
+  CurBlockConstPrecheckPlan.CoveredOpIds = Plan.CoveredOpIds;
+  CurBlockConstPrecheckPlan.HasOpPCRange = true;
+  CurBlockConstPrecheckPlan.FirstOpPC = Plan.FirstOpPC;
+  CurBlockConstPrecheckPlan.LastOpPC = Plan.LastOpPC;
+}
+
+void EVMMirBuilder::noteMemoryExpansionPlan(const MemoryExpansionPlan &Plan) {
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  uint64_t RequiredBegin = 0;
+  if (Plan.RequiredInterval.Addr.Kind == AddressBaseKind::Const &&
+      Plan.RequiredInterval.Addr.Offset >= 0) {
+    RequiredBegin = static_cast<uint64_t>(Plan.RequiredInterval.Addr.Offset);
+  }
+
+  uint64_t CoveredMLoad = 0;
+  uint64_t CoveredMStore = 0;
+  uint64_t CoveredMStore8 = 0;
+  uint64_t CoveredMCopy = 0;
+  for (const MemoryOp &Op : MemoryFactsData.Ops) {
+    if (Op.Pc < Plan.FirstOpPC) {
+      continue;
+    }
+    if (Op.Pc > Plan.LastOpPC) {
+      break;
+    }
+    switch (Op.Kind) {
+    case MemoryOpKind::MLoad:
+      ++CoveredMLoad;
+      break;
+    case MemoryOpKind::MStore:
+      ++CoveredMStore;
+      break;
+    case MemoryOpKind::MStore8:
+      ++CoveredMStore8;
+      break;
+    case MemoryOpKind::MCopy:
+      ++CoveredMCopy;
+      break;
+    default:
+      break;
+    }
+  }
+
+  ++MemStats.MemoryExpansionPlanCount;
+  if (Plan.ExpansionKind == MemoryExpansionKind::ContiguousGroup) {
+    ++MemStats.MemoryExpansionPlanGroupingCount;
+  } else if (Plan.ExpansionKind == MemoryExpansionKind::LinearRegion) {
+    ++MemStats.MemoryExpansionPlanLinearRegionCount;
+  } else {
+    ++MemStats.MemoryExpansionPlanPrecheckCount;
+  }
+  if (Plan.Reusable) {
+    ++MemStats.MemoryExpansionPlanReusableCount;
+  }
+  MemStats.MemoryExpansionPlanCoveredOps += Plan.CoveredOps;
+  MemStats.MemoryExpansionPlanCoveredMLoadOps += CoveredMLoad;
+  MemStats.MemoryExpansionPlanCoveredMStoreOps += CoveredMStore;
+  MemStats.MemoryExpansionPlanCoveredMStore8Ops += CoveredMStore8;
+  MemStats.MemoryExpansionPlanCoveredMCopyOps += CoveredMCopy;
+  MemStats.MemoryExpansionPlanRequiredSizeSum += Plan.RequiredMemorySize;
+  MemStats.MemoryExpansionPlanRequiredSizeMax = std::max(
+      MemStats.MemoryExpansionPlanRequiredSizeMax, Plan.RequiredMemorySize);
+  MemStats.MemoryExpansionPlanEstimatedReducedExpansions +=
+      Plan.EstimatedReducedExpansions;
+
+  if (CurBlockMemStats.Active) {
+    CurBlockMemStats.HasMemoryExpansionPlan = true;
+    switch (Plan.ExpansionKind) {
+    case MemoryExpansionKind::ProvenRange:
+      CurBlockMemStats.MemoryExpansionPlanKind = 1;
+      break;
+    case MemoryExpansionKind::ContiguousGroup:
+      CurBlockMemStats.MemoryExpansionPlanKind = 2;
+      break;
+    case MemoryExpansionKind::LinearRegion:
+      CurBlockMemStats.MemoryExpansionPlanKind = 3;
+      break;
+    }
+    CurBlockMemStats.MemoryExpansionPlanReusable = Plan.Reusable ? 1 : 0;
+    CurBlockMemStats.MemoryExpansionPlanCoveredOps = Plan.CoveredOps;
+    CurBlockMemStats.MemoryExpansionPlanCoveredMLoadOps = CoveredMLoad;
+    CurBlockMemStats.MemoryExpansionPlanCoveredMStoreOps = CoveredMStore;
+    CurBlockMemStats.MemoryExpansionPlanCoveredMStore8Ops = CoveredMStore8;
+    CurBlockMemStats.MemoryExpansionPlanCoveredMCopyOps = CoveredMCopy;
+    CurBlockMemStats.MemoryExpansionPlanRequiredBegin = RequiredBegin;
+    CurBlockMemStats.MemoryExpansionPlanRequiredEnd = Plan.RequiredMemorySize;
+    CurBlockMemStats.MemoryExpansionPlanRequiredSize =
+        Plan.RequiredMemorySize >= RequiredBegin
+            ? Plan.RequiredMemorySize - RequiredBegin
+            : 0;
+    CurBlockMemStats.MemoryExpansionPlanEstimatedReducedExpansions =
+        Plan.EstimatedReducedExpansions;
+  }
+#else
+  (void)Plan;
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+}
+
+void EVMMirBuilder::noteMemoryExpansionPlanDiagnostics(
+    const MemoryExpansionPlanDiagnostics &Diag) {
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  MemStats.MemoryExpansionPlanGroupingCandidates += Diag.GroupingCandidates;
+  MemStats.MemoryExpansionPlanLinearRegionCandidates +=
+      Diag.LinearRegionCandidates;
+  MemStats.MemoryExpansionPlanPrecheckCandidates += Diag.PrecheckCandidates;
+  MemStats.MemoryExpansionPlanRejectedNoCandidate += Diag.RejectedNoCandidate;
+  MemStats.MemoryExpansionPlanRejectedUnknownInterval +=
+      Diag.RejectedUnknownInterval;
+  MemStats.MemoryExpansionPlanRejectedInvalidRange += Diag.RejectedInvalidRange;
+  MemStats.MemoryExpansionPlanRejectedOverflow += Diag.RejectedOverflow;
+  MemStats.MemoryExpansionPlanRejectedTooLarge += Diag.RejectedTooLarge;
+  MemStats.MemoryExpansionPlanRejectedZeroSize += Diag.RejectedZeroSize;
+  MemStats.MemoryExpansionPlanRejectedUnprofitable += Diag.RejectedUnprofitable;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedNotStraightLine +=
+      Diag.LinearRegionRejectedNotStraightLine;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBranchingHead +=
+      Diag.LinearRegionRejectedBranchingHead;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedMergeSuccessor +=
+      Diag.LinearRegionRejectedMergeSuccessor;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBackedgeOrNonForward +=
+      Diag.LinearRegionRejectedBackedgeOrNonForward;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedHardBarrier +=
+      Diag.LinearRegionRejectedHardBarrier;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierMSize +=
+      Diag.LinearRegionRejectedBarrierMSize;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierGas +=
+      Diag.LinearRegionRejectedBarrierGas;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierCall +=
+      Diag.LinearRegionRejectedBarrierCall;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierCreate +=
+      Diag.LinearRegionRejectedBarrierCreate;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierReturn +=
+      Diag.LinearRegionRejectedBarrierReturn;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierRevert +=
+      Diag.LinearRegionRejectedBarrierRevert;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierLog +=
+      Diag.LinearRegionRejectedBarrierLog;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierStorage +=
+      Diag.LinearRegionRejectedBarrierStorage;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierSelfDestruct +=
+      Diag.LinearRegionRejectedBarrierSelfDestruct;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierInvalid +=
+      Diag.LinearRegionRejectedBarrierInvalid;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierUnknownEffect +=
+      Diag.LinearRegionRejectedBarrierUnknownEffect;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBarrierEscape +=
+      Diag.LinearRegionRejectedBarrierEscape;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedNoHeadMemoryOp +=
+      Diag.LinearRegionRejectedNoHeadMemoryOp;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedUnknownInterval +=
+      Diag.LinearRegionRejectedUnknownInterval;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedNonDirectMemoryOp +=
+      Diag.LinearRegionRejectedNonDirectMemoryOp;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedTooFewOps +=
+      Diag.LinearRegionRejectedTooFewOps;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedUnprofitable +=
+      Diag.LinearRegionRejectedUnprofitable;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixCandidateBlocks +=
+      Diag.LinearRegionPrefixCandidateBlocks;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixCandidateOps +=
+      Diag.LinearRegionPrefixCandidateOps;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixAcceptedBlocks +=
+      Diag.LinearRegionPrefixAcceptedBlocks;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixAcceptedOps +=
+      Diag.LinearRegionPrefixAcceptedOps;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixRejectedTooShort +=
+      Diag.LinearRegionPrefixRejectedTooShort;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixRejectedNoHeadMemoryOp +=
+      Diag.LinearRegionPrefixRejectedNoHeadMemoryOp;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixBranchingAfterSafePrefix +=
+      Diag.LinearRegionPrefixBranchingAfterSafePrefix;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixMergeAfterSafePrefix +=
+      Diag.LinearRegionPrefixMergeAfterSafePrefix;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixTerminalAfterSafePrefix +=
+      Diag.LinearRegionPrefixTerminalAfterSafePrefix;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixMissingSuccessorBlock +=
+      Diag.LinearRegionPrefixMissingSuccessorBlock;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixBackedgeAfterSafePrefix +=
+      Diag.LinearRegionPrefixBackedgeAfterSafePrefix;
+  MemStats.MemoryExpansionPlanLinearRegionPrefixBarrierAfterSafePrefix +=
+      Diag.LinearRegionPrefixBarrierAfterSafePrefix;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedBranchingHeadNoSafePrefix +=
+      Diag.LinearRegionRejectedBranchingHeadNoSafePrefix;
+  MemStats.MemoryExpansionPlanLinearRegionRejectedMergeSuccessorNoSafePrefix +=
+      Diag.LinearRegionRejectedMergeSuccessorNoSafePrefix;
+  MemStats.MemoryExpansionPlanLinearRegionHeadCandidateBlocks +=
+      Diag.LinearRegionHeadCandidateBlocks;
+  MemStats.MemoryExpansionPlanLinearRegionHeadSkippedEmptyBlocks +=
+      Diag.LinearRegionHeadSkippedEmptyBlocks;
+  MemStats.MemoryExpansionPlanLinearRegionHeadSelectedNonEntryBlock +=
+      Diag.LinearRegionHeadSelectedNonEntryBlock;
+  MemStats.MemoryExpansionPlanLinearRegionHeadRejectedPredecessorNotStraight +=
+      Diag.LinearRegionHeadRejectedPredecessorNotStraight;
+  MemStats.MemoryExpansionPlanLinearRegionHeadRejectedHeadNotDominatingChain +=
+      Diag.LinearRegionHeadRejectedHeadNotDominatingChain;
+  MemStats.MemoryExpansionPlanLinearRegionHeadRejectedEntryGuaranteeMissing +=
+      Diag.LinearRegionHeadRejectedEntryGuaranteeMissing;
+#else
+  (void)Diag;
+#endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+}
+
 void EVMMirBuilder::setMemoryCompileBlockLinearPrecheckPlan(
     uint64_t AccessWidth, uint64_t CoveredDirectOps,
     bool ValueEqualsFirstAddr) {
-  if (!CurBlockMemStats.Active || CoveredDirectOps < 2) {
+  if (!CurBlockMemStats.Active || CoveredDirectOps < 2 ||
+      CurBlockConstPrecheckPlan.Active || CurBlockLinearPrecheckPlan.Active) {
     return;
   }
   CurBlockLinearPrecheckPlan = MemoryBlockLinearPrecheckPlan();
@@ -7975,6 +8604,7 @@ void EVMMirBuilder::noteLargeStaticWorkspaceVerifierResult(
 }
 
 void EVMMirBuilder::noteMemoryOpcodeInBlock(evmc_opcode Opcode, uint64_t PC) {
+  CurrentMemoryOpPC = PC;
   if (!CurBlockMemStats.Active) {
     return;
   }
@@ -8178,9 +8808,21 @@ void EVMMirBuilder::endMemoryCompileBlock() {
       "mem_base_cache_uses=%llu reload_mem_size=%llu "
       "block_const_precheck=%llu block_linear_precheck=%llu "
       "prechecked_direct_ops=%llu prechecked_mload_ops=%llu "
-      "prechecked_mstore_ops=%llu prechecked_mcopy_ops=%llu "
-      "linear_u64_addr_fast_ops=%llu linear_u64_mload_fast_ops=%llu "
-      "linear_u64_mstore_fast_ops=%llu "
+      "prechecked_mstore_ops=%llu prechecked_mstore8_ops=%llu "
+      "prechecked_mcopy_ops=%llu memory_expansion_plan=%d "
+      "memory_expansion_plan_kind=%llu "
+      "memory_expansion_plan_reusable=%llu "
+      "memory_expansion_plan_covered_ops=%llu "
+      "memory_expansion_plan_covered_mload_ops=%llu "
+      "memory_expansion_plan_covered_mstore_ops=%llu "
+      "memory_expansion_plan_covered_mstore8_ops=%llu "
+      "memory_expansion_plan_covered_mcopy_ops=%llu "
+      "memory_expansion_plan_required_begin=%llu "
+      "memory_expansion_plan_required_end=%llu "
+      "memory_expansion_plan_required_size=%llu "
+      "memory_expansion_plan_estimated_reduced_expansions=%llu "
+      "linear_u64_addr_fast_ops=%llu "
+      "linear_u64_mload_fast_ops=%llu linear_u64_mstore_fast_ops=%llu "
       "const_base_ptr_inits=%llu const_base_ptr_reuses=%llu "
       "const_disp_bytes32_mload_ops=%llu const_disp_bytes32_mstore_ops=%llu "
       "disp_bytes32_mload_ops=%llu disp_bytes32_mstore_ops=%llu "
@@ -8224,7 +8866,31 @@ void EVMMirBuilder::endMemoryCompileBlock() {
       static_cast<unsigned long long>(CurBlockMemStats.PrecheckedDirectOpCount),
       static_cast<unsigned long long>(CurBlockMemStats.PrecheckedMLoadOpCount),
       static_cast<unsigned long long>(CurBlockMemStats.PrecheckedMStoreOpCount),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.PrecheckedMStore8OpCount),
       static_cast<unsigned long long>(CurBlockMemStats.PrecheckedMCopyOpCount),
+      CurBlockMemStats.HasMemoryExpansionPlan ? 1 : 0,
+      static_cast<unsigned long long>(CurBlockMemStats.MemoryExpansionPlanKind),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryExpansionPlanReusable),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryExpansionPlanCoveredOps),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryExpansionPlanCoveredMLoadOps),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryExpansionPlanCoveredMStoreOps),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryExpansionPlanCoveredMStore8Ops),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryExpansionPlanCoveredMCopyOps),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryExpansionPlanRequiredBegin),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryExpansionPlanRequiredEnd),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryExpansionPlanRequiredSize),
+      static_cast<unsigned long long>(
+          CurBlockMemStats.MemoryExpansionPlanEstimatedReducedExpansions),
       static_cast<unsigned long long>(
           CurBlockMemStats.LinearU64AddrFastPathCount),
       static_cast<unsigned long long>(
@@ -8270,12 +8936,57 @@ void EVMMirBuilder::endMemoryCompileBlock() {
   CurBlockLargeStaticWorkspacePrecheckPlan =
       MemoryBlockLargeStaticWorkspacePrecheckPlan();
   CurrentMemoryOpPC = 0;
+  CurrentBlockGuaranteedMinBytes = 0;
+  CurrentBlockMStoreValues.clear();
+}
+
+bool EVMMirBuilder::tryUseGuaranteedMinBytesExpansionElision(
+    bool OffsetWasConst, uint64_t ConstOffset, uint64_t AccessSize) {
+  if (!OffsetWasConst || AccessSize == 0) {
+    return false;
+  }
+  if (AccessSize > std::numeric_limits<uint64_t>::max() - ConstOffset) {
+    return false;
+  }
+  const uint64_t RequiredBytes = ConstOffset + AccessSize;
+  uint64_t GuaranteedBytes = CurrentBlockGuaranteedMinBytes;
+  if (MemoryExpansionPlans) {
+    GuaranteedBytes = std::max(
+        GuaranteedBytes,
+        MemoryExpansionPlans->getGuaranteedMinBytesBeforeOp(CurrentMemoryOpPC));
+  }
+  return RequiredBytes <= GuaranteedBytes;
 }
 
 bool EVMMirBuilder::tryConsumeConstBlockMemoryPrecheck() {
   if (!CurBlockConstPrecheckPlan.Active ||
       CurBlockConstPrecheckPlan.CoveredDirectOpsRemaining == 0) {
     return false;
+  }
+  if (CurBlockConstPrecheckPlan.HasOpPCRange) {
+    if (CurrentMemoryOpPC < CurBlockConstPrecheckPlan.FirstOpPC) {
+      return false;
+    }
+    if (CurrentMemoryOpPC > CurBlockConstPrecheckPlan.LastOpPC) {
+      CurBlockConstPrecheckPlan.Active = false;
+      return false;
+    }
+  }
+  if (!CurBlockConstPrecheckPlan.CoveredOpIds.empty()) {
+    const MemoryOp *CurrentOp = nullptr;
+    for (const MemoryOp &Op : MemoryFactsData.Ops) {
+      if (Op.Pc == CurrentMemoryOpPC) {
+        CurrentOp = &Op;
+        break;
+      }
+    }
+    if (CurrentOp == nullptr ||
+        std::find(CurBlockConstPrecheckPlan.CoveredOpIds.begin(),
+                  CurBlockConstPrecheckPlan.CoveredOpIds.end(),
+                  CurrentOp->Id) ==
+            CurBlockConstPrecheckPlan.CoveredOpIds.end()) {
+      return false;
+    }
   }
 
   if (!CurBlockConstPrecheckPlan.Emitted) {

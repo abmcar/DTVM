@@ -6,6 +6,8 @@
 
 #include "compiler/evm_frontend/evm_analyzer.h"
 #include "compiler/evm_frontend/evm_lifted_stack_lifter.h"
+#include "compiler/evm_frontend/evm_memory_analysis.h"
+#include "compiler/evm_frontend/evm_memory_facts.h"
 #include "compiler/evm_frontend/evm_mir_compiler.h"
 #include "evmc/evmc.h"
 #include "evmc/instructions.h"
@@ -119,6 +121,65 @@ private:
       : std::true_type {};
 
   template <typename T, typename = void>
+  struct HasSetMemoryFacts : std::false_type {};
+  template <typename T>
+  struct HasSetMemoryFacts<
+      T, std::void_t<decltype(std::declval<T &>().setMemoryFacts(
+             std::declval<const MemoryFacts &>()))>> : std::true_type {};
+
+  template <typename T, typename = void>
+  struct HasBeginMemoryCompileBlockWithBodyEnd : std::false_type {};
+  template <typename T>
+  struct HasBeginMemoryCompileBlockWithBodyEnd<
+      T, std::void_t<decltype(std::declval<T &>().beginMemoryCompileBlock(
+             uint64_t{}, uint64_t{}))>> : std::true_type {};
+
+  void setMemoryFactsCompat() {
+    if constexpr (HasSetMemoryFacts<IRBuilder>::value) {
+      Builder.setMemoryFacts(MemoryFacts.getFacts());
+    }
+  }
+
+  void buildMemoryFacts(const EVMAnalyzer &Analyzer, const uint8_t *Bytecode,
+                        size_t BytecodeSize) {
+    MemoryFacts.reset();
+    MemoryEntryAddressAnalysis EntryAddresses(Analyzer, Bytecode, BytecodeSize);
+    const auto &BlockInfos = Analyzer.getBlockInfos();
+
+    for (const auto &[EntryPC, BlockInfo] : BlockInfos) {
+      const int32_t EntryDepth = std::max(BlockInfo.ResolvedEntryStackDepth, 0);
+      std::vector<MemoryEntryValue> EntryValues = EntryAddresses.getEntryValues(
+          EntryPC, static_cast<uint32_t>(EntryDepth));
+      MemoryFacts.beginBlock(EntryPC, BlockInfo.BodyStartPC,
+                             BlockInfo.BodyEndPC, EntryValues,
+                             BlockInfo.Successors, BlockInfo.Predecessors);
+
+      size_t ScanPC = static_cast<size_t>(BlockInfo.BodyStartPC);
+      const size_t EndPC = std::min<size_t>(BlockInfo.BodyEndPC, BytecodeSize);
+      while (ScanPC < EndPC) {
+        evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[ScanPC]);
+        MemoryFacts.observeOpcode(Opcode, static_cast<uint64_t>(ScanPC),
+                                  Bytecode, BytecodeSize);
+        ++ScanPC;
+        if (Opcode >= OP_PUSH0 && Opcode <= OP_PUSH32) {
+          ScanPC +=
+              static_cast<uint8_t>(Opcode) - static_cast<uint8_t>(OP_PUSH0);
+        }
+      }
+    }
+    MemoryFacts.endBlock();
+  }
+
+  void beginMemoryCompileBlockCompat(uint64_t EntryPC, uint64_t BodyEndPC) {
+    if constexpr (HasBeginMemoryCompileBlockWithBodyEnd<IRBuilder>::value) {
+      Builder.beginMemoryCompileBlock(EntryPC, BodyEndPC);
+    } else {
+      (void)BodyEndPC;
+      Builder.beginMemoryCompileBlock(EntryPC);
+    }
+  }
+
+  template <typename T, typename = void>
   struct HasHandleJumpWithCandidates : std::false_type {};
   template <typename T>
   struct HasHandleJumpWithCandidates<
@@ -213,6 +274,10 @@ private:
         Analyzer.setResolvedJumpTargets(Ctx->getResolvedJumpTargets());
       }
       Analyzer.analyze(Bytecode, BytecodeSize);
+      if constexpr (HasSetMemoryFacts<IRBuilder>::value) {
+        buildMemoryFacts(Analyzer, Bytecode, BytecodeSize);
+        setMemoryFactsCompat();
+      }
       initializeLiftedBlocks(Analyzer);
 
       const uint8_t *Ip = Bytecode;
@@ -276,7 +341,6 @@ private:
           }
           Builder.meterOpcode(Opcode, PC);
         }
-
         switch (Opcode) {
         case OP_STOP:
           handleEndBlock();
@@ -1092,7 +1156,8 @@ private:
   void handleBeginBlock(EVMAnalyzer &Analyzer) {
     const auto &BlockInfos = Analyzer.getBlockInfos();
     ZEN_ASSERT(BlockInfos.count(PC) > 0 && "Block info not found");
-    Builder.beginMemoryCompileBlock(PC);
+    const auto &BlockInfo = BlockInfos.at(PC);
+    beginMemoryCompileBlockCompat(PC, BlockInfo.BodyEndPC);
     CurBlockLinearPrecheckPlan = BlockLinearPrecheckPlan();
     const Byte *Bytecode = Ctx->getBytecode();
     size_t BytecodeSize = Ctx->getBytecodeSize();
@@ -1143,7 +1208,6 @@ private:
           LargeStaticWorkspace.LoweringCoveredMStore8Ops);
     }
 #endif // ZEN_ENABLE_EVM_MEM_LARGE_STATIC_WORKSPACE_LOWERING
-    const auto &BlockInfo = BlockInfos.at(PC);
     CurrentBlockEntryPC = PC;
     registerCurrentBlockPC(PC);
     bool LiftedBlock = isLiftedBlock(PC);
@@ -3186,6 +3250,7 @@ private:
   EvalStack Stack;
   BlockLinearPrecheckPlan CurBlockLinearPrecheckPlan;
   StackLifterType StackLifter;
+  MemoryFactsBuilder MemoryFacts;
   bool InDeadCode = false;
   uint64_t PC = 0;
   uint64_t CurrentBlockEntryPC = 0;
