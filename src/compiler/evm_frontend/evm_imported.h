@@ -147,11 +147,15 @@ struct RuntimeFunctions {
   CreateFn HandleCreate;
   Create2Fn HandleCreate2;
   CallFn HandleCall;
+  CallFn HandleCallNoExpand;
   CallFn HandleCallCode;
+  CallFn HandleCallCodeNoExpand;
   VoidWithUInt64UInt64Fn SetReturn;
   VoidWithUInt64UInt64Fn SetReturnNoExpand;
   DelegateCallFn HandleDelegateCall;
+  DelegateCallFn HandleDelegateCallNoExpand;
   DelegateCallFn HandleStaticCall;
+  DelegateCallFn HandleStaticCallNoExpand;
   VoidWithUInt64UInt64Fn SetRevert;
   VoidWithUInt64UInt64Fn SetRevertNoExpand;
   VoidFn HandleInvalid;
@@ -285,10 +289,20 @@ uint64_t evmHandleCall(zen::runtime::EVMInstance *Instance, uint64_t Gas,
                        const uint8_t *ToAddr, const intx::uint256 &Value,
                        uint64_t ArgsOffset, uint64_t ArgsSize,
                        uint64_t RetOffset, uint64_t RetSize);
+uint64_t evmHandleCallNoExpand(zen::runtime::EVMInstance *Instance,
+                               uint64_t Gas, const uint8_t *ToAddr,
+                               const intx::uint256 &Value, uint64_t ArgsOffset,
+                               uint64_t ArgsSize, uint64_t RetOffset,
+                               uint64_t RetSize);
 uint64_t evmHandleCallCode(zen::runtime::EVMInstance *Instance, uint64_t Gas,
                            const uint8_t *ToAddr, const intx::uint256 &Value,
                            uint64_t ArgsOffset, uint64_t ArgsSize,
                            uint64_t RetOffset, uint64_t RetSize);
+uint64_t evmHandleCallCodeNoExpand(zen::runtime::EVMInstance *Instance,
+                                   uint64_t Gas, const uint8_t *ToAddr,
+                                   const intx::uint256 &Value,
+                                   uint64_t ArgsOffset, uint64_t ArgsSize,
+                                   uint64_t RetOffset, uint64_t RetSize);
 void evmSetReturn(zen::runtime::EVMInstance *Instance, uint64_t MemOffset,
                   uint64_t Length);
 void evmSetReturnNoExpand(zen::runtime::EVMInstance *Instance,
@@ -297,10 +311,18 @@ uint64_t evmHandleDelegateCall(zen::runtime::EVMInstance *Instance,
                                uint64_t Gas, const uint8_t *ToAddr,
                                uint64_t ArgsOffset, uint64_t ArgsSize,
                                uint64_t RetOffset, uint64_t RetSize);
+uint64_t evmHandleDelegateCallNoExpand(zen::runtime::EVMInstance *Instance,
+                                       uint64_t Gas, const uint8_t *ToAddr,
+                                       uint64_t ArgsOffset, uint64_t ArgsSize,
+                                       uint64_t RetOffset, uint64_t RetSize);
 uint64_t evmHandleStaticCall(zen::runtime::EVMInstance *Instance, uint64_t Gas,
                              const uint8_t *ToAddr, uint64_t ArgsOffset,
                              uint64_t ArgsSize, uint64_t RetOffset,
                              uint64_t RetSize);
+uint64_t evmHandleStaticCallNoExpand(zen::runtime::EVMInstance *Instance,
+                                     uint64_t Gas, const uint8_t *ToAddr,
+                                     uint64_t ArgsOffset, uint64_t ArgsSize,
+                                     uint64_t RetOffset, uint64_t RetSize);
 void evmSetRevert(zen::runtime::EVMInstance *Instance, uint64_t Offset,
                   uint64_t Size);
 void evmSetRevertNoExpand(zen::runtime::EVMInstance *Instance, uint64_t Offset,

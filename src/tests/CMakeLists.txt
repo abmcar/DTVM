@@ -72,6 +72,7 @@ if(ZEN_ENABLE_SPEC_TEST)
       )
       add_executable(evmRangeAnalyzerTests evm_range_analyzer_tests.cpp)
       add_executable(evmDifferentialTests evm_differential_tests.cpp)
+      target_sources(evmJitFrontendTests PRIVATE evm_call_memory_tests.cpp)
       add_executable(
         evmMemoryExecuteOnlyBench evm_memory_execute_only_bench.cpp
       )

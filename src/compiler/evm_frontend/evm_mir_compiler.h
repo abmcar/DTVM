@@ -1855,6 +1855,10 @@ private:
   bool tryUseGuaranteedMinBytesExpansionElision(bool OffsetWasConst,
                                                 uint64_t ConstOffset,
                                                 uint64_t AccessSize);
+  bool canUseGuaranteedCallMemoryRanges(const Operand &ArgsOffset,
+                                        const Operand &ArgsSize,
+                                        const Operand &RetOffset,
+                                        const Operand &RetSize);
   void applyMemoryExpansionPlan(const MemoryExpansionPlan &Plan);
   void noteMemoryExpansionPlan(const MemoryExpansionPlan &Plan);
   void noteMemoryExpansionPlanDiagnostics(

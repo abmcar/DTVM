@@ -5598,11 +5598,39 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleCreate2(Operand ValueOp,
   return Result;
 }
 
+bool EVMMirBuilder::canUseGuaranteedCallMemoryRanges(const Operand &ArgsOffset,
+                                                     const Operand &ArgsSize,
+                                                     const Operand &RetOffset,
+                                                     const Operand &RetSize) {
+  const auto IsCovered = [this](const Operand &Offset, const Operand &Size) {
+    if (Size.isZeroConstant()) {
+      return true;
+    }
+    if (!Offset.isConstU64() || !Size.isConstU64()) {
+      return false;
+    }
+    return tryUseGuaranteedMinBytesExpansionElision(
+        true, Offset.getConstValue()[0], Size.getConstValue()[0]);
+  };
+
+  const bool CanReuse =
+      IsCovered(ArgsOffset, ArgsSize) && IsCovered(RetOffset, RetSize);
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+  if (CanReuse) {
+    ZEN_LOG_DEBUG("[EVM-CALL-MEMORY-PROOF] pc=%llu",
+                  static_cast<unsigned long long>(CurrentMemoryOpPC));
+  }
+#endif
+  return CanReuse;
+}
+
 typename EVMMirBuilder::Operand
 EVMMirBuilder::handleCall(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
                           Operand ArgsOffsetOp, Operand ArgsSizeOp,
                           Operand RetOffsetOp, Operand RetSizeOp) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  const bool UsePreparedMemory = canUseGuaranteedCallMemoryRanges(
+      ArgsOffsetOp, ArgsSizeOp, RetOffsetOp, RetSizeOp);
   // When gas value exceeds 64 bits, use max uint64 as fallback.
   // The runtime will cap it to available gas per EIP-150.
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
@@ -5617,8 +5645,10 @@ EVMMirBuilder::handleCall(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
       callRuntimeForWithErrorCheck<uint64_t, uint64_t, const uint8_t *,
                                    const intx::uint256 &, uint64_t, uint64_t,
                                    uint64_t, uint64_t>(
-          RuntimeFunctions.HandleCall, GasOp, ToAddrOp, ValueOp, ArgsOffsetOp,
-          ArgsSizeOp, RetOffsetOp, RetSizeOp);
+          UsePreparedMemory ? RuntimeFunctions.HandleCallNoExpand
+                            : RuntimeFunctions.HandleCall,
+          GasOp, ToAddrOp, ValueOp, ArgsOffsetOp, ArgsSizeOp, RetOffsetOp,
+          RetSizeOp);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
@@ -5631,6 +5661,8 @@ EVMMirBuilder::handleCallCode(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
                               Operand ArgsOffsetOp, Operand ArgsSizeOp,
                               Operand RetOffsetOp, Operand RetSizeOp) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  const bool UsePreparedMemory = canUseGuaranteedCallMemoryRanges(
+      ArgsOffsetOp, ArgsSizeOp, RetOffsetOp, RetSizeOp);
   // When gas value exceeds 64 bits, use max uint64 as fallback.
   // The runtime will cap it to available gas per EIP-150.
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
@@ -5645,8 +5677,10 @@ EVMMirBuilder::handleCallCode(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
       callRuntimeForWithErrorCheck<uint64_t, uint64_t, const uint8_t *,
                                    const intx::uint256 &, uint64_t, uint64_t,
                                    uint64_t, uint64_t>(
-          RuntimeFunctions.HandleCallCode, GasOp, ToAddrOp, ValueOp,
-          ArgsOffsetOp, ArgsSizeOp, RetOffsetOp, RetSizeOp);
+          UsePreparedMemory ? RuntimeFunctions.HandleCallCodeNoExpand
+                            : RuntimeFunctions.HandleCallCode,
+          GasOp, ToAddrOp, ValueOp, ArgsOffsetOp, ArgsSizeOp, RetOffsetOp,
+          RetSizeOp);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
@@ -5688,6 +5722,8 @@ EVMMirBuilder::handleDelegateCall(Operand GasOp, Operand ToAddrOp,
                                   Operand ArgsOffsetOp, Operand ArgsSizeOp,
                                   Operand RetOffsetOp, Operand RetSizeOp) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  const bool UsePreparedMemory = canUseGuaranteedCallMemoryRanges(
+      ArgsOffsetOp, ArgsSizeOp, RetOffsetOp, RetSizeOp);
   // When gas value exceeds 64 bits, use max uint64 as fallback.
   // The runtime will cap it to available gas per EIP-150.
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
@@ -5701,8 +5737,9 @@ EVMMirBuilder::handleDelegateCall(Operand GasOp, Operand ToAddrOp,
   auto Result =
       callRuntimeForWithErrorCheck<uint64_t, uint64_t, const uint8_t *,
                                    uint64_t, uint64_t, uint64_t, uint64_t>(
-          RuntimeFunctions.HandleDelegateCall, GasOp, ToAddrOp, ArgsOffsetOp,
-          ArgsSizeOp, RetOffsetOp, RetSizeOp);
+          UsePreparedMemory ? RuntimeFunctions.HandleDelegateCallNoExpand
+                            : RuntimeFunctions.HandleDelegateCall,
+          GasOp, ToAddrOp, ArgsOffsetOp, ArgsSizeOp, RetOffsetOp, RetSizeOp);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
@@ -5715,6 +5752,8 @@ EVMMirBuilder::handleStaticCall(Operand GasOp, Operand ToAddrOp,
                                 Operand ArgsOffsetOp, Operand ArgsSizeOp,
                                 Operand RetOffsetOp, Operand RetSizeOp) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
+  const bool UsePreparedMemory = canUseGuaranteedCallMemoryRanges(
+      ArgsOffsetOp, ArgsSizeOp, RetOffsetOp, RetSizeOp);
   // When gas value exceeds 64 bits, use max uint64 as fallback.
   // The runtime will cap it to available gas per EIP-150.
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
@@ -5728,8 +5767,9 @@ EVMMirBuilder::handleStaticCall(Operand GasOp, Operand ToAddrOp,
   auto Result =
       callRuntimeForWithErrorCheck<uint64_t, uint64_t, const uint8_t *,
                                    uint64_t, uint64_t, uint64_t, uint64_t>(
-          RuntimeFunctions.HandleStaticCall, GasOp, ToAddrOp, ArgsOffsetOp,
-          ArgsSizeOp, RetOffsetOp, RetSizeOp);
+          UsePreparedMemory ? RuntimeFunctions.HandleStaticCallNoExpand
+                            : RuntimeFunctions.HandleStaticCall,
+          GasOp, ToAddrOp, ArgsOffsetOp, ArgsSizeOp, RetOffsetOp, RetSizeOp);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif

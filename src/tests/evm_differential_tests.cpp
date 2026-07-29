@@ -1245,6 +1245,58 @@ std::vector<uint8_t> log0StaticHighOffsetBytecode() {
   return Code;
 }
 
+std::vector<uint8_t> staticCallPreparedMemoryBytecode() {
+  std::vector<uint8_t> Code;
+  appendPush32Pattern(Code, 0x21);
+  Code.insert(Code.end(), {0x60, 0x80, 0x52}); // MSTORE(0x80, pattern)
+  Code.insert(Code.end(), {0x5f, 0x60, 0xa0, 0x52});
+  // Transfer to a successor block so the CALL consumes a propagated CFG fact.
+  Code.push_back(0x60);
+  const size_t JumpDestImmediate = Code.size();
+  Code.push_back(0x00);
+  Code.push_back(0x56);
+  Code[JumpDestImmediate] = static_cast<uint8_t>(Code.size());
+  Code.push_back(0x5b);
+
+  Code.insert(Code.end(), {
+                              0x60, 0x20, // return size
+                              0x60, 0xa0, // return offset
+                              0x60, 0x20, // argument size
+                              0x60, 0x80, // argument offset
+                              0x60, 0x04, // identity precompile
+                              0x61, 0xff, 0xff,
+                              0xfa,       // STATICCALL
+                              0x50,       // POP success
+                              0x60, 0x20, // RETURN size
+                              0x60, 0xa0, // RETURN offset
+                              0xf3,
+                          });
+  return Code;
+}
+
+std::vector<uint8_t> staticCallEmptyHighOffsetsBytecode() {
+  std::vector<uint8_t> Code;
+  Code.push_back(0x5f); // return size
+  appendPush32HighOffset(Code);
+  Code.push_back(0x5f); // argument size
+  appendPush32HighOffset(Code);
+  Code.insert(Code.end(), {
+                              0x60,
+                              0x04, // identity precompile
+                              0x61,
+                              0xff,
+                              0xff,
+                              0xfa, // STATICCALL
+                              0x5f,
+                              0x52, // MSTORE(0, success)
+                              0x60,
+                              0x20,
+                              0x5f,
+                              0xf3,
+                          });
+  return Code;
+}
+
 } // namespace
 
 TEST(EVMLogMemoryPreexpandDifferential, LogDataMatchesInterpreter) {
@@ -1277,6 +1329,21 @@ TEST(EVMLogMemoryPreexpandDifferential, StaticModePrecedesMemoryExpansion) {
   EXPECT_EQ(Interp.LogCount, size_t{0});
   EXPECT_EQ(Multi.LogCount, size_t{0});
   EXPECT_EQ(Multi.LogsSignature, Interp.LogsSignature);
+}
+
+TEST(EVMCallMemoryProofDifferential, PreparedIdentityCallMatchesInterpreter) {
+  const auto Output = expectInterpMatchesMultipassWithGas(
+      "staticcall_prepared_memory", staticCallPreparedMemoryBytecode(), {});
+  EXPECT_EQ(Output,
+            "2122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F40");
+}
+
+TEST(EVMCallMemoryProofDifferential, EmptyRangesIgnoreHighOffsets) {
+  const auto Output = expectInterpMatchesMultipassWithGas(
+      "staticcall_empty_high_offsets", staticCallEmptyHighOffsetsBytecode(),
+      {});
+  EXPECT_EQ(Output,
+            "0000000000000000000000000000000000000000000000000000000000000001");
 }
 
 #endif

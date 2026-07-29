@@ -258,11 +258,15 @@ const RuntimeFunctions &getRuntimeFunctionTable() {
       .HandleCreate = &evmHandleCreate,
       .HandleCreate2 = &evmHandleCreate2,
       .HandleCall = &evmHandleCall,
+      .HandleCallNoExpand = &evmHandleCallNoExpand,
       .HandleCallCode = &evmHandleCallCode,
+      .HandleCallCodeNoExpand = &evmHandleCallCodeNoExpand,
       .SetReturn = &evmSetReturn,
       .SetReturnNoExpand = &evmSetReturnNoExpand,
       .HandleDelegateCall = &evmHandleDelegateCall,
+      .HandleDelegateCallNoExpand = &evmHandleDelegateCallNoExpand,
       .HandleStaticCall = &evmHandleStaticCall,
+      .HandleStaticCallNoExpand = &evmHandleStaticCallNoExpand,
       .SetRevert = &evmSetRevert,
       .SetRevertNoExpand = &evmSetRevertNoExpand,
       .HandleInvalid = &evmHandleInvalid,
@@ -1088,10 +1092,13 @@ const uint8_t *evmHandleCreate2(zen::runtime::EVMInstance *Instance,
 }
 
 // Helper function for all call types
-static uint64_t evmHandleCallInternal(
-    zen::runtime::EVMInstance *Instance, evmc_call_kind CallKind, uint64_t Gas,
-    const uint8_t *ToAddr, const intx::uint256 &Value, uint64_t ArgsOffset,
-    uint64_t ArgsSize, uint64_t RetOffset, uint64_t RetSize, bool ForceStatic) {
+static uint64_t evmHandleCallInternal(zen::runtime::EVMInstance *Instance,
+                                      evmc_call_kind CallKind, uint64_t Gas,
+                                      const uint8_t *ToAddr,
+                                      const intx::uint256 &Value,
+                                      uint64_t ArgsOffset, uint64_t ArgsSize,
+                                      uint64_t RetOffset, uint64_t RetSize,
+                                      bool ForceStatic, bool MemoryPrepared) {
   const zen::runtime::EVMModule *Module = Instance->getModule();
   ZEN_ASSERT(Module && Module->Host);
 
@@ -1122,25 +1129,28 @@ static uint64_t evmHandleCallInternal(
     return 0;
   }
 
-  // Calculate required memory sizes for input and output
-  // Only expand memory if we actually need to access it
-  bool needArgsMemory = ArgsSize > 0;
-  bool needRetMemory = RetSize > 0;
-  if (needArgsMemory && needRetMemory) {
-    if (!Instance->expandMemoryChecked(ArgsOffset, ArgsSize, RetOffset,
-                                       RetSize)) {
-      Instance->setReturnData({});
-      return 0;
-    }
-  } else if (needArgsMemory) {
-    if (!Instance->expandMemoryChecked(ArgsOffset, ArgsSize)) {
-      Instance->setReturnData({});
-      return 0;
-    }
-  } else if (needRetMemory) {
-    if (!Instance->expandMemoryChecked(RetOffset, RetSize)) {
-      Instance->setReturnData({});
-      return 0;
+  // No-expand callers must prove both non-empty ranges before entering this
+  // helper. Account access, static-mode checks, and all call gas handling stay
+  // in their original order.
+  if (!MemoryPrepared) {
+    const bool NeedArgsMemory = ArgsSize > 0;
+    const bool NeedRetMemory = RetSize > 0;
+    if (NeedArgsMemory && NeedRetMemory) {
+      if (!Instance->expandMemoryChecked(ArgsOffset, ArgsSize, RetOffset,
+                                         RetSize)) {
+        Instance->setReturnData({});
+        return 0;
+      }
+    } else if (NeedArgsMemory) {
+      if (!Instance->expandMemoryChecked(ArgsOffset, ArgsSize)) {
+        Instance->setReturnData({});
+        return 0;
+      }
+    } else if (NeedRetMemory) {
+      if (!Instance->expandMemoryChecked(RetOffset, RetSize)) {
+        Instance->setReturnData({});
+        return 0;
+      }
     }
   }
 
@@ -1271,7 +1281,18 @@ uint64_t evmHandleCall(zen::runtime::EVMInstance *Instance, uint64_t Gas,
                        uint64_t ArgsOffset, uint64_t ArgsSize,
                        uint64_t RetOffset, uint64_t RetSize) {
   return evmHandleCallInternal(Instance, EVMC_CALL, Gas, ToAddr, Value,
-                               ArgsOffset, ArgsSize, RetOffset, RetSize, false);
+                               ArgsOffset, ArgsSize, RetOffset, RetSize, false,
+                               false);
+}
+
+uint64_t evmHandleCallNoExpand(zen::runtime::EVMInstance *Instance,
+                               uint64_t Gas, const uint8_t *ToAddr,
+                               const intx::uint256 &Value, uint64_t ArgsOffset,
+                               uint64_t ArgsSize, uint64_t RetOffset,
+                               uint64_t RetSize) {
+  return evmHandleCallInternal(Instance, EVMC_CALL, Gas, ToAddr, Value,
+                               ArgsOffset, ArgsSize, RetOffset, RetSize, false,
+                               true);
 }
 
 uint64_t evmHandleCallCode(zen::runtime::EVMInstance *Instance, uint64_t Gas,
@@ -1279,7 +1300,18 @@ uint64_t evmHandleCallCode(zen::runtime::EVMInstance *Instance, uint64_t Gas,
                            uint64_t ArgsOffset, uint64_t ArgsSize,
                            uint64_t RetOffset, uint64_t RetSize) {
   return evmHandleCallInternal(Instance, EVMC_CALLCODE, Gas, ToAddr, Value,
-                               ArgsOffset, ArgsSize, RetOffset, RetSize, false);
+                               ArgsOffset, ArgsSize, RetOffset, RetSize, false,
+                               false);
+}
+
+uint64_t evmHandleCallCodeNoExpand(zen::runtime::EVMInstance *Instance,
+                                   uint64_t Gas, const uint8_t *ToAddr,
+                                   const intx::uint256 &Value,
+                                   uint64_t ArgsOffset, uint64_t ArgsSize,
+                                   uint64_t RetOffset, uint64_t RetSize) {
+  return evmHandleCallInternal(Instance, EVMC_CALLCODE, Gas, ToAddr, Value,
+                               ArgsOffset, ArgsSize, RetOffset, RetSize, false,
+                               true);
 }
 
 void evmHandleInvalid(zen::runtime::EVMInstance *Instance) {
@@ -1312,7 +1344,16 @@ uint64_t evmHandleDelegateCall(zen::runtime::EVMInstance *Instance,
                                uint64_t RetOffset, uint64_t RetSize) {
   return evmHandleCallInternal(Instance, EVMC_DELEGATECALL, Gas, ToAddr,
                                intx::uint256{0}, ArgsOffset, ArgsSize,
-                               RetOffset, RetSize, false);
+                               RetOffset, RetSize, false, false);
+}
+
+uint64_t evmHandleDelegateCallNoExpand(zen::runtime::EVMInstance *Instance,
+                                       uint64_t Gas, const uint8_t *ToAddr,
+                                       uint64_t ArgsOffset, uint64_t ArgsSize,
+                                       uint64_t RetOffset, uint64_t RetSize) {
+  return evmHandleCallInternal(Instance, EVMC_DELEGATECALL, Gas, ToAddr,
+                               intx::uint256{0}, ArgsOffset, ArgsSize,
+                               RetOffset, RetSize, false, true);
 }
 
 // EVMC spec: STATICCALL uses kind=EVMC_CALL + flags=EVMC_STATIC
@@ -1324,7 +1365,16 @@ uint64_t evmHandleStaticCall(zen::runtime::EVMInstance *Instance, uint64_t Gas,
                              uint64_t RetSize) {
   return evmHandleCallInternal(Instance, EVMC_CALL, Gas, ToAddr,
                                intx::uint256{0}, ArgsOffset, ArgsSize,
-                               RetOffset, RetSize, true);
+                               RetOffset, RetSize, true, false);
+}
+
+uint64_t evmHandleStaticCallNoExpand(zen::runtime::EVMInstance *Instance,
+                                     uint64_t Gas, const uint8_t *ToAddr,
+                                     uint64_t ArgsOffset, uint64_t ArgsSize,
+                                     uint64_t RetOffset, uint64_t RetSize) {
+  return evmHandleCallInternal(Instance, EVMC_CALL, Gas, ToAddr,
+                               intx::uint256{0}, ArgsOffset, ArgsSize,
+                               RetOffset, RetSize, true, true);
 }
 
 void evmSetRevert(zen::runtime::EVMInstance *Instance, uint64_t Offset,
