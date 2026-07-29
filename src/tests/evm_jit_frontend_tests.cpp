@@ -1739,6 +1739,11 @@ struct MockMeterOpcodeRangeRecord {
   uint64_t EndPCExclusive = 0;
 };
 
+struct MockHelperOpcodeRecord {
+  evmc_opcode Opcode = OP_STOP;
+  uint64_t PC = 0;
+};
+
 struct MockConstPrecheckPlanRecord {
   uint64_t MaxRequiredSize = 0;
   uint64_t CoveredDirectOps = 0;
@@ -2064,7 +2069,9 @@ public:
     LastLinearPrecheckStride = Stride.resolvedValue()[0];
   }
   void noteMemoryOpcodeInBlock(evmc_opcode, uint64_t) {}
-  void noteHelperOpcodeInBlock(evmc_opcode, uint64_t) {}
+  void noteHelperOpcodeInBlock(evmc_opcode Opcode, uint64_t PC) {
+    HelperOpcodes.push_back({Opcode, PC});
+  }
   void endMemoryCompileBlock() {}
 
   void handleJump(Operand) {}
@@ -2089,6 +2096,10 @@ public:
 
   const std::vector<MockMeterOpcodeRangeRecord> &meteredRanges() const {
     return MeteredRanges;
+  }
+
+  const std::vector<MockHelperOpcodeRecord> &helperOpcodes() const {
+    return HelperOpcodes;
   }
 
   const std::vector<MockConstPrecheckPlanRecord> &constPrecheckPlans() const {
@@ -2200,6 +2211,7 @@ private:
   std::array<MockStackAccessStats, 256> Stats = {};
   std::array<uint32_t, 256> MeteredOpcodeCounts = {};
   std::vector<MockMeterOpcodeRangeRecord> MeteredRanges;
+  std::vector<MockHelperOpcodeRecord> HelperOpcodes;
   std::vector<MockConstPrecheckPlanRecord> ConstPrecheckPlans;
   MockMStoreRecord LastMStore = {};
   uint32_t MStoreCount = 0;
@@ -2331,6 +2343,23 @@ bool compileWithMockBuilder(const std::vector<uint8_t> &Bytecode,
 
   COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
   return Visitor.compile();
+}
+
+TEST(EVMJITFrontendVisitorTest, TerminatingMemoryHelpersRetainExactOpcodePC) {
+  const std::vector<uint8_t> ReturnBytecode = {OP_PUSH0, OP_PUSH0, OP_RETURN};
+  const std::vector<uint8_t> RevertBytecode = {OP_PUSH0, OP_PUSH0, OP_REVERT};
+
+  MockEVMBuilder ReturnBuilder;
+  ASSERT_TRUE(compileWithMockBuilder(ReturnBytecode, ReturnBuilder));
+  ASSERT_EQ(ReturnBuilder.helperOpcodes().size(), 1u);
+  EXPECT_EQ(ReturnBuilder.helperOpcodes()[0].Opcode, OP_RETURN);
+  EXPECT_EQ(ReturnBuilder.helperOpcodes()[0].PC, 2u);
+
+  MockEVMBuilder RevertBuilder;
+  ASSERT_TRUE(compileWithMockBuilder(RevertBytecode, RevertBuilder));
+  ASSERT_EQ(RevertBuilder.helperOpcodes().size(), 1u);
+  EXPECT_EQ(RevertBuilder.helperOpcodes()[0].Opcode, OP_REVERT);
+  EXPECT_EQ(RevertBuilder.helperOpcodes()[0].PC, 2u);
 }
 
 TEST(EVMJITFrontendVisitorTest, DynamicJumpConsistencyErrorEscapesVisitor) {

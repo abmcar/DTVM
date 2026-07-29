@@ -916,6 +916,7 @@ private:
           Operand MemOffset = pop();
           Operand Length = pop();
           handleEndBlock();
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           Builder.handleReturn(MemOffset, Length);
           break;
         }
@@ -924,6 +925,7 @@ private:
           Operand OffsetOp = pop();
           Operand SizeOp = pop();
           handleEndBlock();
+          Builder.noteHelperOpcodeInBlock(Opcode, PC);
           Builder.handleRevert(OffsetOp, SizeOp);
           break;
         }

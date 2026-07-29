@@ -1340,7 +1340,8 @@ private:
   MInstruction *extractKnownU64LowOperand(const Operand &Opnd);
   void checkStaticModeIR();
   void normalizeOffsetWithSize(Operand &Offset, Operand &Size);
-  void preExpandMemoryRange(Operand &Offset, Operand &Size);
+  bool preExpandMemoryRange(Operand &Offset, Operand &Size,
+                            bool AllowGuaranteedElision = false);
 
   Operand convertSingleInstrToU256Operand(MInstruction *SingleInstr);
   Operand convertU256InstrToU256Operand(MInstruction *U256Instr);
@@ -1558,6 +1559,8 @@ private:
     uint64_t MemoryBaseCacheUseCount = 0;
 
     uint64_t ExpandNeedExpandCFGCount = 0;
+    uint64_t ReturnGuaranteedElisionCount = 0;
+    uint64_t RevertGuaranteedElisionCount = 0;
 
     uint64_t SmallFrameCandidateTotal = 0;
     uint64_t SmallFramePrecheckedTotal = 0;

@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "compiler/evm_frontend/evm_analyzer.h"
@@ -410,6 +411,46 @@ TEST(EVMMemoryTerminationDifferential, DynamicEmptyRevertIgnoresHighOffset) {
 
   ASSERT_TRUE(expectInterpStatusMatchesMultipass(
       "dynamic_empty_revert_high_offset", Bytecode, EVMC_REVERT));
+}
+
+TEST(EVMMemoryTerminationDifferential,
+     CrossBlockCoveredRangeMatchesStatusOutputAndGas) {
+  const std::vector<uint8_t> Prefix = {
+      0x60, 0x01, // PC0 PUSH1 1: value
+      0x60, 0x80, // PC2 PUSH1 0x80: memory offset
+      0x52,       // PC4 MSTORE: prove memory covers [0, 0xa0)
+      0x60, 0x08, // PC5 PUSH1 8
+      0x56,       // PC7 JUMP
+      0x5b,       // PC8 JUMPDEST
+      0x60, 0x20, // PC9 PUSH1 32: output size
+      0x60, 0x80, // PC11 PUSH1 0x80: output offset
+  };
+  const std::string ExpectedOutput =
+      "0000000000000000000000000000000000000000000000000000000000000001";
+
+  for (const auto &[Name, Terminator, ExpectedStatus] :
+       std::vector<std::tuple<const char *, uint8_t, evmc_status_code>>{
+           {"return", 0xf3, EVMC_SUCCESS},
+           {"revert", 0xfd, EVMC_REVERT},
+       }) {
+    std::vector<uint8_t> Bytecode = Prefix;
+    Bytecode.push_back(Terminator);
+
+    const auto Interp =
+        runEvmBytecode(std::string(Name) + "_covered_range_interp", Bytecode,
+                       common::RunMode::InterpMode, {}, 0u, true);
+    const auto Multi =
+        runEvmBytecode(std::string(Name) + "_covered_range_multipass", Bytecode,
+                       common::RunMode::MultipassMode, {}, 0u, true);
+#ifdef ZEN_ENABLE_JIT
+    EXPECT_TRUE(Multi.JITCompiled);
+#endif
+    EXPECT_EQ(Interp.Status, ExpectedStatus);
+    EXPECT_EQ(Multi.Status, Interp.Status);
+    EXPECT_EQ(Multi.GasLeft, Interp.GasLeft);
+    EXPECT_EQ(Multi.OutputHex, Interp.OutputHex);
+    EXPECT_EQ(Interp.OutputHex, ExpectedOutput);
+  }
 }
 
 // Range-narrowed lowering paths: the range-narrowed ISZERO/JUMPI folds,
