@@ -1618,14 +1618,23 @@ private:
            RequiredSize <= Plan.MaxRequiredSize;
   }
 
+  void maybePrepareLinearBlockMemoryPrecheck(evmc_opcode Opcode,
+                                             Operand Stride) {
+    if (!CurBlockLinearPrecheckPlan.Eligible ||
+        CurBlockLinearPrecheckPlan.CoveredOpcode != Opcode) {
+      return;
+    }
+    Builder.prepareLinearBlockMemoryPrecheck(Stride);
+  }
+
   void maybePrepareLinearBlockMemoryPrecheck(evmc_opcode Opcode) {
     if (!CurBlockLinearPrecheckPlan.Eligible ||
         CurBlockLinearPrecheckPlan.CoveredOpcode != Opcode ||
         Stack.getSize() <= CurBlockLinearPrecheckPlan.StrideStackIndex) {
       return;
     }
-    Builder.prepareLinearBlockMemoryPrecheck(
-        Stack.peek(CurBlockLinearPrecheckPlan.StrideStackIndex));
+    maybePrepareLinearBlockMemoryPrecheck(
+        Opcode, Stack.peek(CurBlockLinearPrecheckPlan.StrideStackIndex));
   }
 
   LargeStaticWorkspaceVerifierResult
@@ -3085,7 +3094,7 @@ private:
     Operand Current = Stack.peek(0);
     Operand Stride = Stack.peek(1);
     Builder.noteMemoryOpcodeInBlock(OP_MSTORE, MStorePC);
-    maybePrepareLinearBlockMemoryPrecheck(OP_MSTORE);
+    maybePrepareLinearBlockMemoryPrecheck(OP_MSTORE, Stride);
     Builder.handleMStore(Current, Current);
     Operand Next =
         Builder.template handleBinaryArithmetic<BinaryOperator::BO_ADD>(Current,

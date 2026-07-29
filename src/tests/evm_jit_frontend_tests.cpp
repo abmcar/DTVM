@@ -1554,7 +1554,7 @@ public:
   MOCK_OPERAND_STUB(handleBlobHash);
   MOCK_OPERAND_STUB(handleBlockHash);
   MOCK_OPERAND_STUB(handleByte);
-  MOCK_OPERAND_STUB(handleCallDataLoad);
+  Operand handleCallDataLoad(Operand) { return Operand(CallDataLoadResult); }
   MOCK_OPERAND_STUB(handleCallDataSize);
   MOCK_OPERAND_STUB(handleCallValue);
   MOCK_OPERAND_STUB(handleCaller);
@@ -1690,8 +1690,9 @@ public:
     LargeStaticWorkspaceRejectHelperByteExactRisk += RejectHelperByteExactRisk;
     LargeStaticWorkspaceRejectTooFewOps += RejectTooFewOps;
   }
-  void prepareLinearBlockMemoryPrecheck(Operand) {
+  void prepareLinearBlockMemoryPrecheck(Operand Stride) {
     LinearPrecheckPrepareCount++;
+    LastLinearPrecheckStride = Stride.resolvedValue()[0];
   }
   void noteMemoryOpcodeInBlock(evmc_opcode, uint64_t) {}
   void noteHelperOpcodeInBlock(evmc_opcode, uint64_t) {}
@@ -1796,6 +1797,10 @@ public:
     return LinearPrecheckPrepareCount;
   }
 
+  void setCallDataLoadResult(uint64_t Value) { CallDataLoadResult = Value; }
+
+  uint64_t lastLinearPrecheckStride() const { return LastLinearPrecheckStride; }
+
   bool Trapped = false;
   bool Undefined = false;
   uint64_t LargeStaticWorkspaceCandidates = 0;
@@ -1850,6 +1855,8 @@ private:
   uint64_t LastLinearPrecheckCoveredDirectOps = 0;
   bool LastLinearPrecheckValueEqualsFirstAddr = false;
   uint32_t LinearPrecheckPrepareCount = 0;
+  uint64_t LastLinearPrecheckStride = 0;
+  uint64_t CallDataLoadResult = 0;
 
 #undef MOCK_OPERAND_STUB
 #undef MOCK_VOID_STUB
@@ -3053,6 +3060,49 @@ TEST(EVMJITFrontendVisitorTest, FusesLinearMStoreNextMotifIntoMeteredRange) {
   EXPECT_EQ(Builder.topStackValue()[0], 0x60U);
 }
 
+TEST(EVMJITFrontendVisitorTest,
+     PlansFusedLinearMStoreMemoryPrecheckWithDynamicStride) {
+  const std::vector<uint8_t> Bytecode = {
+      0x5f, // PUSH0 calldata offset for stride
+      0x35, // CALLDATALOAD
+      0x5f, // PUSH0 current
+      0x80, // DUP1
+      0x80, // DUP1
+      0x52, // MSTORE
+      0x81, // DUP2
+      0x01, // ADD
+      0x80, // DUP1
+      0x80, // DUP1
+      0x52, // MSTORE
+      0x81, // DUP2
+      0x01, // ADD
+      0x00  // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MockEVMBuilder Builder;
+  Builder.setCallDataLoadResult(7);
+  COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_FALSE(Builder.Trapped);
+  EXPECT_FALSE(Builder.Undefined);
+
+  EXPECT_EQ(Builder.linearPrecheckPlanCount(), 1U);
+  EXPECT_EQ(Builder.lastLinearPrecheckAccessWidth(), 32U);
+  EXPECT_EQ(Builder.lastLinearPrecheckCoveredDirectOps(), 2U);
+  EXPECT_TRUE(Builder.lastLinearPrecheckValueEqualsFirstAddr());
+  EXPECT_EQ(Builder.linearPrecheckPrepareCount(), 2U);
+  EXPECT_EQ(Builder.lastLinearPrecheckStride(), 7U);
+  EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE), 2U);
+  EXPECT_EQ(Builder.mstoreCount(), 2U);
+  EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
+  EXPECT_EQ(Builder.topStackValue()[0], 14U);
+}
+
 TEST(EVMJITFrontendVisitorTest, PlansLinearMStore8NextMotifMemoryPrecheck) {
   const std::vector<uint8_t> Bytecode = {
       0x5f, // PUSH0 calldata offset for stride
@@ -3077,6 +3127,7 @@ TEST(EVMJITFrontendVisitorTest, PlansLinearMStore8NextMotifMemoryPrecheck) {
                   Bytecode.size());
 
   MockEVMBuilder Builder;
+  Builder.setCallDataLoadResult(11);
   COMPILER::EVMByteCodeVisitor<MockEVMBuilder> Visitor(Builder, &Ctx);
   EXPECT_TRUE(Visitor.compile());
   EXPECT_FALSE(Builder.Trapped);
@@ -3087,6 +3138,7 @@ TEST(EVMJITFrontendVisitorTest, PlansLinearMStore8NextMotifMemoryPrecheck) {
   EXPECT_EQ(Builder.lastLinearPrecheckCoveredDirectOps(), 2U);
   EXPECT_FALSE(Builder.lastLinearPrecheckValueEqualsFirstAddr());
   EXPECT_EQ(Builder.linearPrecheckPrepareCount(), 2U);
+  EXPECT_EQ(Builder.lastLinearPrecheckStride(), 11U);
   EXPECT_EQ(Builder.meteredOpcodeCount(OP_MSTORE8), 2U);
   EXPECT_EQ(Builder.runtimeStackDepth(), 2U);
 }
