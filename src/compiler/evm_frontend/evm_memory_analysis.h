@@ -876,6 +876,8 @@ private:
     switch (Op.Kind) {
     case MemoryOpKind::MLoad:
       return Op.Reads.size() == 1 && getIntervalEnd(Op.Reads[0], End);
+    case MemoryOpKind::Keccak:
+      return Op.Reads.size() == 1 && getIntervalEnd(Op.Reads[0], End);
     case MemoryOpKind::MStore:
     case MemoryOpKind::MStore8:
       return Op.Writes.size() == 1 && getIntervalEnd(Op.Writes[0], End);

@@ -5865,7 +5865,12 @@ EVMMirBuilder::handleKeccak256(Operand OffsetComponents,
     syncGasToMemory();
 #endif
   } else {
-    preExpandMemoryRange(OffsetComponents, LengthComponents);
+    const bool ExpansionCovered = OffsetWasConstU64 && LengthWasConstU64 &&
+                                  tryUseGuaranteedMinBytesExpansionElision(
+                                      true, ConstOffset, ConstLength);
+    if (!ExpansionCovered) {
+      preExpandMemoryRange(OffsetComponents, LengthComponents);
+    }
     MInstruction *Length = extractKnownU64LowOperand(LengthComponents);
     chargeKeccakWordGasIR(Length);
   }

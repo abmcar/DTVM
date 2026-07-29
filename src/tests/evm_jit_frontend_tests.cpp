@@ -459,6 +459,130 @@ TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, LearnsConstMCopyUnionEnd) {
   EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0x40u);
 }
 
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, LearnsConstKeccakReadEnd) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH1, 0x40,         OP_PUSH1,
+                                         0x20,     OP_KECCAK256, OP_POP,
+                                         OP_PUSH1, 0x20,         OP_MLOAD};
+
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0x60u);
+}
+
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
+     PropagatesConstKeccakGuaranteeToSuccessor) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x40,        OP_PUSH1, 0x20, OP_KECCAK256,
+      OP_POP,   OP_JUMPDEST, OP_PUSH1, 0x20, OP_MLOAD};
+
+  COMPILER::MemoryFacts Facts = collectAnalyzerMemoryFacts(Bytecode);
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesAtEntry(6), 0x60u);
+}
+
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, IgnoresZeroLengthKeccak) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH1, 0x00,         OP_PUSH1,
+                                         0x80,     OP_KECCAK256, OP_POP,
+                                         OP_PUSH1, 0x00,         OP_MLOAD};
+
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0u);
+}
+
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+std::optional<size_t>
+countKeccakExpandMemoryCalls(const std::vector<uint8_t> &Bytecode) {
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  COMPILER::MModule Mod(Ctx);
+  std::array<COMPILER::MType *, 1> ParamTypes = {
+      COMPILER::MPointerType::create(Ctx, Ctx.VoidType)};
+  COMPILER::MFunctionType *FuncType = COMPILER::MFunctionType::create(
+      Ctx, Ctx.VoidType, llvm::ArrayRef<COMPILER::MType *>(ParamTypes));
+  Mod.addFuncType(FuncType);
+
+  COMPILER::MFunction Func(Ctx, 0);
+  Func.setFunctionType(FuncType);
+  EVMMirBuilder Builder(Ctx, Func);
+  if (!Builder.compile(&Ctx)) {
+    return std::nullopt;
+  }
+
+  std::string Mir;
+  llvm::raw_string_ostream OS(Mir);
+  Func.print(OS);
+  OS.flush();
+
+  const auto &RuntimeFunctions = COMPILER::getRuntimeFunctionTable();
+  const auto Address =
+      COMPILER::getFunctionAddress(RuntimeFunctions.ExpandMemoryNoGas);
+  const std::string Needle =
+      "target = const.i64 " + std::to_string(Address) + ", ";
+  size_t Count = 0;
+  for (size_t Pos = Mir.find(Needle); Pos != std::string::npos;
+       Pos = Mir.find(Needle, Pos + Needle.size())) {
+    ++Count;
+  }
+  return Count;
+}
+
+TEST(EVMMirBuilderMemoryProofTest,
+     ReusesCrossBlockGuaranteedSizeForKeccakConsumer) {
+  const std::vector<uint8_t> ProducerOnly = {
+      OP_PUSH1, 0x01, OP_PUSH1, 0x80,        OP_MSTORE,
+      OP_PUSH1, 0x08, OP_JUMP,  OP_JUMPDEST, OP_STOP};
+  const std::vector<uint8_t> CoveredKeccak = {
+      OP_PUSH1, 0x01,         OP_PUSH1,    0x80,     OP_MSTORE, OP_PUSH1,
+      0x08,     OP_JUMP,      OP_JUMPDEST, OP_PUSH1, 0x20,      OP_PUSH1,
+      0x80,     OP_KECCAK256, OP_POP,      OP_STOP};
+  const std::vector<uint8_t> UncoveredKeccak = {
+      OP_PUSH1, 0x01,         OP_PUSH1,    0x80,     OP_MSTORE, OP_PUSH1,
+      0x08,     OP_JUMP,      OP_JUMPDEST, OP_PUSH1, 0x20,      OP_PUSH1,
+      0xa0,     OP_KECCAK256, OP_POP,      OP_STOP};
+
+  const std::optional<size_t> ProducerExpansionCalls =
+      countKeccakExpandMemoryCalls(ProducerOnly);
+  const std::optional<size_t> CoveredExpansionCalls =
+      countKeccakExpandMemoryCalls(CoveredKeccak);
+  const std::optional<size_t> UncoveredExpansionCalls =
+      countKeccakExpandMemoryCalls(UncoveredKeccak);
+
+  ASSERT_TRUE(ProducerExpansionCalls.has_value());
+  ASSERT_TRUE(CoveredExpansionCalls.has_value());
+  ASSERT_TRUE(UncoveredExpansionCalls.has_value());
+  EXPECT_EQ(*CoveredExpansionCalls, *ProducerExpansionCalls);
+  EXPECT_EQ(*UncoveredExpansionCalls, *ProducerExpansionCalls + 1);
+}
+
+TEST(EVMMirBuilderMemoryProofTest, ReusesPriorKeccakProofAtExactOpcodePC) {
+  const std::vector<uint8_t> OneKeccak = {OP_PUSH1,     0x20,   OP_PUSH1, 0x80,
+                                          OP_KECCAK256, OP_POP, OP_STOP};
+  const std::vector<uint8_t> TwoKeccaks = {
+      OP_PUSH1,     0x20,     OP_PUSH1, 0x80,     OP_KECCAK256,
+      OP_POP,       OP_PUSH1, 0x20,     OP_PUSH1, 0x80,
+      OP_KECCAK256, OP_POP,   OP_STOP};
+
+  const std::optional<size_t> OneExpansionCalls =
+      countKeccakExpandMemoryCalls(OneKeccak);
+  const std::optional<size_t> TwoExpansionCalls =
+      countKeccakExpandMemoryCalls(TwoKeccaks);
+
+  ASSERT_TRUE(OneExpansionCalls.has_value());
+  ASSERT_TRUE(TwoExpansionCalls.has_value());
+  EXPECT_EQ(*TwoExpansionCalls, *OneExpansionCalls);
+}
+#endif
+
 TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, IgnoresZeroLengthMCopy) {
   const std::vector<uint8_t> Bytecode = {OP_PUSH1, 0x00,    OP_PUSH1, 0x80,
                                          OP_PUSH1, 0xa0,    OP_MCOPY, OP_PUSH1,

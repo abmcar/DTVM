@@ -73,10 +73,11 @@ struct EVMExecutionResult {
 // config can fall back to the interpreter for a single call, which would make
 // a differential test vacuous; DisableMultipassMultithread compiles before the
 // run so the JIT side is non-vacuous.
-EVMExecutionResult
-runEvmBytecode(const std::string &Label, const std::vector<uint8_t> &Bytecode,
-               common::RunMode Mode, const std::vector<uint8_t> &CallData = {},
-               uint32_t MessageFlags = 0u, bool EnableGasMetering = false) {
+EVMExecutionResult runEvmBytecode(
+    const std::string &Label, const std::vector<uint8_t> &Bytecode,
+    common::RunMode Mode, const std::vector<uint8_t> &CallData = {},
+    uint32_t MessageFlags = 0u, bool EnableGasMetering = false,
+    uint64_t GasLimit = 0xFFFF'FFFF'FFFF - zen::evm::BASIC_EXECUTION_COST) {
   EVMExecutionResult Empty;
 
   RuntimeConfig Config;
@@ -106,7 +107,6 @@ runEvmBytecode(const std::string &Label, const std::vector<uint8_t> &Bytecode,
     return Empty;
   }
 
-  const uint64_t GasLimit = 0xFFFF'FFFF'FFFF - zen::evm::BASIC_EXECUTION_COST;
   auto InstRet = Iso->createEVMInstance(*Mod, GasLimit);
   if (!InstRet) {
     ADD_FAILURE() << "instance create failed: " << Label;
@@ -261,6 +261,68 @@ std::string fixtureTestName(const testing::TestParamInfo<std::string> &Info) {
 }
 
 } // namespace
+
+TEST(EVMKeccakMemoryProofDifferential,
+     CrossBlockProofReusePreservesHashAndGas) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01, // PC0: PUSH1 1
+      0x60, 0x80, // PC2: PUSH1 0x80
+      0x52,       // PC4: MSTORE, proves memory through 0xa0
+      0x60, 0x08, // PC5: PUSH1 successor
+      0x56,       // PC7: JUMP
+      0x5b,       // PC8: JUMPDEST
+      0x60, 0x20, // PC9: PUSH1 hash length
+      0x60, 0x80, // PC11: PUSH1 hash offset
+      0x20,       // PC13: KECCAK256
+      0x5f,       // PC14: PUSH0 result offset
+      0x52,       // PC15: MSTORE hash result
+      0x60, 0x20, // PC16: PUSH1 return length
+      0x5f,       // PC18: PUSH0 return offset
+      0xf3,       // PC19: RETURN
+  };
+
+  const auto Output =
+      expectInterpMatchesMultipassWithGas("keccak_cfg_proof", Bytecode, {});
+  EXPECT_EQ(Output,
+            "B10E2D527612073B26EECDFD717E6A320CF44B4AFAC2B0732D9FCBE2B7FA0CF6");
+}
+
+TEST(EVMKeccakMemoryProofDifferential,
+     WordGasOutOfGasBoundaryMatchesInterpreter) {
+  // KECCAK256 is the final operation, so one gas below the successful
+  // execution budget exercises its final dynamic word-gas charge.
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01, // PUSH1 1
+      0x60, 0x80, // PUSH1 0x80
+      0x52,       // MSTORE, expands memory before KECCAK256
+      0x60, 0x20, // PUSH1 hash length
+      0x60, 0x80, // PUSH1 hash offset
+      0x20,       // KECCAK256
+  };
+  constexpr uint64_t ProbeGasLimit = 1'000'000;
+  const auto Reference =
+      runEvmBytecode("keccak_word_gas_reference", Bytecode,
+                     common::RunMode::InterpMode, {}, 0u, true, ProbeGasLimit);
+  ASSERT_EQ(Reference.Status, EVMC_SUCCESS);
+  ASSERT_GE(Reference.GasLeft, 0);
+  const auto RequiredGas =
+      ProbeGasLimit - static_cast<uint64_t>(Reference.GasLeft);
+  ASSERT_GT(RequiredGas, uint64_t{1});
+
+  const auto Interp = runEvmBytecode("keccak_word_gas_oog_interp", Bytecode,
+                                     common::RunMode::InterpMode, {}, 0u, true,
+                                     RequiredGas - 1);
+  const auto Multi = runEvmBytecode("keccak_word_gas_oog_multipass", Bytecode,
+                                    common::RunMode::MultipassMode, {}, 0u,
+                                    true, RequiredGas - 1);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Multi.JITCompiled);
+#endif
+  EXPECT_EQ(Interp.Status, EVMC_OUT_OF_GAS);
+  EXPECT_EQ(Multi.Status, Interp.Status);
+  EXPECT_EQ(Multi.GasLeft, Interp.GasLeft);
+  EXPECT_EQ(Multi.OutputHex, Interp.OutputHex);
+}
 
 // ===========================================================================
 // Fixture-based differential suite.
