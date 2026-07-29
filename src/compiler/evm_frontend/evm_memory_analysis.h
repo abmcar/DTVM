@@ -879,6 +879,9 @@ private:
     case MemoryOpKind::MStore:
     case MemoryOpKind::MStore8:
       return Op.Writes.size() == 1 && getIntervalEnd(Op.Writes[0], End);
+    case MemoryOpKind::CallDataCopy:
+    case MemoryOpKind::CodeCopy:
+      return Op.Writes.size() == 1 && getIntervalEnd(Op.Writes[0], End);
     case MemoryOpKind::MCopy: {
       if (Op.Reads.size() != 1 || Op.Writes.size() != 1) {
         return false;

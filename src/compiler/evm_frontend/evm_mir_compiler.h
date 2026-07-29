@@ -1458,6 +1458,7 @@ private:
     uint64_t MStore8ExpandCount = 0;
     uint64_t MCopyExpandCount = 0;
     uint64_t MCopyGuaranteedElisionCount = 0;
+    uint64_t CopyGuaranteedElisionCount = 0;
     uint64_t MemoryDSEStoreCandidates = 0;
     uint64_t MemoryDSEEliminatedWrites = 0;
     uint64_t MemoryLoadForwardCandidates = 0;
@@ -1883,7 +1884,7 @@ private:
   void reloadMemorySizeFromInstance();
   void expandMemoryIR(MInstruction *RequiredSize, MInstruction *Overflow);
   void preExpandKeccakTwoWordMemory(Operand &OffsetComponents);
-  void preExpandCopyMemory(Operand &DestOffsetComponents,
+  bool preExpandCopyMemory(Operand &DestOffsetComponents,
                            Operand &SizeComponents);
   void chargeWordCopyGasIR(MInstruction *Size);
   void chargeDynamicGasIR(MInstruction *GasCost);

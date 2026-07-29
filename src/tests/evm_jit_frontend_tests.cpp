@@ -3,6 +3,7 @@
 
 #include "action/evm_bytecode_visitor.h"
 #include "compiler/evm_frontend/evm_analyzer.h"
+#include "compiler/evm_frontend/evm_imported.h"
 #include "compiler/evm_frontend/evm_memory_analysis.h"
 #include "compiler/evm_frontend/evm_memory_facts.h"
 #include "compiler/evm_frontend/evm_memory_grouping.h"
@@ -31,6 +32,23 @@ using COMPILER::EVMMirBuilder;
 using COMPILER::EVMValueRange;
 using zen::common::BinaryOperator;
 using zen::common::CompareOperator;
+
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+class CapturingLogger final : public zen::utils::ILogger {
+public:
+  void trace(const std::string &, const char *, int, const char *) override {}
+  void debug(const std::string &Message, const char *, int,
+             const char *) override {
+    DebugMessages.push_back(Message);
+  }
+  void info(const std::string &, const char *, int, const char *) override {}
+  void warn(const std::string &, const char *, int, const char *) override {}
+  void error(const std::string &, const char *, int, const char *) override {}
+  void fatal(const std::string &, const char *, int, const char *) override {}
+
+  std::vector<std::string> DebugMessages;
+};
+#endif
 
 EVMAnalyzer analyzeBytecode(const std::vector<uint8_t> &Bytecode) {
   EVMAnalyzer Analyzer(EVMC_CANCUN);
@@ -122,6 +140,51 @@ void expectPCList(const std::vector<uint64_t> &Actual,
     ++Index;
   }
 }
+
+#if defined(ZEN_ENABLE_MULTIPASS_JIT_LOGGING) &&                               \
+    defined(ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK)
+size_t countRuntimeCalls(const COMPILER::MFunction &Func, uint64_t Address) {
+  std::string Mir;
+  llvm::raw_string_ostream OS(Mir);
+  Func.print(OS);
+  OS.flush();
+
+  const std::string Needle =
+      "target = const.i64 " + std::to_string(Address) + ", ";
+  size_t Count = 0;
+  for (size_t Pos = Mir.find(Needle); Pos != std::string::npos;
+       Pos = Mir.find(Needle, Pos + Needle.size())) {
+    ++Count;
+  }
+  return Count;
+}
+
+std::optional<size_t>
+countExpandMemoryCallsForBytecode(const std::vector<uint8_t> &Bytecode) {
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  COMPILER::MModule Mod(Ctx);
+  std::array<COMPILER::MType *, 1> ParamTypes = {
+      COMPILER::MPointerType::create(Ctx, Ctx.VoidType)};
+  COMPILER::MFunctionType *FuncType = COMPILER::MFunctionType::create(
+      Ctx, Ctx.VoidType, llvm::ArrayRef<COMPILER::MType *>(ParamTypes));
+  Mod.addFuncType(FuncType);
+
+  COMPILER::MFunction Func(Ctx, 0);
+  Func.setFunctionType(FuncType);
+  EVMMirBuilder Builder(Ctx, Func);
+  if (!Builder.compile(&Ctx)) {
+    return std::nullopt;
+  }
+
+  const auto &RuntimeFunctions = COMPILER::getRuntimeFunctionTable();
+  return countRuntimeCalls(
+      Func, COMPILER::getFunctionAddress(RuntimeFunctions.ExpandMemoryNoGas));
+}
+#endif
 
 void appendPushU64(std::vector<uint8_t> &Bytecode, uint64_t Value) {
   if (Value == 0) {
@@ -408,6 +471,44 @@ TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, IgnoresZeroLengthMCopy) {
   EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0u);
 }
 
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
+     LearnsConstCallDataCopyDestinationEnd) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,        0x20,     OP_PUSH1, 0x00,    OP_PUSH1, 0x80,
+      OP_CALLDATACOPY, OP_PUSH1, 0x80,     OP_MLOAD};
+
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0xa0u);
+}
+
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
+     LearnsConstCodeCopyDestinationEnd) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x20,        OP_PUSH1, 0x00, OP_PUSH1,
+      0x40,     OP_CODECOPY, OP_PUSH1, 0x40, OP_MLOAD};
+
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0x60u);
+}
+
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, IgnoresZeroLengthCallDataCopy) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,        0x00,     OP_PUSH1, 0x00,    OP_PUSH1, 0x80,
+      OP_CALLDATACOPY, OP_PUSH1, 0x00,     OP_MLOAD};
+
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0u);
+}
+
 TEST(EVMMemoryFactsBuilderTest, RecordsCopyAddressSpaces) {
   const std::vector<uint8_t> Bytecode = {OP_PUSH1, 0x20, OP_PUSH1,       0x04,
                                          OP_PUSH1, 0x80, OP_CALLDATACOPY};
@@ -429,6 +530,150 @@ TEST(EVMMemoryFactsBuilderTest, RecordsCopyAddressSpaces) {
   ASSERT_TRUE(Op.Writes[0].Size.Known);
   EXPECT_EQ(Op.Writes[0].Size.Value, 0x20u);
 }
+
+#if defined(ZEN_ENABLE_MULTIPASS_JIT_LOGGING) &&                               \
+    defined(ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK)
+TEST(EVMMirBuilderMemoryStatsTest,
+     ReusesCrossBlockGuaranteedSizeForCopyConsumers) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01, // PUSH1 value
+      0x60, 0x80, // PUSH1 memory offset
+      0x52,       // MSTORE: guarantees memory through 0x9f
+      0x60, 0x08, // PUSH1 successor block
+      0x56,       // JUMP
+      0x5b,       // JUMPDEST
+      0x60, 0x20, // PUSH1 CALLDATACOPY size
+      0x60, 0x00, // PUSH1 calldata source
+      0x60, 0x80, // PUSH1 memory destination
+      0x37,       // CALLDATACOPY: covered by the predecessor proof
+      0x60, 0x20, // PUSH1 CODECOPY size
+      0x60, 0x00, // PUSH1 code source
+      0x60, 0x40, // PUSH1 memory destination
+      0x39,       // CODECOPY: covered by the predecessor proof
+      0x60, 0x20, // PUSH1 CODECOPY size
+      0x60, 0x00, // PUSH1 code source
+      0x60, 0xa0, // PUSH1 memory destination
+      0x39,       // CODECOPY: extends beyond the predecessor proof
+      0x00        // STOP
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  COMPILER::MModule Mod(Ctx);
+  std::array<COMPILER::MType *, 1> ParamTypes = {
+      COMPILER::MPointerType::create(Ctx, Ctx.VoidType)};
+  COMPILER::MFunctionType *FuncType = COMPILER::MFunctionType::create(
+      Ctx, Ctx.VoidType, llvm::ArrayRef<COMPILER::MType *>(ParamTypes));
+  Mod.addFuncType(FuncType);
+
+  COMPILER::MFunction Func(Ctx, 0);
+  Func.setFunctionType(FuncType);
+  EVMMirBuilder Builder(Ctx, Func);
+  ASSERT_TRUE(Builder.compile(&Ctx));
+
+  auto Logger = std::make_shared<CapturingLogger>();
+  auto &Logging = zen::utils::Logging::getInstance();
+  auto PreviousLogger = Logging.getLogger();
+  Logging.setLogger(Logger);
+  Builder.dumpMemoryCompileStats();
+  Logging.setLogger(std::move(PreviousLogger));
+
+  auto Summary = std::find_if(
+      Logger->DebugMessages.begin(), Logger->DebugMessages.end(),
+      [](const std::string &Message) {
+        return Message.find("[EVM-MEM-SUMMARY]") != std::string::npos;
+      });
+  ASSERT_NE(Summary, Logger->DebugMessages.end());
+  EXPECT_NE(Summary->find("copy_guaranteed_elision=2 "), std::string::npos)
+      << *Summary;
+  EXPECT_EQ(Summary->find("copy_guaranteed_elision=3 "), std::string::npos)
+      << *Summary;
+}
+
+TEST(EVMMirBuilderMemoryStatsTest,
+     TracksCopyProofAtEachOpcodePCAndRetainsFallbackExpansion) {
+  const std::vector<uint8_t> ProducerOnly = {0x60, 0x01, 0x60, 0x80, 0x52,
+                                             0x60, 0x08, 0x56, 0x5b, 0x00};
+  const std::vector<uint8_t> WithUncoveredCopy = {
+      0x60, 0x01, // PUSH1 value
+      0x60, 0x80, // PUSH1 memory offset
+      0x52,       // MSTORE: guarantees memory through 0x9f
+      0x60, 0x08, // PUSH1 successor block
+      0x56,       // JUMP
+      0x5b,       // JUMPDEST
+      0x60, 0x20, // PUSH1 CODECOPY size
+      0x60, 0x00, // PUSH1 code source
+      0x60, 0xa0, // PUSH1 memory destination
+      0x39,       // CODECOPY: uncovered, grows memory through 0xbf
+      0x00        // STOP
+  };
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x01, // PUSH1 value
+      0x60, 0x80, // PUSH1 memory offset
+      0x52,       // MSTORE: guarantees memory through 0x9f
+      0x60, 0x08, // PUSH1 successor block
+      0x56,       // JUMP
+      0x5b,       // JUMPDEST
+      0x60, 0x20, // PUSH1 CODECOPY size
+      0x60, 0x00, // PUSH1 code source
+      0x60, 0xa0, // PUSH1 memory destination
+      0x39,       // CODECOPY: uncovered, grows memory through 0xbf
+      0x60, 0x20, // PUSH1 CALLDATACOPY size
+      0x60, 0x00, // PUSH1 calldata source
+      0x60, 0xa0, // PUSH1 memory destination
+      0x37,       // CALLDATACOPY: covered by the preceding COPY proof
+      0x00        // STOP
+  };
+
+  const std::optional<size_t> ProducerExpansionCalls =
+      countExpandMemoryCallsForBytecode(ProducerOnly);
+  const std::optional<size_t> FallbackExpansionCalls =
+      countExpandMemoryCallsForBytecode(WithUncoveredCopy);
+  const std::optional<size_t> CoveredSuccessorExpansionCalls =
+      countExpandMemoryCallsForBytecode(Bytecode);
+  ASSERT_TRUE(ProducerExpansionCalls.has_value());
+  ASSERT_TRUE(FallbackExpansionCalls.has_value());
+  ASSERT_TRUE(CoveredSuccessorExpansionCalls.has_value());
+  EXPECT_EQ(*FallbackExpansionCalls, *ProducerExpansionCalls + 1);
+  EXPECT_EQ(*CoveredSuccessorExpansionCalls, *FallbackExpansionCalls);
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  COMPILER::MModule Mod(Ctx);
+  std::array<COMPILER::MType *, 1> ParamTypes = {
+      COMPILER::MPointerType::create(Ctx, Ctx.VoidType)};
+  COMPILER::MFunctionType *FuncType = COMPILER::MFunctionType::create(
+      Ctx, Ctx.VoidType, llvm::ArrayRef<COMPILER::MType *>(ParamTypes));
+  Mod.addFuncType(FuncType);
+
+  COMPILER::MFunction Func(Ctx, 0);
+  Func.setFunctionType(FuncType);
+  EVMMirBuilder Builder(Ctx, Func);
+  ASSERT_TRUE(Builder.compile(&Ctx));
+
+  auto Logger = std::make_shared<CapturingLogger>();
+  auto &Logging = zen::utils::Logging::getInstance();
+  auto PreviousLogger = Logging.getLogger();
+  Logging.setLogger(Logger);
+  Builder.dumpMemoryCompileStats();
+  Logging.setLogger(std::move(PreviousLogger));
+
+  auto Summary = std::find_if(
+      Logger->DebugMessages.begin(), Logger->DebugMessages.end(),
+      [](const std::string &Message) {
+        return Message.find("[EVM-MEM-SUMMARY]") != std::string::npos;
+      });
+  ASSERT_NE(Summary, Logger->DebugMessages.end());
+  EXPECT_NE(Summary->find("copy_guaranteed_elision=1 "), std::string::npos)
+      << *Summary;
+}
+#endif
 
 TEST(EVMMemoryAnalysisViewTest, ClassifiesBarriersFromMemoryOps) {
   const std::vector<uint8_t> Bytecode = {OP_PUSH1, 0x00,     OP_MLOAD, OP_PUSH1,

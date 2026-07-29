@@ -4740,7 +4740,11 @@ void EVMMirBuilder::handleCodeCopy(Operand DestOffsetComponents,
                                    Operand OffsetComponents,
                                    Operand SizeComponents) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
-  preExpandCopyMemory(DestOffsetComponents, SizeComponents);
+  if (preExpandCopyMemory(DestOffsetComponents, SizeComponents)) {
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+    ++MemStats.CopyGuaranteedElisionCount;
+#endif
+  }
   MInstruction *Size = extractKnownU64LowOperand(SizeComponents);
   chargeWordCopyGasIR(Size);
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
@@ -6789,9 +6793,20 @@ void EVMMirBuilder::preExpandKeccakTwoWordMemory(Operand &OffsetComponents) {
   expandMemoryIR(RequiredSize, Overflow);
 }
 
-void EVMMirBuilder::preExpandCopyMemory(Operand &DestOffsetComponents,
+bool EVMMirBuilder::preExpandCopyMemory(Operand &DestOffsetComponents,
                                         Operand &SizeComponents) {
+  const bool DestWasConstU64 = DestOffsetComponents.isConstU64();
+  const uint64_t ConstDest =
+      DestWasConstU64 ? DestOffsetComponents.getConstValue()[0] : 0;
+  const bool SizeWasConstU64 = SizeComponents.isConstU64();
+  const uint64_t ConstSize =
+      SizeWasConstU64 ? SizeComponents.getConstValue()[0] : 0;
+
   normalizeOffsetWithSize(DestOffsetComponents, SizeComponents);
+  if (DestWasConstU64 && SizeWasConstU64 &&
+      tryUseGuaranteedMinBytesExpansionElision(true, ConstDest, ConstSize)) {
+    return true;
+  }
 
   MType *I64Type = &Ctx.I64Type;
   MInstruction *DestOffset = extractKnownU64LowOperand(DestOffsetComponents);
@@ -6802,6 +6817,7 @@ void EVMMirBuilder::preExpandCopyMemory(Operand &DestOffsetComponents,
       false, CmpInstruction::Predicate::ICMP_ULT, I64Type, RequiredSize,
       DestOffset);
   expandMemoryIR(RequiredSize, Overflow);
+  return false;
 }
 
 void EVMMirBuilder::chargeWordCopyGasIR(MInstruction *Size) {
@@ -7214,7 +7230,11 @@ void EVMMirBuilder::handleCallDataCopy(Operand DestOffsetComponents,
                                        Operand SizeComponents) {
   const auto &RuntimeFunctions = getRuntimeFunctionTable();
   uint64_t Non64Value = std::numeric_limits<uint64_t>::max();
-  preExpandCopyMemory(DestOffsetComponents, SizeComponents);
+  if (preExpandCopyMemory(DestOffsetComponents, SizeComponents)) {
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+    ++MemStats.CopyGuaranteedElisionCount;
+#endif
+  }
   MInstruction *Size = extractKnownU64LowOperand(SizeComponents);
   chargeWordCopyGasIR(Size);
   normalizeOperandU64(OffsetComponents, &Non64Value);
@@ -7312,6 +7332,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleReturnDataSize() {
 bool EVMMirBuilder::hasMemoryCompileStats() const {
   return MemStats.MLoadExpandCount != 0 || MemStats.MStoreExpandCount != 0 ||
          MemStats.MStore8ExpandCount != 0 || MemStats.MCopyExpandCount != 0 ||
+         MemStats.CopyGuaranteedElisionCount != 0 ||
          MemStats.BlockConstPrecheckCount != 0 ||
          MemStats.MemoryExpansionPlanCount != 0 ||
          MemStats.LinearU64AddrFastPathCount != 0 ||
@@ -7674,7 +7695,8 @@ void EVMMirBuilder::dumpMemoryCompileStats() const {
   ZEN_LOG_DEBUG(
       "[EVM-MEM-SUMMARY] mload_expand=%llu mstore_expand=%llu "
       "mstore8_expand=%llu mcopy_expand=%llu "
-      "mcopy_guaranteed_elision=%llu memory_dse_candidates=%llu "
+      "mcopy_guaranteed_elision=%llu copy_guaranteed_elision=%llu "
+      "memory_dse_candidates=%llu "
       "memory_dse_eliminated_writes=%llu memory_load_forward_candidates=%llu "
       "memory_load_forwarded=%llu block_const_precheck=%llu "
       "block_linear_precheck=%llu prechecked_mload_ops=%llu "
@@ -7768,6 +7790,7 @@ void EVMMirBuilder::dumpMemoryCompileStats() const {
       static_cast<unsigned long long>(MemStats.MStore8ExpandCount),
       static_cast<unsigned long long>(MemStats.MCopyExpandCount),
       static_cast<unsigned long long>(MemStats.MCopyGuaranteedElisionCount),
+      static_cast<unsigned long long>(MemStats.CopyGuaranteedElisionCount),
       static_cast<unsigned long long>(MemStats.MemoryDSEStoreCandidates),
       static_cast<unsigned long long>(MemStats.MemoryDSEEliminatedWrites),
       static_cast<unsigned long long>(MemStats.MemoryLoadForwardCandidates),
@@ -8639,6 +8662,7 @@ void EVMMirBuilder::noteMemoryOpcodeInBlock(evmc_opcode Opcode, uint64_t PC) {
 }
 
 void EVMMirBuilder::noteHelperOpcodeInBlock(evmc_opcode Opcode, uint64_t PC) {
+  CurrentMemoryOpPC = PC;
   if (!CurBlockMemStats.Active) {
     return;
   }
