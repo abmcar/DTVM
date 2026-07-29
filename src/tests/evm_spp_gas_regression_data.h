@@ -1,4 +1,4 @@
-// Copyright (C) 2025 the DTVM authors. All Rights Reserved.
+// Copyright (C) 2026 the DTVM authors. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 #ifndef ZEN_TESTS_EVM_SPP_GAS_REGRESSION_DATA_H
