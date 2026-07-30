@@ -43,8 +43,9 @@ reduction.
   32 bytes.
 - `src/evm/evm_cache.md` and `docs/modules/evm/cache-build.md` record the
   source, successor, and CFG invariants used by SPP scheduling.
-- Cache-level and interpreter-versus-multipass regressions cover both failure
-  modes without introducing a new runtime component.
+- Cache-level regressions cover both failure modes. An
+  interpreter-versus-multipass regression covers the unresolved dynamic
+  `JUMPI` case without introducing a new runtime component.
 - No API, ABI, configuration, or persisted-data format changes are introduced.
 - The guards can reduce SPP scheduling opportunities around `SSTORE` and
   unresolved dynamic jumps. Applying the `SSTORE` boundary before Istanbul is
@@ -58,7 +59,7 @@ The production implementation at commit
 - tracked-source formatting and a clean Release all-target build, with no
   warning diagnostics from changed files;
 - focused cache regressions: 2/2;
-- focused interpreter-versus-multipass regressions: 2/2;
+- focused interpreter-versus-multipass regression: 1/1;
 - CTest: 12/12 targets;
 - interpreter unit, Cancun state, and EVM assembly suites: 215/215, 2723/2723,
   and 209/209;
