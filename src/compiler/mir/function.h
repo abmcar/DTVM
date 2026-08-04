@@ -84,6 +84,12 @@ public:
     BasicBlocks.emplace_back(BB);
   }
 
+  bool containsBasicBlock(const MBasicBlock *BB) const {
+    ZEN_ASSERT(BB);
+    uint32_t BBIdx = BB->getIdx();
+    return BBIdx < BasicBlocks.size() && BasicBlocks[BBIdx] == BB;
+  }
+
   MBasicBlock *getBasicBlock(uint32_t BBIdx) const {
     ZEN_ASSERT(BBIdx < BasicBlocks.size());
     return BasicBlocks[BBIdx];

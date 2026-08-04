@@ -46,12 +46,9 @@ bool CgDeadCgInstructionElim::isDead(const CgInstruction *MI) const {
 #endif
           continue;
         }
-        for (const CgInstruction &Use : MRI->use_nodbg_instructions(Reg)) {
-          if (&Use != MI)
-            // This def has a non-debug use. Don't delete the
-            // instruction!
-            return false;
-        }
+        if (MRI->hasUseOutside(Reg, *MI))
+          // This def has a use in another instruction. Don't delete it!
+          return false;
       }
     }
   }

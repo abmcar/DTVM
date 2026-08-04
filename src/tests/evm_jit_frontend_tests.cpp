@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "action/evm_bytecode_visitor.h"
+#include "compiler/cgir/cg_function.h"
+#include "compiler/cgir/pass/dead_cg_instruction_elim.h"
 #include "compiler/evm_frontend/evm_analyzer.h"
 #include "compiler/evm_frontend/evm_imported.h"
 #include "compiler/evm_frontend/evm_memory_analysis.h"
@@ -14,6 +16,8 @@
 
 #include "llvm/Support/raw_ostream.h"
 #include <gtest/gtest.h>
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/CodeGen/TargetOpcodes.h>
 
 #include <algorithm>
 #include <array>
@@ -182,6 +186,89 @@ public:
   COMPILER::MFunction Func;
   EVMMirBuilder Builder;
 };
+
+TEST(MFunctionBasicBlockTest, MembershipUsesIndexAndPointerIdentity) {
+  COMPILER::EVMFrontendContext Ctx;
+  COMPILER::MFunction Func(Ctx, 0);
+  COMPILER::MBasicBlock *First = Func.createBasicBlock();
+  COMPILER::MBasicBlock *Second = Func.createBasicBlock();
+
+  EXPECT_FALSE(Func.containsBasicBlock(First));
+  Func.appendBlock(First);
+  EXPECT_TRUE(Func.containsBasicBlock(First));
+
+  EXPECT_EQ(Second->getIdx(), 0U);
+  EXPECT_FALSE(Func.containsBasicBlock(Second));
+  Func.appendBlock(Second);
+  EXPECT_TRUE(Func.containsBasicBlock(Second));
+
+  EXPECT_EQ(Func.getNumBasicBlocks(), 2U);
+  EXPECT_EQ(Func.getBasicBlock(First->getIdx()), First);
+  EXPECT_EQ(Func.getBasicBlock(Second->getIdx()), Second);
+}
+
+TEST(EVMMirBuilderBasicBlockTest, InitDoesNotReappendEntryBlock) {
+  MirBuilderConstFoldHarness Harness;
+
+  EXPECT_EQ(Harness.Func.getNumBasicBlocks(), 1U);
+}
+
+TEST(CgDeadInstructionElimTest, PreservesExternalUsesAndDeletesSelfUses) {
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.initialize();
+  COMPILER::MFunction MFunc(Ctx, 0);
+  COMPILER::CgFunction CgFunc(Ctx, MFunc);
+  COMPILER::CgBasicBlock *FirstDefBB = CgFunc.createCgBasicBlock();
+  COMPILER::CgBasicBlock *SecondDefBB = CgFunc.createCgBasicBlock();
+  COMPILER::CgBasicBlock *SelfCopyBB = CgFunc.createCgBasicBlock();
+  COMPILER::CgBasicBlock *UseBB = CgFunc.createCgBasicBlock();
+  CgFunc.appendCgBasicBlock(FirstDefBB);
+  CgFunc.appendCgBasicBlock(SecondDefBB);
+  CgFunc.appendCgBasicBlock(SelfCopyBB);
+  CgFunc.appendCgBasicBlock(UseBB);
+  FirstDefBB->addSuccessorWithoutProb(SecondDefBB);
+  SecondDefBB->addSuccessorWithoutProb(SelfCopyBB);
+  SelfCopyBB->addSuccessorWithoutProb(UseBB);
+
+  auto &MRI = CgFunc.getRegInfo();
+  const auto &TII = CgFunc.getTargetInstrInfo();
+  auto AddInstruction =
+      [&](COMPILER::CgBasicBlock &BB, unsigned Opcode,
+          llvm::SmallVector<COMPILER::CgOperand, 2> Operands) {
+        return CgFunc.createCgInstruction(BB, TII.get(Opcode), Operands,
+                                          /*no_implicit=*/true);
+      };
+
+  COMPILER::CgRegister LiveReg = MRI.createIncompleteVirtualRegister();
+  AddInstruction(*FirstDefBB, llvm::TargetOpcode::IMPLICIT_DEF,
+                 {COMPILER::CgOperand::createRegOperand(LiveReg, true)});
+  AddInstruction(*SecondDefBB, llvm::TargetOpcode::IMPLICIT_DEF,
+                 {COMPILER::CgOperand::createRegOperand(LiveReg, true)});
+
+  COMPILER::CgRegister SelfReg = MRI.createIncompleteVirtualRegister();
+  AddInstruction(*SelfCopyBB, llvm::TargetOpcode::COPY,
+                 {COMPILER::CgOperand::createRegOperand(SelfReg, true),
+                  COMPILER::CgOperand::createRegOperand(SelfReg, false)});
+
+  COMPILER::CgInstruction *InlineAsm = AddInstruction(
+      *UseBB, llvm::TargetOpcode::INLINEASM,
+      {COMPILER::CgOperand::createRegOperand(LiveReg, false,
+                                             /*IsImplicit=*/true)});
+
+  MRI.freezeReservedRegs(CgFunc);
+  (void)COMPILER::CgDeadCgInstructionElim(CgFunc);
+  EXPECT_FALSE(FirstDefBB->empty());
+  EXPECT_FALSE(SecondDefBB->empty());
+  EXPECT_TRUE(SelfCopyBB->empty());
+  EXPECT_FALSE(UseBB->empty());
+
+  InlineAsm->eraseFromParent();
+  (void)COMPILER::CgDeadCgInstructionElim(CgFunc);
+  EXPECT_TRUE(FirstDefBB->empty());
+  EXPECT_TRUE(SecondDefBB->empty());
+  EXPECT_TRUE(SelfCopyBB->empty());
+  EXPECT_TRUE(UseBB->empty());
+}
 
 void expectPCList(const std::vector<uint64_t> &Actual,
                   std::initializer_list<uint64_t> Expected) {

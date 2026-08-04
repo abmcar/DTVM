@@ -1160,9 +1160,7 @@ private:
 
   void setInsertBlock(MBasicBlock *BB) {
     CurBB = BB;
-    // Check if this basic block is already in the function's BasicBlocks list
-    // to avoid duplicate insertion
-    if (std::find(CurFunc->begin(), CurFunc->end(), BB) == CurFunc->end()) {
+    if (!CurFunc->containsBasicBlock(BB)) {
       CurFunc->appendBlock(BB);
     }
   }
