@@ -78,7 +78,8 @@ EVMExecutionResult runEvmBytecode(
     const std::string &Label, const std::vector<uint8_t> &Bytecode,
     common::RunMode Mode, const std::vector<uint8_t> &CallData = {},
     uint32_t MessageFlags = 0u, bool EnableGasMetering = false,
-    uint64_t GasLimit = 0xFFFF'FFFF'FFFF - zen::evm::BASIC_EXECUTION_COST) {
+    uint64_t GasLimit = 0xFFFF'FFFF'FFFF - zen::evm::BASIC_EXECUTION_COST,
+    evmc_revision Revision = evmc_revision::EVMC_OSAKA) {
   EVMExecutionResult Empty;
 
   RuntimeConfig Config;
@@ -95,7 +96,8 @@ EVMExecutionResult runEvmBytecode(
   }
   MockedHost->setRuntime(RT.get());
 
-  auto ModRet = RT->loadEVMModule(Label, Bytecode.data(), Bytecode.size());
+  auto ModRet =
+      RT->loadEVMModule(Label, Bytecode.data(), Bytecode.size(), Revision);
   if (!ModRet) {
     ADD_FAILURE() << "module load failed: " << Label;
     return Empty;
@@ -114,7 +116,7 @@ EVMExecutionResult runEvmBytecode(
     return Empty;
   }
   EVMInstance *Inst = *InstRet;
-  Inst->setRevision(evmc_revision::EVMC_OSAKA);
+  Inst->setRevision(Revision);
 
   evmc_message Msg = {
       .kind = EVMC_CALL,
@@ -663,6 +665,61 @@ TEST(EVMRangeDifferential,
       "constant_u64_divisor", Bytecode, CallData);
   EXPECT_EQ(Output,
             "0000000000000000000000000000000000000000000000005555555555555555");
+}
+
+TEST(EVMRangeDifferential, UnresolvedJumpiTakenTargetPreservesGas) {
+  const std::vector<uint8_t> Bytecode = {
+      0x60, 0x00, 0x35, // PC0  condition = calldata[0]
+      0x60, 0x20, 0x35, // PC3  destination = calldata[32]
+      0x57,             // PC6  dynamic JUMPI
+      0x5f, 0x50,       // PC7  untaken-only fallthrough cost
+      0x5b, 0x5a,       // PC9  dynamic target; observe GAS
+      0x5f, 0x52,       // PC11 MSTORE(0, gas)
+      0x60, 0x20, 0x5f, 0xf3,
+  };
+  std::vector<uint8_t> TakenCallData(64, 0);
+  TakenCallData[31] = 1;
+  TakenCallData[63] = 9;
+
+  const auto TakenInterp =
+      runEvmBytecode("unresolved_jumpi_taken_target_interp", Bytecode,
+                     common::RunMode::InterpMode, TakenCallData, 0u, true,
+                     0x2210, evmc_revision::EVMC_CANCUN);
+  const auto TakenMulti =
+      runEvmBytecode("unresolved_jumpi_taken_target_multipass", Bytecode,
+                     common::RunMode::MultipassMode, TakenCallData, 0u, true,
+                     0x2210, evmc_revision::EVMC_CANCUN);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(TakenMulti.JITCompiled);
+#endif
+  constexpr char ExpectedTakenGasOutput[] =
+      "00000000000000000000000000000000000000000000000000000000000021F7";
+  EXPECT_EQ(TakenInterp.Status, EVMC_SUCCESS);
+  EXPECT_EQ(TakenInterp.OutputHex, ExpectedTakenGasOutput);
+  EXPECT_EQ(TakenMulti.Status, TakenInterp.Status);
+  EXPECT_EQ(TakenMulti.GasLeft, TakenInterp.GasLeft);
+  EXPECT_EQ(TakenMulti.OutputHex, ExpectedTakenGasOutput);
+
+  std::vector<uint8_t> FallthroughCallData = TakenCallData;
+  FallthroughCallData[31] = 0;
+  const auto FallthroughInterp =
+      runEvmBytecode("unresolved_jumpi_fallthrough_interp", Bytecode,
+                     common::RunMode::InterpMode, FallthroughCallData, 0u, true,
+                     0x2210, evmc_revision::EVMC_CANCUN);
+  const auto FallthroughMulti =
+      runEvmBytecode("unresolved_jumpi_fallthrough_multipass", Bytecode,
+                     common::RunMode::MultipassMode, FallthroughCallData, 0u,
+                     true, 0x2210, evmc_revision::EVMC_CANCUN);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(FallthroughMulti.JITCompiled);
+#endif
+  constexpr char ExpectedFallthroughGasOutput[] =
+      "00000000000000000000000000000000000000000000000000000000000021F3";
+  EXPECT_EQ(FallthroughInterp.Status, EVMC_SUCCESS);
+  EXPECT_EQ(FallthroughInterp.OutputHex, ExpectedFallthroughGasOutput);
+  EXPECT_EQ(FallthroughMulti.Status, FallthroughInterp.Status);
+  EXPECT_EQ(FallthroughMulti.GasLeft, FallthroughInterp.GasLeft);
+  EXPECT_EQ(FallthroughMulti.OutputHex, ExpectedFallthroughGasOutput);
 }
 
 // Sweep SHL/SHR/SAR with shift amounts that land inside the limb-crossing

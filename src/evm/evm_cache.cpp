@@ -103,6 +103,12 @@ static bool isControlFlowTerminator(uint8_t OpcodeU8) {
 static bool isGasSensitiveTerminator(uint8_t OpcodeU8) {
   switch (static_cast<evmc_opcode>(OpcodeU8)) {
   case evmc_opcode::OP_GAS:
+  // EIP-2200 makes SSTORE fail when gas left is at or below the call stipend.
+  // Moving successor cost before SSTORE can therefore change success to OOG
+  // even when the total path cost is preserved. Applying this barrier before
+  // Istanbul is an intentional conservative safety policy: it can only reduce
+  // SPP shifting on revisions without the sentry.
+  case evmc_opcode::OP_SSTORE:
   case evmc_opcode::OP_CREATE:
   case evmc_opcode::OP_CREATE2:
   case evmc_opcode::OP_CALL:
@@ -228,7 +234,8 @@ buildJumpDestMapAndPushCache(const zen::common::Byte *Code, size_t CodeSize,
 //   16 ImplicitDynamicPredCount    uint32
 //   20 LastOpcode                  uint8
 //   21 PrevOpcode                  uint8
-//   22 pad[2]                      (2 alignment bytes before Cost)
+//   22 HasUnresolvedDynamicSuccessor uint8
+//   23 pad[1]                      (1 alignment byte before Cost)
 //   24 Cost                        uint64
 //   32 sizeof
 struct GasBlock {
@@ -243,6 +250,8 @@ struct GasBlock {
   uint32_t ImplicitDynamicPredCount = 0;
   uint8_t LastOpcode = 0;
   uint8_t PrevOpcode = 0;
+  // Runtime can branch to a successor omitted from the explicit CFG.
+  uint8_t HasUnresolvedDynamicSuccessor = 0;
   uint64_t Cost = 0;
 };
 static_assert(sizeof(GasBlock) == 32,
@@ -502,12 +511,11 @@ static bool resolveConstantJumpTarget(const std::vector<uint8_t> &JumpDestMap,
 // single-target edges. For each unresolved dynamic jump we DO NOT add the
 // D*|JUMPDEST| explicit over-approximation edges (which previously made the
 // pass quadratic-to-cubic in pathological contracts). Instead we record on
-// every JUMPDEST how many dynamic-jump blocks could land there at runtime
-// via `ImplicitDynamicPredCount`, and `effectivePredCount` folds that count
-// into its multi-predecessor check. SPP decisions are identical: a JUMPDEST
-// that is a potential dynamic-jump target sees `effectivePredCount > 1` and
-// `lemma614Update` refuses to shift gas across that edge, exactly as it
-// would have done against an explicit over-approximated `Preds` set.
+// every JUMPDEST how many dynamic-jump blocks could land there at runtime via
+// `ImplicitDynamicPredCount`, and mark each dynamic-jump source with
+// `HasUnresolvedDynamicSuccessor`. The former prevents shifts into an implicit
+// target; the latter prevents shifts out of a source whose omitted successors
+// cannot be compensated.
 static void
 buildCFGEdges(std::vector<GasBlock> &Blocks, EdgeTables &Edges,
               const std::vector<uint32_t> &BlockAtPc,
@@ -523,7 +531,7 @@ buildCFGEdges(std::vector<GasBlock> &Blocks, EdgeTables &Edges,
   // halves the call count and the bytecode rescan it performs.
   uint32_t DynamicJumpCount = 0;
   for (size_t BlockId = 0; BlockId < Blocks.size(); ++BlockId) {
-    const auto &Block = Blocks[BlockId];
+    auto &Block = Blocks[BlockId];
     const bool IsTerminator = isControlFlowTerminator(Block.LastOpcode);
 
     // Add fallthrough edge for non-terminating opcodes (CALL/CREATE/GAS,
@@ -546,6 +554,7 @@ buildCFGEdges(std::vector<GasBlock> &Blocks, EdgeTables &Edges,
         // Keep the constant-decode fallback for cases the shared abstract
         // stack pass intentionally leaves unresolved.
       } else {
+        Block.HasUnresolvedDynamicSuccessor = 1;
         ++DynamicJumpCount;
         continue;
       }
@@ -1199,9 +1208,9 @@ static bool buildLoopsUsingDominance(
 //
 // Blocks with `ImplicitDynamicPredCount > 0` (every JUMPDEST in a contract
 // that has at least one dynamic jump) carry the over-approximated dynamic
-// predecessors as a count instead of explicit edges; folding them in here
-// keeps `lemma614Update`'s "shift only into single-pred successors" check
-// equivalent to the explicit over-approximation.
+// predecessors as a count instead of explicit edges. Folding them in here
+// conservatively prevents a shift into any represented successor that could
+// also be reached by an omitted dynamic edge.
 static size_t effectivePredCount(uint32_t NodeId,
                                  const std::vector<GasBlock> &Blocks,
                                  const CSRGraph &PredsCSR) {
@@ -1220,7 +1229,8 @@ static bool lemma614Update(uint32_t NodeId, const std::vector<GasBlock> &Blocks,
                            const std::vector<uint64_t> *AllowedMask,
                            std::vector<uint64_t> &Metering) {
   const auto &Node = Blocks[NodeId];
-  if (isGasSensitiveTerminator(Node.LastOpcode)) {
+  if (isGasSensitiveTerminator(Node.LastOpcode) ||
+      Node.HasUnresolvedDynamicSuccessor != 0) {
     return false;
   }
 
@@ -1508,7 +1518,9 @@ static bool buildGasChunksSPP(
   }
 
   // Always build CFG — no early exit for dynamic jumps.
-  // Unresolved jumps get over-approximated edges to all JUMPDESTs.
+  // Unresolved dynamic targets remain implicit: possible target blocks carry
+  // ImplicitDynamicPredCount, and their source blocks carry
+  // HasUnresolvedDynamicSuccessor.
 
   // JumpDestBlocks is now produced inline by buildGasBlocks (one push per
   // block whose first opcode is OP_JUMPDEST), eliminating the prior bytecode
@@ -1516,11 +1528,9 @@ static bool buildGasChunksSPP(
   // every JUMPDEST byte under EVM semantics starts a new gas block.
 
   // Static jumps get precise single-target edges. For unresolved dynamic
-  // jumps, the CFG over-approximation is encoded as
-  // ImplicitDynamicPredCount on each JUMPDEST (folded into
-  // effectivePredCount). Narrowing to partial call-site resolution would
-  // under-approximate the CFG and let SPP shift gas along non-existent
-  // edges, producing unsafe metering.
+  // jumps, ImplicitDynamicPredCount protects possible targets while
+  // HasUnresolvedDynamicSuccessor prevents source-side shifts that could not
+  // compensate omitted targets.
   EdgeTables Edges;
   Edges.resize(Blocks.size());
 
@@ -1604,21 +1614,21 @@ static bool buildGasChunksSPP(
       SuccsCSR, PredsCSR, Dom, Reachable, Loops, LoopOf, ExitLoops, ExitFlags);
   EVM_PROFILE_END(buildLoopsUsingDominance);
 
-  // InCycle is a performance fast-path filter for lemma614Update, NOT the
-  // soundness mechanism. On reducible CFGs (UseLinearSPP=true) the union of
-  // natural-loop NodeMasks coincides with the in-cycle set Tarjan SCC would
-  // produce, so we skip the standalone Tarjan pass. On irreducible CFGs
-  // (UseLinearSPP=false) buildLoopsUsingDominance can miss multi-entry
-  // cycles (e.g. an irreducible 2-entry cycle A<->B with no dominator-based
-  // back-edge), so the Tarjan SCC backstop fills InCycle for those nodes.
+  // UseLinearSPP means only that the detected dominance-based natural loops
+  // passed the body-dominance and nesting checks. It is not a general
+  // reducibility proof: an SCC without a dominance back-edge produces no
+  // LoopInfo and can still return true. The two-pass SCC fallback runs only
+  // when the validator returns false; otherwise InCycle is the union of the
+  // detected loop masks.
   //
-  // Soundness on irreducible CFGs ultimately rests on lemma614Update's
-  // effectivePredCount(Succ) != 1 multi-pred guard at line 1224: every SCC
-  // node has at least one in-cycle predecessor on top of any out-of-cycle
-  // entry, so its effectivePredCount is >= 2 and the shift is refused even
-  // when InCycle is empty. See docs/modules/evm/cache-build.md §Invariants
-  // -- do NOT remove the multi-pred guard on the assumption that InCycle
-  // covers it.
+  // Runtime soundness is local to each successful update on a reachable source.
+  // Sources with omitted dynamic successors are rejected. A reachable source
+  // of a recorded dominance back-edge is in its natural-loop mask and is
+  // skipped by the schedule, so BackEdges omits no executable edge from a
+  // reachable source that is updated. If AllowedMask excludes another
+  // successor, lemma614Update cancels the whole update. Unreachable blocks can
+  // still be scheduled, but their shifted costs occur on no executable path.
+  // See docs/modules/evm/cache-build.md §Invariants.
   EVM_PROFILE_BEGIN(computeInCycle);
   std::vector<uint8_t> InCycle;
   if (UseLinearSPP) {

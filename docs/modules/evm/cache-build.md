@@ -40,17 +40,17 @@ straight-line fallback only.
 |---:|---|---|
 | 0 | `buildJumpDestMapAndPushCache` | Single bytecode walk: mark valid JUMPDESTs (skipping PUSH-data regions); decode PUSHn immediates into `PushValueMap` |
 | 1 | `buildGasBlocks` | Single bytecode walk: emit one `GasBlock` per basic block, record `JumpDestBlocks` inline, compute per-block straight-line gas |
-| 2 | `buildCFGEdges` | Single sweep: emit Succs/Preds edges into `EdgeTables`; stamp `ImplicitDynamicPredCount` on JUMPDEST blocks reachable by unresolved dynamic JUMP |
+| 2 | `buildCFGEdges` | Single sweep: emit resolved and fallthrough Succs/Preds edges into `EdgeTables`; for unresolved dynamic JUMP/JUMPI, mark the source with `HasUnresolvedDynamicSuccessor` and stamp possible JUMPDEST targets with `ImplicitDynamicPredCount` |
 | 3 | `splitCriticalEdges` | Insert empty synthetic blocks on `multi-succ → multi-pred` edges; appends new entries onto `Blocks` and `EdgeTables` |
 | 4 | `buildAdjacencyCSR` | Flatten `EdgeTables.Succs` and `.Preds` into two read-only `CSRGraph`s after the graph is frozen |
 | 5 | `computeReachable` | DFS from block 0 over `SuccsCSR`; produce `Reachable` bitset |
 | 6 | `computeDomInfo` | Cooper-Harvey-Kennedy fixpoint over `PredsCSR` for `IDom`, then Tarjan DFS over the dominator tree for `Enter`/`Exit` Euler tour stamps; produce `RPO` from the forward DFS |
 | 7 | `findBackEdgesUsingDominators` | Iterate edges; emit back-edges where successor `dominates(succ, curr)` |
 | 8 | `computeReverseTopo` | Return `reverse(DomInfo::RPO)` |
-| 9 | `buildLoopsUsingDominance` | From dominator-based back-edges, gather natural-loop body sets; returns `true` if every node's back-edge target dominates it (reducible) |
-| 10 | `computeInCycle` | **Conditional**: when `UseLinearSPP=true` (reducible result from 9), set `InCycle = union(Loops[].NodeMask)`; when `UseLinearSPP=false`, fall back to Tarjan SCC over `SuccsCSR` for `InCycle` |
+| 9 | `buildLoopsUsingDominance` | Gather natural-loop bodies from dominance back-edges whose source is reachable; return `false` if a detected body violates header dominance or detected loops overlap without nesting. A `true` result validates only the detected loop set, not general CFG reducibility |
+| 10 | `computeInCycle` | **Conditional**: when `UseLinearSPP=true`, set `InCycle = union(Loops[].NodeMask)`; when `UseLinearSPP=false`, run a two-pass Kosaraju-style SCC traversal over `SuccsCSR` and `PredsCSR`. The traversal therefore runs only for a rejected detected-loop set |
 | 11 | `meteringInit` | Copy per-block `Cost` into the `Metering` working array used by lemma614 |
-| 12 | `lemma614Schedule` | SPP gas-shifting in reverse-topo order: for each block, try to shift its gas charge onto its successors via `lemma614Update`, gated on `effectivePredCount` and `InCycle` |
+| 12 | `lemma614Schedule` | SPP gas-shifting in reverse-topo order: for each block, try to shift its gas charge onto its successors via `lemma614Update`, gated on `HasUnresolvedDynamicSuccessor == 0`, `effectivePredCount`, and `InCycle` |
 | 13 | `writeback` | Project per-block `Metering` back onto `GasChunkEnd` / `GasChunkCost` / `GasChunkCostSPP` |
 
 `EVM_PROFILE_BEGIN(<phase>) / EVM_PROFILE_END(<phase>)` chrono pairs
@@ -72,7 +72,8 @@ Per-block scalars used by every downstream pass.
 | 16 | `ImplicitDynamicPredCount` | `uint32_t` | Count of dynamic-JUMP blocks that could land on this JUMPDEST (carried separately to avoid `D×J` materialised over-approximation edges) |
 | 20 | `LastOpcode` | `uint8_t` | Terminator opcode |
 | 21 | `PrevOpcode` | `uint8_t` | Opcode before terminator |
-| 22 | _pad[2]_ | — | Alignment to 8-byte `Cost` |
+| 22 | `HasUnresolvedDynamicSuccessor` | `uint8_t` | Nonzero when an unresolved dynamic JUMP/JUMPI has runtime targets omitted from this source's explicit successor list |
+| 23 | _pad[1]_ | — | Alignment to 8-byte `Cost` |
 | 24 | `Cost` | `uint64_t` | Straight-line gas cost of the block |
 
 The 32-byte stride is load-bearing for the cache-density gains; the
@@ -93,6 +94,13 @@ Written by `buildCFGEdges` and `splitCriticalEdges`; deduplicating
 edge insertion is provided by the `addEdge` helper (linear scan over
 the per-block vectors). Consumed by `buildAdjacencyCSR` and not read
 directly by any downstream pass.
+
+Edges for unresolved dynamic jumps are deliberately absent from both
+tables and the resulting CSR graphs. `ImplicitDynamicPredCount`
+represents those omitted incoming edges on each possible JUMPDEST,
+while `HasUnresolvedDynamicSuccessor` marks the source whose runtime
+successor set is incomplete. For an unresolved JUMPI, its fallthrough
+edge remains explicit; only its taken-target edges are omitted.
 
 ### `CSRGraph` — read-only flat adjacency
 
@@ -138,42 +146,93 @@ DFS instead of running their own.
 
 ## Invariants
 
-### Reducible-CFG fast-path soundness
+### Loop-set selection and per-update soundness
 
-The R2 reviewers established the soundness story explicitly. When
-`UseLinearSPP=true` (i.e. `buildLoopsUsingDominance` reported reducible),
-`computeInCycle` is a **performance optimisation**, not the safety
-mechanism. The actual safety invariant lives in `lemma614Update`'s
-multi-predecessor guard:
+`UseLinearSPP=true` means that the dominance-based natural loops found
+by `buildLoopsUsingDominance` passed its body-dominance and nesting
+checks. It does not prove that the CFG is reducible. A multi-entry SCC
+with no dominance back-edge produces no `LoopInfo` and can therefore
+return `true` with that SCC absent from `InCycle`. The two-pass SCC
+traversal runs only when the detected loop set fails validation.
+
+Soundness does not require complete SCC classification. For updates
+that can occur on a runtime path, it follows from these local
+conditions:
 
 ```cpp
+if (Node.HasUnresolvedDynamicSuccessor != 0) {
+  return false;
+}
+
 if (effectivePredCount(Succ, Blocks, PredsCSR) != 1) {
-  // refuse shift
+  MinSucc = 0;
+  continue;
 }
 ```
 
 `effectivePredCount` folds `ImplicitDynamicPredCount` into the
-structural pred count, so any JUMPDEST that could be reached by an
-unresolved dynamic JUMP sees count > 1 and the lemma refuses to shift
-gas across that edge. Every node inside any SCC of size ≥ 2 has at
-least one in-cycle predecessor on top of any out-of-cycle entry, so
-its `effectivePredCount` is ≥ 2 and the shift is refused even on
-irreducible CFGs the fast-path filter misses.
+structural pred count. A possible dynamic target with an explicit
+incoming edge therefore has count greater than one, so the lemma
+cannot move its cost onto only that explicit predecessor. A target
+with only implicit incoming edges is not present in any source's
+`SuccsCSR` slice and cannot be selected for a shift.
 
-**Future-contributor warning**: do **not** remove the multi-pred guard
-on the assumption that `InCycle` covers it. On an irreducible 2-entry
-cycle `A ↔ B` where neither node dominates the other, the dominator-based
-back-edge set is empty, `buildLoopsUsingDominance` returns `true` with
-`Loops` empty, and `InCycle = union(empty) = all-zeros`. Without the
-multi-pred guard, lemma614 would mis-charge such a CFG; with the guard,
-correctness is preserved.
+Independently, no block with `HasUnresolvedDynamicSuccessor != 0` may
+act as a lemma614 shift source. Moving explicit-successor cost onto
+such a source would increase the charge on every runtime exit while
+compensating only successors represented in `SuccsCSR`; an omitted
+taken target would receive no compensating reduction. The guard makes
+the represented successor list complete for every accepted source.
 
-### Irreducible-CFG fallback
+A runtime-reachable source of a recorded dominance back-edge belongs
+to the corresponding natural-loop mask and is skipped before
+`lemma614Update`. The `BackEdges` branch therefore omits no executable
+edge for a reachable source that is actually updated. In particular,
+an updated reachable source in an unrecognized SCC has no recorded
+outgoing back-edge, so the branch is a no-op. If `AllowedMask` excludes
+any other represented successor, the first scan sets `MinSucc` to zero
+and rejects the whole update.
+
+For a successful update on a reachable source, every represented
+runtime successor is therefore included, and the source passes the
+gas-sensitive boundary check. Each successor has one effective
+predecessor, is not the program entry, has no implicit dynamic
+predecessor, and passes the gas-chunk boundary check. The update
+subtracts the same common cost from every such successor that it adds
+to the source. Every source execution selects one compensated
+successor, and every execution of that successor arrives from the
+source, so the costs balance on complete paths even when an SCC was
+not added to `InCycle`.
+
+`RPO` and the schedule can still contain unreachable blocks, while
+`buildLoopsUsingDominance` skips an unreachable back-edge source.
+`lemma614Update` may therefore update such a source and skip one of its
+recorded back-edges. This does not affect runtime gas because no
+executable path reaches the source. The local path-balance claim above
+is intentionally limited to runtime-reachable sources.
+
+**Future-contributor warning**: `InCycle`, the dynamic-edge guards,
+`effectivePredCount`, and the schedule masks enforce different parts of
+this invariant. None can be removed on the assumption that
+`UseLinearSPP=true` proves reducibility.
+
+### Conditional two-pass SCC fallback
 
 When `buildLoopsUsingDominance` returns `false`, `UseLinearSPP=false`
-and the Tarjan SCC pass runs over `SuccsCSR` to fill `InCycle`. The
-`effectivePredCount` guard remains active in this path too, so Tarjan
-SCC is defence-in-depth, not the only safety net.
+and a two-pass Kosaraju-style traversal runs over `SuccsCSR` and
+`PredsCSR` to fill `InCycle`. A `true` result does not trigger the
+fallback and may leave an SCC without dominance back-edges unmarked.
+Both paths retain the same local source, successor, and schedule checks
+described above.
+
+### Regression scope
+
+The permanent cache and execution regressions added for the dynamic-jump
+fix directly cover the `HasUnresolvedDynamicSuccessor` behavior. They do
+not execute an unrecognized SCC or a synthetic critical edge through the
+complete SPP pipeline. Changes to loop discovery, back-edge filtering, or
+synthetic-block writeback require dedicated regression coverage for those
+paths.
 
 ### Block-vector reserve
 
