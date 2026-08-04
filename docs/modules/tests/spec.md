@@ -72,6 +72,15 @@ This module does not include: EVM interpreter (evm), Host implementation (host),
 - **evmFallbackExecutionTests**: Requires `ZEN_ENABLE_LIBEVM`; verify interpreter fallback on JIT exception
 - **Dependency**: dtvmapi library
 
+### 9. EVM JIT Frontend Structural Tests
+
+- **evmJitFrontendTests**: Validate analyzer facts, stack-SSA boundaries,
+  memory-plan consumers, MIR verification, and control-flow lowering.
+- Full-table runtime dynamic dispatch must remain shared across multiple
+  unfiltered dynamic sources. The structural regression counts MIR switch
+  statements so stack-SSA builds cannot silently return to per-source
+  `O(dynamic sources × JUMPDESTs)` expansion.
+
 ## External Contracts
 
 | Dependent Module | Contract |

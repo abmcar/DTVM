@@ -101,6 +101,43 @@ bool verifyMirForBytecode(const std::vector<uint8_t> &Bytecode,
   return Ok;
 }
 
+struct MirControlFlowStats {
+  bool Compiled = false;
+  uint32_t BasicBlocks = 0;
+  uint32_t Switches = 0;
+};
+
+MirControlFlowStats
+compileMirControlFlowStats(const std::vector<uint8_t> &Bytecode) {
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setGasMeteringEnabled(false);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  COMPILER::MModule Mod(Ctx);
+  std::array<COMPILER::MType *, 1> ParamTypes = {
+      COMPILER::MPointerType::create(Ctx, Ctx.VoidType)};
+  COMPILER::MFunctionType *FuncType = COMPILER::MFunctionType::create(
+      Ctx, Ctx.VoidType, llvm::ArrayRef<COMPILER::MType *>(ParamTypes));
+  Mod.addFuncType(FuncType);
+
+  COMPILER::MFunction Func(Ctx, 0);
+  Func.setFunctionType(FuncType);
+  EVMMirBuilder Builder(Ctx, Func);
+  MirControlFlowStats Stats;
+  Stats.Compiled = Builder.compile(&Ctx);
+  Stats.BasicBlocks = Func.getNumBasicBlocks();
+  for (COMPILER::MBasicBlock *BB : Func) {
+    for (COMPILER::MInstruction *Inst : *BB) {
+      if (Inst->getKind() == COMPILER::MInstruction::SWITCH) {
+        ++Stats.Switches;
+      }
+    }
+  }
+  return Stats;
+}
+
 const EVMAnalyzer::BlockInfo *findBlock(const EVMAnalyzer &Analyzer,
                                         uint64_t EntryPC) {
   const auto &Blocks = Analyzer.getBlockInfos();
@@ -109,6 +146,21 @@ const EVMAnalyzer::BlockInfo *findBlock(const EVMAnalyzer &Analyzer,
     return nullptr;
   }
   return &It->second;
+}
+
+TEST(EVMMirBuilderControlFlowTest, FullDynamicDispatchIsSharedAcrossSources) {
+  constexpr uint32_t DynamicSources = 16;
+  std::vector<uint8_t> Bytecode;
+  for (uint32_t Index = 0; Index < DynamicSources; ++Index) {
+    Bytecode.push_back(OP_JUMPDEST);
+    Bytecode.push_back(OP_PUSH0);
+    Bytecode.push_back(OP_CALLDATALOAD);
+    Bytecode.push_back(OP_JUMP);
+  }
+
+  const MirControlFlowStats Stats = compileMirControlFlowStats(Bytecode);
+  ASSERT_TRUE(Stats.Compiled);
+  EXPECT_LT(Stats.Switches, DynamicSources);
 }
 
 class MirBuilderConstFoldHarness {

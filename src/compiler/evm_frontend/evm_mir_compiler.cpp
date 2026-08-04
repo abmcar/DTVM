@@ -316,14 +316,6 @@ void EVMMirBuilder::loadEVMInstanceAttr() {
   ExceptionReturnBB = CurFunc->createExceptionReturnBB();
 }
 
-bool EVMMirBuilder::shouldUseSharedDynamicDispatch() const {
-#ifdef ZEN_ENABLE_EVM_STACK_SSA_LIFT
-  return false;
-#else
-  return true;
-#endif
-}
-
 MBasicBlock *EVMMirBuilder::getOrCreateIndirectJumpBB(
     uint64_t SourceBlockPC, const JumpTargetPCList *CandidateTargets) {
   auto ExistingIt = IndirectJumpBBs.find(SourceBlockPC);
@@ -1576,12 +1568,16 @@ void EVMMirBuilder::implementIndirectJump(
   const bool UseFilteredPerSource =
       CandidateTargets != nullptr && !CandidateTargets->empty() &&
       CandidateTargets->size() < JumpDestTable.size();
+  // Full-table runtime-dispatch targets are forced onto the materialized
+  // runtime-stack path by EVMAnalyzer::finalizeLiftability(). They therefore
+  // have no source-aware stack-merge phi consumer and can share one dispatch
+  // CFG in both stack-SSA and non-SSA builds. A proven smaller candidate set
+  // remains per-source so its filtered dispatch and predecessor registration
+  // stay source-specific.
   MBasicBlock *TargetBB =
       UseFilteredPerSource
           ? getOrCreateIndirectJumpBB(CurrentBlockPC, CandidateTargets)
-          : (shouldUseSharedDynamicDispatch()
-                 ? getOrCreateSharedIndirectJumpBB()
-                 : getOrCreateIndirectJumpBB(CurrentBlockPC));
+          : getOrCreateSharedIndirectJumpBB();
   createInstruction<DassignInstruction>(true, &(Ctx.VoidType), JumpTarget,
                                         JumpTargetVar->getVarIdx());
   createInstruction<BrInstruction>(true, Ctx, TargetBB);

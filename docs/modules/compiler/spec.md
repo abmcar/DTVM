@@ -179,6 +179,26 @@ and destination ends for expansion elision while retaining the original
 - Provide bytecode, gas chunk end/cost arrays for chunk-based metering
 - Use register to hold gas when `ZEN_ENABLE_EVM_GAS_REGISTER` is enabled
 
+### EVM Stack SSA Lift Safety
+
+- `ZEN_ENABLE_EVM_STACK_SSA_LIFT` permits compatible EVM operand-stack values
+  to cross basic-block boundaries as SSA state.
+- A lifted merge must have one valid incoming for every final MIR predecessor,
+  and all MIR phi instructions must remain contiguous at block start.
+- Dynamic-jump lowering may expand one EVM predecessor PC into multiple MIR
+  predecessor blocks. Until the merge representation distinguishes those MIR
+  predecessors, a dynamic-jump target requiring an entry merge is non-lifted
+  and uses the deterministic runtime-stack fallback.
+- An unfiltered full-table dynamic dispatch is shared at module scope in both
+  stack-SSA and non-SSA builds. This is sound while every runtime
+  dynamic-dispatch target is non-lifted and consumes the materialized runtime
+  stack. A source with a proven smaller candidate set retains a per-source
+  filtered dispatch. Re-enabling lifting for runtime dynamic targets requires
+  revisiting this predecessor-accounting contract before changing either
+  invariant.
+- Unsupported merge shapes must fall back before MIR phi construction; they
+  must never emit an incomplete phi, fail module verification, or abort.
+
 ### Machine Code and Module Binding
 
 - Machine code is written to `EVMModule::getJITCodeMemPool()` or the corresponding `Module` pool
