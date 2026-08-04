@@ -147,12 +147,26 @@ private:
     const auto &BlockInfos = Analyzer.getBlockInfos();
 
     for (const auto &[EntryPC, BlockInfo] : BlockInfos) {
-      const int32_t EntryDepth = std::max(BlockInfo.ResolvedEntryStackDepth, 0);
+      const bool HasReliableEntryStack =
+          BlockInfo.ResolvedEntryStackDepth >= 0 &&
+          !BlockInfo.HasInconsistentEntryDepth &&
+          !BlockInfo.EntryDepthMayComeFromDynamicDispatch;
+      const int32_t EntryDepth =
+          HasReliableEntryStack ? BlockInfo.ResolvedEntryStackDepth : 0;
       std::vector<MemoryEntryValue> EntryValues = EntryAddresses.getEntryValues(
           EntryPC, static_cast<uint32_t>(EntryDepth));
-      MemoryFacts.beginBlock(EntryPC, BlockInfo.BodyStartPC,
-                             BlockInfo.BodyEndPC, EntryValues,
-                             BlockInfo.Successors, BlockInfo.Predecessors);
+      MemoryFacts.beginBlock(
+          EntryPC, BlockInfo.BodyStartPC, BlockInfo.BodyEndPC, EntryValues,
+          BlockInfo.Successors, BlockInfo.Predecessors, HasReliableEntryStack);
+
+      // Memory facts model stack-relative addresses.  An unresolved,
+      // inconsistent, or dynamic-dispatch-derived entry depth cannot reliably
+      // supply the hidden live-ins used by DUP/SWAP, so simulating such a block
+      // can invent precise but false aliases.  Keep every memory-plan consumer
+      // conservative by retaining only the block topology.
+      if (!HasReliableEntryStack) {
+        continue;
+      }
 
       size_t ScanPC = static_cast<size_t>(BlockInfo.BodyStartPC);
       const size_t EndPC = std::min<size_t>(BlockInfo.BodyEndPC, BytecodeSize);
