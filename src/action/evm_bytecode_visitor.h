@@ -143,8 +143,11 @@ private:
   void buildMemoryFacts(const EVMAnalyzer &Analyzer, const uint8_t *Bytecode,
                         size_t BytecodeSize) {
     MemoryFacts.reset();
+    MemoryFacts.setRevision(Analyzer.getRevision());
     MemoryEntryAddressAnalysis EntryAddresses(Analyzer, Bytecode, BytecodeSize);
     const auto &BlockInfos = Analyzer.getBlockInfos();
+    const std::vector<uint64_t> DynamicDispatchSources =
+        Analyzer.getDynamicJumpDispatchSourceBlocks();
 
     for (const auto &[EntryPC, BlockInfo] : BlockInfos) {
       const bool HasReliableEntryStack =
@@ -155,9 +158,17 @@ private:
           HasReliableEntryStack ? BlockInfo.ResolvedEntryStackDepth : 0;
       std::vector<MemoryEntryValue> EntryValues = EntryAddresses.getEntryValues(
           EntryPC, static_cast<uint32_t>(EntryDepth));
+      const std::vector<uint64_t> PotentialPredecessors =
+          Analyzer.getPotentialEntryPredecessorsForBlock(EntryPC);
+      const bool PredecessorsAreStatic =
+          Analyzer.getDynamicJumpSourceBlocksForBlock(EntryPC).empty();
+      const bool PredecessorsComplete =
+          Analyzer.dynamicJumpTargetPredecessorsAreComplete(
+              EntryPC, DynamicDispatchSources);
       MemoryFacts.beginBlock(
           EntryPC, BlockInfo.BodyStartPC, BlockInfo.BodyEndPC, EntryValues,
-          BlockInfo.Successors, BlockInfo.Predecessors, HasReliableEntryStack);
+          BlockInfo.Successors, PotentialPredecessors, HasReliableEntryStack,
+          PredecessorsComplete, PredecessorsAreStatic);
 
       // Memory facts model stack-relative addresses.  An unresolved,
       // inconsistent, or dynamic-dispatch-derived entry depth cannot reliably

@@ -361,6 +361,17 @@ public:
     return PredBlockPCs;
   }
 
+  std::vector<uint64_t> getDynamicJumpDispatchSourceBlocks() const {
+    return collectAllDynamicJumpDispatchSourceBlocks();
+  }
+
+  bool dynamicJumpTargetPredecessorsAreComplete(
+      uint64_t BlockPC,
+      const std::vector<uint64_t> &DispatchSourceBlocks) const {
+    return dynamicJumpTargetPredecessorsCoverCodegenEdges(BlockPC,
+                                                          DispatchSourceBlocks);
+  }
+
   std::vector<uint64_t>
   getCompatibleDynamicJumpTargetBlocksForSourceBlock(uint64_t BlockPC) const {
     auto It = BlockInfos.find(BlockPC);

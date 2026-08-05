@@ -162,8 +162,26 @@ Block prechecks select one maximal safe window with at least two proven direct
 memory operations. The plan records explicit operation IDs, is emitted at the
 first covered operation, and may cover gaps or overlapping intervals because
 expansion grouping does not transform memory values. Per-operation guaranteed
-bytes include proven earlier expansion in the same block, but stop learning
-new guarantees after a hard barrier.
+bytes include proven earlier expansion in the same block.
+
+`MemoryProofLifetimeAnalysis` separates two questions that are distinct under
+EVM semantics. A successful memory operation may establish a logical minimum
+extent that remains true after an opcode such as `GAS` or `MSIZE`; this permits
+a later consumer to reuse the extent proof. It does not permit the compiler to
+move a later expansion, gas charge, trap, log, return, or external call across
+that opcode. The placement query therefore remains fail closed across
+observable-order, trapping, externalization, termination, unknown-effect, and
+unsafe CFG boundaries even when the logical-size proof survives.
+
+Proof propagation uses the analyzer's complete predecessor relation. The
+invocation entry starts with a zero-byte guarantee even when it has a backedge,
+and blocks with incomplete dynamic-dispatch predecessors receive no cross-block
+guarantee. Revision-undefined opcodes are terminating barriers. Prepared-memory
+runtime helpers declare typed proof requirements and normal-success memory
+effects; a helper contract is satisfied only when every required proof
+component has been established. Cached host-base and memory-content proof
+domains are deliberately not propagated until a lowering consumer requires
+them.
 
 The framework may eliminate only the write of an exact, fully overwritten
 `MSTORE` or `MSTORE8`, and may forward an exact 32-byte `MSTORE` value to a

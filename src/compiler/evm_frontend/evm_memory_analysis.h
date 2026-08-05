@@ -842,26 +842,6 @@ public:
   }
 
 private:
-  static bool isHardBarrier(const MemoryOp &Op) {
-    switch (Op.Kind) {
-    case MemoryOpKind::Log:
-    case MemoryOpKind::Call:
-    case MemoryOpKind::Create:
-    case MemoryOpKind::Return:
-    case MemoryOpKind::Revert:
-    case MemoryOpKind::MSize:
-    case MemoryOpKind::Gas:
-      return true;
-    default:
-      break;
-    }
-
-    return Op.Effect == MemoryEffect::Escape ||
-           Op.Effect == MemoryEffect::MemorySizeObserver ||
-           Op.Effect == MemoryEffect::GasSensitive ||
-           Op.Effect == MemoryEffect::Unknown;
-  }
-
   static bool getIntervalEnd(const MemoryInterval &Interval, uint64_t &End) {
     if (Interval.Space != AddressSpace::Memory || Interval.Empty ||
         !Interval.Addr.isKnown() ||
@@ -877,54 +857,51 @@ private:
     return true;
   }
 
-  static bool getDirectRequiredBytes(const MemoryOp &Op, uint64_t &End) {
-    switch (Op.Kind) {
-    case MemoryOpKind::MLoad:
-      return Op.Reads.size() == 1 && getIntervalEnd(Op.Reads[0], End);
-    case MemoryOpKind::Keccak:
-      return Op.Reads.size() == 1 && getIntervalEnd(Op.Reads[0], End);
-    case MemoryOpKind::MStore:
-    case MemoryOpKind::MStore8:
-      return Op.Writes.size() == 1 && getIntervalEnd(Op.Writes[0], End);
-    case MemoryOpKind::CallDataCopy:
-    case MemoryOpKind::CodeCopy:
-      return Op.Writes.size() == 1 && getIntervalEnd(Op.Writes[0], End);
-    case MemoryOpKind::MCopy: {
-      if (Op.Reads.size() != 1 || Op.Writes.size() != 1) {
-        return false;
+  static bool getGuaranteedRequiredBytes(const MemoryOp &Op, uint64_t &End) {
+    bool Found = false;
+    End = 0;
+    auto Accumulate = [&Found, &End](const MemoryInterval &Interval) {
+      uint64_t IntervalEnd = 0;
+      if (getIntervalEnd(Interval, IntervalEnd)) {
+        End = std::max(End, IntervalEnd);
+        Found = true;
       }
-      uint64_t ReadEnd = 0;
-      uint64_t WriteEnd = 0;
-      if (!getIntervalEnd(Op.Reads[0], ReadEnd) ||
-          !getIntervalEnd(Op.Writes[0], WriteEnd)) {
-        return false;
-      }
-      End = std::max(ReadEnd, WriteEnd);
-      return true;
+    };
+    for (const MemoryInterval &Read : Op.Reads) {
+      Accumulate(Read);
     }
-    default:
-      return false;
+    for (const MemoryInterval &Write : Op.Writes) {
+      Accumulate(Write);
     }
+    return Found;
   }
 
-  uint64_t transfer(const MemoryBlockFacts &Block,
-                    uint64_t EntryBytesValue) const {
+  struct TransferResult {
+    uint64_t Bytes = 0;
+    bool HasNormalExit = true;
+  };
+
+  TransferResult transfer(const MemoryBlockFacts &Block,
+                          uint64_t EntryBytesValue) const {
     if (!Block.HasCompleteOpcodeFacts) {
-      return 0;
+      return {.Bytes = 0};
     }
     uint64_t Current = EntryBytesValue;
     for (size_t I = Block.OpsBegin; I < Block.OpsEnd && I < Facts.Ops.size();
          ++I) {
       const MemoryOp &Op = Facts.Ops[I];
-      if (isHardBarrier(Op)) {
-        return Current;
+      if (!Op.ObservableEffects.preservesLogicalSizeProof()) {
+        Current = 0;
       }
       uint64_t RequiredBytes = 0;
-      if (getDirectRequiredBytes(Op, RequiredBytes)) {
+      if (getGuaranteedRequiredBytes(Op, RequiredBytes)) {
         Current = std::max(Current, RequiredBytes);
       }
+      if (Op.ObservableEffects.terminatesFrame()) {
+        return {.Bytes = 0, .HasNormalExit = false};
+      }
     }
-    return Current;
+    return {.Bytes = Current};
   }
 
   void recordBeforeOpBytes(const MemoryBlockFacts &Block,
@@ -933,34 +910,35 @@ private:
       return;
     }
     uint64_t Current = EntryBytesValue;
-    bool SeenBarrier = false;
     for (size_t I = Block.OpsBegin; I < Block.OpsEnd && I < Facts.Ops.size();
          ++I) {
       const MemoryOp &Op = Facts.Ops[I];
       BeforeOpBytes[Op.Id] = Current;
-      if (isHardBarrier(Op)) {
-        SeenBarrier = true;
-        continue;
-      }
-      if (SeenBarrier) {
-        continue;
+      if (!Op.ObservableEffects.preservesLogicalSizeProof()) {
+        Current = 0;
       }
       uint64_t RequiredBytes = 0;
-      if (getDirectRequiredBytes(Op, RequiredBytes)) {
+      if (getGuaranteedRequiredBytes(Op, RequiredBytes)) {
         Current = std::max(Current, RequiredBytes);
+      }
+      if (Op.ObservableEffects.terminatesFrame()) {
+        return;
       }
     }
   }
 
   uint64_t computeEntryFromPredecessors(const MemoryBlockFacts &Block) const {
-    if (!Block.HasCompleteOpcodeFacts) {
-      return 0;
-    }
-    if (Block.Predecessors.empty()) {
+    if (!Block.HasCompleteOpcodeFacts || Block.EntryPC == 0 ||
+        !Block.PredecessorsComplete || !Block.PredecessorsAreStatic ||
+        Block.Predecessors.empty()) {
       return 0;
     }
     uint64_t Result = std::numeric_limits<uint64_t>::max();
     for (uint64_t PredPC : Block.Predecessors) {
+      auto PredValidIt = ExitAvailable.find(PredPC);
+      if (PredValidIt == ExitAvailable.end() || !PredValidIt->second) {
+        return 0;
+      }
       auto PredExitIt = ExitBytes.find(PredPC);
       const uint64_t PredExit =
           PredExitIt == ExitBytes.end() ? 0 : PredExitIt->second;
@@ -973,11 +951,22 @@ private:
     std::queue<uint64_t> WorkList;
     std::map<uint64_t, bool> InQueue;
     for (const auto &[EntryPC, Block] : Facts.Blocks) {
-      (void)Block;
       EntryBytes[EntryPC] = 0;
       ExitBytes[EntryPC] = 0;
+      ExitAvailable[EntryPC] = false;
       WorkList.push(EntryPC);
       InQueue[EntryPC] = true;
+      for (uint64_t PredPC : Block.Predecessors) {
+        Dependents[PredPC].push_back(EntryPC);
+      }
+      for (uint64_t SuccPC : Block.Successors) {
+        Dependents[EntryPC].push_back(SuccPC);
+      }
+    }
+    for (auto &[EntryPC, Targets] : Dependents) {
+      (void)EntryPC;
+      std::sort(Targets.begin(), Targets.end());
+      Targets.erase(std::unique(Targets.begin(), Targets.end()), Targets.end());
     }
 
     while (!WorkList.empty()) {
@@ -992,13 +981,19 @@ private:
       const MemoryBlockFacts &Block = BlockIt->second;
       const uint64_t NewEntry = computeEntryFromPredecessors(Block);
       EntryBytes[EntryPC] = NewEntry;
-      const uint64_t NewExit = transfer(Block, NewEntry);
-      if (NewExit == ExitBytes[EntryPC]) {
+      const TransferResult NewExit = transfer(Block, NewEntry);
+      if (!NewExit.HasNormalExit) {
+        ExitAvailable[EntryPC] = false;
+        ExitBytes[EntryPC] = 0;
         continue;
       }
-      ExitBytes[EntryPC] = NewExit;
+      if (ExitAvailable[EntryPC] && NewExit.Bytes == ExitBytes[EntryPC]) {
+        continue;
+      }
+      ExitAvailable[EntryPC] = true;
+      ExitBytes[EntryPC] = NewExit.Bytes;
 
-      for (uint64_t SuccPC : Block.Successors) {
+      for (uint64_t SuccPC : Dependents[EntryPC]) {
         if (Facts.Blocks.find(SuccPC) == Facts.Blocks.end()) {
           continue;
         }
@@ -1017,7 +1012,110 @@ private:
   const MemoryFacts &Facts;
   std::map<uint64_t, uint64_t> EntryBytes;
   std::map<uint64_t, uint64_t> ExitBytes;
+  std::map<uint64_t, bool> ExitAvailable;
+  std::map<uint64_t, std::vector<uint64_t>> Dependents;
   std::map<uint32_t, uint64_t> BeforeOpBytes;
+};
+
+struct MemoryProofAvailability {
+  uint64_t GuaranteedMinBytes = 0;
+  bool HasLogicalSize = false;
+  bool HasAccessRange = false;
+
+  bool canReuseWithoutExpansion() const {
+    return HasLogicalSize && HasAccessRange;
+  }
+};
+
+// Proof availability and placement legality are separate queries. Logical
+// extent survives observers such as GAS and MSIZE, but an expansion may not be
+// moved across their protocol-visible ordering points.
+class MemoryProofLifetimeAnalysis {
+public:
+  explicit MemoryProofLifetimeAnalysis(const MemoryFacts &Facts)
+      : Facts(Facts), GuaranteedBytes(Facts) {}
+
+  MemoryProofAvailability
+  queryBeforeOp(uint32_t OpId, const MemoryInterval &RequiredRange,
+                uint64_t AdditionalGuaranteedBytes = 0) const {
+    if (Facts.getOp(OpId) == nullptr) {
+      return {};
+    }
+
+    MemoryProofAvailability Result;
+    Result.GuaranteedMinBytes =
+        std::max(AdditionalGuaranteedBytes,
+                 GuaranteedBytes.getGuaranteedMinBytesBeforeOp(OpId));
+    Result.HasLogicalSize = true;
+
+    if (RequiredRange.Empty) {
+      Result.HasAccessRange = true;
+      return Result;
+    }
+
+    uint64_t RequiredEnd = 0;
+    Result.HasAccessRange = getExactMemoryEnd(RequiredRange, RequiredEnd) &&
+                            RequiredEnd <= Result.GuaranteedMinBytes;
+    return Result;
+  }
+
+  bool canMoveExpansionBetween(uint32_t ProducerOpId,
+                               uint32_t ConsumerOpId) const {
+    size_t ProducerIndex = 0;
+    size_t ConsumerIndex = 0;
+    if (!findOpIndex(ProducerOpId, ProducerIndex) ||
+        !findOpIndex(ConsumerOpId, ConsumerIndex) ||
+        ProducerIndex >= ConsumerIndex) {
+      return false;
+    }
+
+    const MemoryOp &Producer = Facts.Ops[ProducerIndex];
+    const MemoryOp &Consumer = Facts.Ops[ConsumerIndex];
+    if (Producer.BlockEntryPC != Consumer.BlockEntryPC) {
+      return false;
+    }
+
+    for (size_t I = ProducerIndex + 1; I < ConsumerIndex; ++I) {
+      const MemoryOp &Op = Facts.Ops[I];
+      const MemoryEffectSummary &Effects = Op.ObservableEffects;
+      if (Effects.requiresOrderToken() || Effects.mayTrapOrHalt() ||
+          Effects.externalizesMemory() || Effects.terminatesFrame() ||
+          Op.Effect == MemoryEffect::Escape ||
+          Op.Effect == MemoryEffect::Unknown) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+private:
+  static bool getExactMemoryEnd(const MemoryInterval &Interval, uint64_t &End) {
+    if (Interval.Space != AddressSpace::Memory || Interval.Empty ||
+        !Interval.Addr.isKnown() ||
+        Interval.Addr.Kind != AddressBaseKind::Const || !Interval.Size.Known ||
+        Interval.Addr.Offset < 0) {
+      return false;
+    }
+    const uint64_t Begin = static_cast<uint64_t>(Interval.Addr.Offset);
+    if (Interval.Size.Value > std::numeric_limits<uint64_t>::max() - Begin) {
+      return false;
+    }
+    End = Begin + Interval.Size.Value;
+    return true;
+  }
+
+  bool findOpIndex(uint32_t OpId, size_t &Index) const {
+    for (size_t I = 0; I < Facts.Ops.size(); ++I) {
+      if (Facts.Ops[I].Id == OpId) {
+        Index = I;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const MemoryFacts &Facts;
+  MemoryGuaranteedMinBytesAnalysis GuaranteedBytes;
 };
 
 } // namespace COMPILER

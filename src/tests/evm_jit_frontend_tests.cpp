@@ -11,6 +11,7 @@
 #include "compiler/evm_frontend/evm_memory_grouping.h"
 #include "compiler/evm_frontend/evm_memory_precheck.h"
 #include "compiler/evm_frontend/evm_mir_compiler.h"
+#include "compiler/evm_frontend/evm_runtime_helper_effects.h"
 #include "compiler/mir/module.h"
 #include "compiler/mir/pass/verifier.h"
 
@@ -366,8 +367,9 @@ std::vector<uint8_t> makeLargeStaticDynamicOffsetMStoreBlock(uint64_t Ops) {
   return Bytecode;
 }
 
-COMPILER::MemoryFacts collectMemoryFacts(const std::vector<uint8_t> &Bytecode) {
-  COMPILER::MemoryFactsBuilder FactsBuilder;
+COMPILER::MemoryFacts collectMemoryFacts(const std::vector<uint8_t> &Bytecode,
+                                         evmc_revision Revision = EVMC_CANCUN) {
+  COMPILER::MemoryFactsBuilder FactsBuilder(Revision);
   FactsBuilder.beginBlock(0, 0);
 
   size_t PC = 0;
@@ -389,7 +391,9 @@ collectAnalyzerMemoryFacts(const std::vector<uint8_t> &Bytecode) {
   const uint8_t *Data = Bytecode.empty() ? nullptr : Bytecode.data();
   COMPILER::MemoryEntryAddressAnalysis EntryAddresses(Analyzer, Data,
                                                       Bytecode.size());
-  COMPILER::MemoryFactsBuilder FactsBuilder;
+  COMPILER::MemoryFactsBuilder FactsBuilder(EVMC_CANCUN);
+  const std::vector<uint64_t> DynamicDispatchSources =
+      Analyzer.getDynamicJumpDispatchSourceBlocks();
   const auto &Blocks = Analyzer.getBlockInfos();
   for (const auto &[EntryPC, BlockInfo] : Blocks) {
     const bool HasReliableEntryStack =
@@ -401,9 +405,17 @@ collectAnalyzerMemoryFacts(const std::vector<uint8_t> &Bytecode) {
     std::vector<COMPILER::MemoryEntryValue> EntryValues =
         EntryAddresses.getEntryValues(EntryPC,
                                       static_cast<uint32_t>(EntryDepth));
+    const std::vector<uint64_t> PotentialPredecessors =
+        Analyzer.getPotentialEntryPredecessorsForBlock(EntryPC);
+    const bool PredecessorsAreStatic =
+        Analyzer.getDynamicJumpSourceBlocksForBlock(EntryPC).empty();
+    const bool PredecessorsComplete =
+        Analyzer.dynamicJumpTargetPredecessorsAreComplete(
+            EntryPC, DynamicDispatchSources);
     FactsBuilder.beginBlock(EntryPC, BlockInfo.BodyStartPC, BlockInfo.BodyEndPC,
                             EntryValues, BlockInfo.Successors,
-                            BlockInfo.Predecessors, HasReliableEntryStack);
+                            PotentialPredecessors, HasReliableEntryStack,
+                            PredecessorsComplete, PredecessorsAreStatic);
 
     if (!HasReliableEntryStack) {
       continue;
@@ -430,6 +442,8 @@ struct MemoryFactBlockSpec {
   std::vector<uint64_t> Successors;
   std::vector<uint64_t> Predecessors;
   bool HasCompleteOpcodeFacts = true;
+  bool PredecessorsComplete = true;
+  bool PredecessorsAreStatic = true;
 };
 
 COMPILER::MemoryFacts
@@ -438,9 +452,10 @@ collectManualBlockMemoryFacts(const std::vector<uint8_t> &Bytecode,
   COMPILER::MemoryFactsBuilder FactsBuilder;
   const uint8_t *Data = Bytecode.empty() ? nullptr : Bytecode.data();
   for (const MemoryFactBlockSpec &Block : Blocks) {
-    FactsBuilder.beginBlock(Block.EntryPC, Block.BodyStartPC, Block.BodyEndPC,
-                            {}, Block.Successors, Block.Predecessors,
-                            Block.HasCompleteOpcodeFacts);
+    FactsBuilder.beginBlock(
+        Block.EntryPC, Block.BodyStartPC, Block.BodyEndPC, {}, Block.Successors,
+        Block.Predecessors, Block.HasCompleteOpcodeFacts,
+        Block.PredecessorsComplete, Block.PredecessorsAreStatic);
 
     if (!Block.HasCompleteOpcodeFacts) {
       continue;
@@ -479,6 +494,190 @@ TEST(EVMMemoryFactsBuilderTest, RecordsConstMStoreWriteInterval) {
   EXPECT_EQ(Op.Writes[0].Addr.Offset, 0x80);
   ASSERT_TRUE(Op.Writes[0].Size.Known);
   EXPECT_EQ(Op.Writes[0].Size.Value, 32u);
+}
+
+TEST(EVMMemoryFactsBuilderTest, SeparatesPlacementBaseAndLogicalSizeEffects) {
+  const std::vector<uint8_t> MStoreBytecode = {OP_PUSH1, 0x2a, OP_PUSH1, 0x80,
+                                               OP_MSTORE};
+  COMPILER::MemoryFacts MStoreFacts = collectMemoryFacts(MStoreBytecode);
+
+  ASSERT_EQ(MStoreFacts.Ops.size(), 1u);
+  const COMPILER::MemoryEffectSummary &MStore =
+      MStoreFacts.Ops[0].ObservableEffects;
+  EXPECT_EQ(MStore.StackPop, 2u);
+  EXPECT_EQ(MStore.StackPush, 0u);
+  EXPECT_TRUE(MStore.readsOrWritesMemory());
+  EXPECT_TRUE(MStore.mayGrowMemory());
+  EXPECT_TRUE(MStore.mayRebaseMemory());
+  EXPECT_TRUE(MStore.chargesDynamicGas());
+  EXPECT_TRUE(MStore.mayExhaustGas());
+  EXPECT_FALSE(MStore.requiresOrderToken());
+  EXPECT_TRUE(MStore.preservesLogicalSizeProof());
+  EXPECT_FALSE(MStore.preservesCachedMemoryBase());
+
+  COMPILER::MemoryFacts GasFacts = collectMemoryFacts({OP_GAS, OP_POP});
+  ASSERT_EQ(GasFacts.Ops.size(), 1u);
+  const COMPILER::MemoryEffectSummary &Gas = GasFacts.Ops[0].ObservableEffects;
+  EXPECT_TRUE(Gas.observesGas());
+  EXPECT_TRUE(Gas.requiresOrderToken());
+  EXPECT_TRUE(Gas.preservesLogicalSizeProof());
+  EXPECT_TRUE(Gas.preservesCachedMemoryBase());
+
+  COMPILER::MemoryFacts MSizeFacts = collectMemoryFacts({OP_MSIZE, OP_POP});
+  ASSERT_EQ(MSizeFacts.Ops.size(), 1u);
+  const COMPILER::MemoryEffectSummary &MSize =
+      MSizeFacts.Ops[0].ObservableEffects;
+  EXPECT_TRUE(MSize.observesMemorySize());
+  EXPECT_TRUE(MSize.requiresOrderToken());
+  EXPECT_TRUE(MSize.preservesLogicalSizeProof());
+  EXPECT_TRUE(MSize.preservesCachedMemoryBase());
+}
+
+TEST(EVMMemoryFactsBuilderTest, RecordsDynamicGasOpcodesAsOrderEffects) {
+  const evmc_opcode Opcodes[] = {OP_EXP, OP_BALANCE, OP_EXTCODESIZE,
+                                 OP_EXTCODEHASH, OP_SLOAD};
+  for (evmc_opcode Opcode : Opcodes) {
+    COMPILER::MemoryFacts Facts =
+        collectMemoryFacts({static_cast<uint8_t>(Opcode)});
+    ASSERT_EQ(Facts.Ops.size(), 1u) << static_cast<int>(Opcode);
+    const COMPILER::MemoryEffectSummary &Effect =
+        Facts.Ops[0].ObservableEffects;
+    EXPECT_TRUE(Effect.observesGas());
+    EXPECT_TRUE(Effect.chargesDynamicGas());
+    EXPECT_TRUE(Effect.mayExhaustGas());
+    EXPECT_TRUE(Effect.requiresOrderToken());
+    EXPECT_TRUE(Effect.mayTrapOrHalt());
+    EXPECT_TRUE(Effect.preservesLogicalSizeProof());
+  }
+}
+
+TEST(EVMMemoryFactsBuilderTest, RecordsSelfDestructGasAndTerminationEffects) {
+  COMPILER::MemoryFacts Facts = collectMemoryFacts({OP_SELFDESTRUCT});
+  ASSERT_EQ(Facts.Ops.size(), 1u);
+  const COMPILER::MemoryEffectSummary &Effect = Facts.Ops[0].ObservableEffects;
+  EXPECT_TRUE(Effect.observesGas());
+  EXPECT_TRUE(Effect.chargesDynamicGas());
+  EXPECT_TRUE(Effect.mayExhaustGas());
+  EXPECT_TRUE(Effect.requiresOrderToken());
+  EXPECT_TRUE(Effect.mayTrapOrHalt());
+  EXPECT_TRUE(Effect.terminatesFrame());
+}
+
+TEST(EVMMemoryFactsBuilderTest, TreatsPreForkCallOpcodesAsTerminatingBarriers) {
+  struct InvalidOpcodeCase {
+    evmc_opcode Opcode;
+    evmc_revision Revision;
+  };
+  const InvalidOpcodeCase Cases[] = {
+      {OP_DELEGATECALL, EVMC_FRONTIER},
+      {OP_STATICCALL, EVMC_SPURIOUS_DRAGON},
+  };
+
+  for (const InvalidOpcodeCase &Case : Cases) {
+    COMPILER::MemoryFacts Facts =
+        collectMemoryFacts({static_cast<uint8_t>(Case.Opcode)}, Case.Revision);
+    ASSERT_EQ(Facts.Ops.size(), 1u);
+    const COMPILER::MemoryOp &Op = Facts.Ops[0];
+    EXPECT_EQ(Op.Kind, COMPILER::MemoryOpKind::Other);
+    EXPECT_EQ(Op.Effect, COMPILER::MemoryEffect::Unknown);
+    EXPECT_TRUE(Op.ObservableEffects.requiresOrderToken());
+    EXPECT_TRUE(Op.ObservableEffects.mayTrapOrHalt());
+    EXPECT_TRUE(Op.ObservableEffects.terminatesFrame());
+    EXPECT_TRUE(Op.Reads.empty());
+    EXPECT_TRUE(Op.Writes.empty());
+  }
+}
+
+TEST(EVMRuntimeMemoryHelperContractTest,
+     SeparatesPreparedRangeAndExpansionHelperContracts) {
+  using COMPILER::RuntimeMemoryHelperId;
+  using COMPILER::RuntimeProofRequirementFlag;
+  const COMPILER::RuntimeMemoryHelperContract Copy =
+      COMPILER::getRuntimeMemoryHelperContract(
+          RuntimeMemoryHelperId::CodeCopyNoExpand);
+  EXPECT_TRUE(Copy.requires(RuntimeProofRequirementFlag::LogicalSize));
+  EXPECT_TRUE(Copy.requires(RuntimeProofRequirementFlag::AccessRange));
+  EXPECT_TRUE(Copy.requires(RuntimeProofRequirementFlag::DynamicGasCharged));
+  EXPECT_TRUE(Copy.Effects.has(COMPILER::MemoryEffectFlag::WritesMemory));
+  EXPECT_FALSE(Copy.Effects.mayGrowMemory());
+
+  const COMPILER::RuntimeMemoryHelperContract Expand =
+      COMPILER::getRuntimeMemoryHelperContract(
+          RuntimeMemoryHelperId::ExpandMemoryNoGas);
+  EXPECT_TRUE(Expand.requires(RuntimeProofRequirementFlag::DynamicGasCharged));
+  EXPECT_TRUE(Expand.requires(RuntimeProofRequirementFlag::BoundsValidated));
+  EXPECT_TRUE(Expand.EstablishesLogicalSize);
+  EXPECT_TRUE(Expand.Effects.mayGrowMemory());
+  EXPECT_TRUE(Expand.Effects.mayRebaseMemory());
+}
+
+TEST(EVMRuntimeMemoryHelperContractTest,
+     RecordsTwoWordKeccakDynamicGasAndFailureEffects) {
+  const COMPILER::RuntimeMemoryHelperContract Contract =
+      COMPILER::getRuntimeMemoryHelperContract(
+          COMPILER::RuntimeMemoryHelperId::TwoWordKeccakNoExpand);
+  EXPECT_TRUE(Contract.Valid);
+  EXPECT_TRUE(Contract.Effects.observesGas());
+  EXPECT_TRUE(Contract.Effects.chargesDynamicGas());
+  EXPECT_TRUE(Contract.Effects.mayExhaustGas());
+  EXPECT_TRUE(Contract.Effects.mayTrapOrHalt());
+  EXPECT_TRUE(Contract.Effects.requiresOrderToken());
+}
+
+TEST(EVMRuntimeMemoryHelperContractTest,
+     RequiresIndependentCallArgumentAndReturnProofs) {
+  using COMPILER::RuntimeMemoryHelperId;
+  using COMPILER::RuntimeProofRequirementFlag;
+  const COMPILER::RuntimeMemoryHelperContract Contract =
+      COMPILER::getRuntimeMemoryHelperContract(
+          RuntimeMemoryHelperId::CallNoExpand);
+  const RuntimeProofRequirementFlag Required[] = {
+      RuntimeProofRequirementFlag::LogicalSize,
+      RuntimeProofRequirementFlag::CallArgumentsRange,
+      RuntimeProofRequirementFlag::CallReturnRange,
+      RuntimeProofRequirementFlag::OrderToken,
+  };
+  EXPECT_TRUE(Contract.Valid);
+  for (RuntimeProofRequirementFlag Missing : Required) {
+    COMPILER::RuntimeProofToken Incomplete;
+    for (RuntimeProofRequirementFlag Requirement : Required) {
+      if (Requirement != Missing) {
+        Incomplete.establish(Requirement);
+      }
+    }
+    EXPECT_FALSE(
+        COMPILER::satisfiesRuntimeMemoryHelperContract(Contract, Incomplete));
+  }
+}
+
+TEST(EVMRuntimeMemoryHelperContractTest,
+     RejectsSelectionsMissingAnyPreparedHelperRequirement) {
+  using COMPILER::RuntimeMemoryHelperId;
+  using COMPILER::RuntimeProofRequirementFlag;
+  const COMPILER::RuntimeMemoryHelperContract Contract =
+      COMPILER::getRuntimeMemoryHelperContract(
+          RuntimeMemoryHelperId::CallDataCopyNoExpand);
+  const RuntimeProofRequirementFlag Required[] = {
+      RuntimeProofRequirementFlag::LogicalSize,
+      RuntimeProofRequirementFlag::AccessRange,
+      RuntimeProofRequirementFlag::DynamicGasCharged,
+  };
+  COMPILER::RuntimeProofToken Complete;
+  for (RuntimeProofRequirementFlag Requirement : Required) {
+    Complete.establish(Requirement);
+  }
+  EXPECT_TRUE(
+      COMPILER::satisfiesRuntimeMemoryHelperContract(Contract, Complete));
+  for (RuntimeProofRequirementFlag Missing : Required) {
+    COMPILER::RuntimeProofToken Incomplete;
+    for (RuntimeProofRequirementFlag Requirement : Required) {
+      if (Requirement != Missing) {
+        Incomplete.establish(Requirement);
+      }
+    }
+    EXPECT_FALSE(
+        COMPILER::satisfiesRuntimeMemoryHelperContract(Contract, Incomplete));
+  }
 }
 
 TEST(EVMMemoryFactsBuilderTest, AttributesOpsToAnalyzerBlocks) {
@@ -632,6 +831,42 @@ TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, RejectedMergeKeepsMinimumZero) {
   EXPECT_EQ(Guaranteed.getGuaranteedMinBytesAtEntry(14), 0u);
 }
 
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
+     DynamicDispatchPredecessorPreventsStaticPathProof) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH0,    OP_CALLDATALOAD,
+                                         OP_PUSH1,    0x09,
+                                         OP_JUMPI,    OP_PUSH1,
+                                         0x20,        OP_CALLDATALOAD,
+                                         OP_JUMP,     OP_JUMPDEST,
+                                         OP_PUSH1,    0x01,
+                                         OP_PUSH1,    0x00,
+                                         OP_MSTORE,   OP_PUSH1,
+                                         0x12,        OP_JUMP,
+                                         OP_JUMPDEST, OP_PUSH1,
+                                         0x00,        OP_MLOAD,
+                                         OP_STOP};
+  COMPILER::MemoryFacts Facts = collectAnalyzerMemoryFacts(Bytecode);
+  const COMPILER::MemoryBlockFacts *Target = Facts.getBlock(18);
+  ASSERT_NE(Target, nullptr);
+  EXPECT_EQ(Target->Predecessors, std::vector<uint64_t>({9, 5}));
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesAtEntry(18), 0u);
+}
+
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
+     IncompleteDynamicDispatchPredecessorsDropProof) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,    0x01,     OP_PUSH1,    0x00,     OP_MSTORE, OP_PUSH1,
+      0x0c,        OP_JUMP,  OP_JUMPDEST, OP_JUMP,  OP_STOP,   OP_STOP,
+      OP_JUMPDEST, OP_PUSH1, 0x00,        OP_MLOAD, OP_STOP};
+  COMPILER::MemoryFacts Facts = collectAnalyzerMemoryFacts(Bytecode);
+  const COMPILER::MemoryBlockFacts *Target = Facts.getBlock(12);
+  ASSERT_NE(Target, nullptr);
+  EXPECT_FALSE(Target->PredecessorsComplete);
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesAtEntry(12), 0u);
+}
+
 TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, RecordsGuaranteeBeforeEachOp) {
   const std::vector<uint8_t> Bytecode = {
       OP_PUSH1, 0x01, OP_PUSH1, 0x80, OP_MSTORE, OP_PUSH1, 0x40, OP_MLOAD};
@@ -644,8 +879,40 @@ TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, RecordsGuaranteeBeforeEachOp) {
   EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0xa0u);
 }
 
+TEST(EVMMemoryProofLifetimeAnalysisTest,
+     ReusesRangeButRejectsExpansionMotionAcrossGas) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,     OP_PUSH1, 0x80,     OP_MSTORE, OP_GAS,
+      OP_POP,   OP_PUSH1, 0x80,     OP_MLOAD, OP_STOP};
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryProofLifetimeAnalysis Lifetime(Facts);
+  ASSERT_EQ(Facts.Ops.size(), 3u);
+  const COMPILER::MemoryProofAvailability Proof =
+      Lifetime.queryBeforeOp(Facts.Ops[2].Id, Facts.Ops[2].Reads[0]);
+  EXPECT_EQ(Proof.GuaranteedMinBytes, 0xa0u);
+  EXPECT_TRUE(Proof.canReuseWithoutExpansion());
+  EXPECT_FALSE(
+      Lifetime.canMoveExpansionBetween(Facts.Ops[0].Id, Facts.Ops[2].Id));
+}
+
+TEST(EVMMemoryProofLifetimeAnalysisTest,
+     ReusesRangeButRejectsExpansionMotionAcrossMSize) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,     OP_PUSH1, 0x40,     OP_MSTORE, OP_MSIZE,
+      OP_POP,   OP_PUSH1, 0x40,     OP_MLOAD, OP_STOP};
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryProofLifetimeAnalysis Lifetime(Facts);
+  ASSERT_EQ(Facts.Ops.size(), 3u);
+  const COMPILER::MemoryProofAvailability Proof =
+      Lifetime.queryBeforeOp(Facts.Ops[2].Id, Facts.Ops[2].Reads[0]);
+  EXPECT_EQ(Proof.GuaranteedMinBytes, 0x60u);
+  EXPECT_TRUE(Proof.canReuseWithoutExpansion());
+  EXPECT_FALSE(
+      Lifetime.canMoveExpansionBetween(Facts.Ops[0].Id, Facts.Ops[2].Id));
+}
+
 TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
-     DoesNotLearnNewGuaranteesAfterBarrier) {
+     ContinuesLearningLogicalExtentAcrossGasObserver) {
   const std::vector<uint8_t> Bytecode = {
       OP_PUSH1, 0x01,     OP_PUSH1, 0x00,      OP_MSTORE, OP_GAS, OP_PUSH1,
       0x02,     OP_PUSH1, 0x80,     OP_MSTORE, OP_PUSH1,  0x80,   OP_MLOAD};
@@ -654,7 +921,7 @@ TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
   COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
 
   ASSERT_EQ(Facts.Ops.size(), 4u);
-  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[3].Id), 32u);
+  EXPECT_EQ(Guaranteed.getGuaranteedMinBytesBeforeOp(Facts.Ops[3].Id), 0xa0u);
 }
 
 TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, LearnsConstMCopyUnionEnd) {
@@ -2587,6 +2854,37 @@ class DynamicPushMockEVMBuilder : public MockEVMBuilder {
 public:
   Operand handlePush(const zen::common::Bytes &) { return Operand(); }
 };
+
+class MemoryFactsCapturingBuilder : public MockEVMBuilder {
+public:
+  void setMemoryFacts(const COMPILER::MemoryFacts &Facts) {
+    CapturedFacts = Facts;
+  }
+
+  COMPILER::MemoryFacts CapturedFacts;
+};
+
+TEST(EVMJITFrontendVisitorTest, UsesActiveRevisionForMemoryEffectFacts) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH0, OP_PUSH0, OP_PUSH0, OP_MCOPY,
+                                         OP_STOP};
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_SHANGHAI);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MemoryFactsCapturingBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MemoryFactsCapturingBuilder> Visitor(Builder,
+                                                                    &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  ASSERT_EQ(Builder.CapturedFacts.Ops.size(), 1u);
+  const COMPILER::MemoryOp &Op = Builder.CapturedFacts.Ops[0];
+  EXPECT_EQ(Op.Opcode, OP_MCOPY);
+  EXPECT_EQ(Op.Kind, COMPILER::MemoryOpKind::Other);
+  EXPECT_EQ(Op.Effect, COMPILER::MemoryEffect::Unknown);
+  EXPECT_TRUE(Op.ObservableEffects.mayTrapOrHalt());
+  EXPECT_TRUE(Op.ObservableEffects.terminatesFrame());
+}
 
 TEST(EVMMirBuilderConstFoldTest, ExpFoldsConstantOperands) {
   MirBuilderConstFoldHarness Harness;

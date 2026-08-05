@@ -140,6 +140,81 @@ enum class MemoryEffect : uint8_t {
   Unknown
 };
 
+enum class MemoryEffectFlag : uint16_t {
+  ReadsMemory = 1U << 0,
+  WritesMemory = 1U << 1,
+  ObservesMemorySize = 1U << 2,
+  ObservesGas = 1U << 3,
+  MayGrowMemory = 1U << 4,
+  MayRebaseMemory = 1U << 5,
+  MayTrapOrHalt = 1U << 6,
+  ExternalizesMemory = 1U << 7,
+  RequiresOrderToken = 1U << 8,
+  TerminatesFrame = 1U << 9,
+  ResetsLogicalMemory = 1U << 10,
+  ChargesDynamicGas = 1U << 11,
+  MayExhaustGas = 1U << 12
+};
+
+// Orthogonal EVM-observable effects. Placement barriers, logical memory-size
+// proofs, and cached host pointers deliberately query different dimensions.
+struct MemoryEffectSummary {
+  uint8_t StackPop = 0;
+  uint8_t StackPush = 0;
+  uint16_t Flags = 0;
+
+  void add(MemoryEffectFlag Flag) { Flags |= static_cast<uint16_t>(Flag); }
+
+  bool has(MemoryEffectFlag Flag) const {
+    return (Flags & static_cast<uint16_t>(Flag)) != 0;
+  }
+
+  bool readsOrWritesMemory() const {
+    return has(MemoryEffectFlag::ReadsMemory) ||
+           has(MemoryEffectFlag::WritesMemory);
+  }
+
+  bool observesMemorySize() const {
+    return has(MemoryEffectFlag::ObservesMemorySize);
+  }
+
+  bool observesGas() const { return has(MemoryEffectFlag::ObservesGas); }
+
+  bool chargesDynamicGas() const {
+    return has(MemoryEffectFlag::ChargesDynamicGas);
+  }
+
+  bool mayExhaustGas() const { return has(MemoryEffectFlag::MayExhaustGas); }
+
+  bool mayGrowMemory() const { return has(MemoryEffectFlag::MayGrowMemory); }
+
+  bool mayRebaseMemory() const {
+    return has(MemoryEffectFlag::MayRebaseMemory);
+  }
+
+  bool mayTrapOrHalt() const { return has(MemoryEffectFlag::MayTrapOrHalt); }
+
+  bool externalizesMemory() const {
+    return has(MemoryEffectFlag::ExternalizesMemory);
+  }
+
+  bool requiresOrderToken() const {
+    return has(MemoryEffectFlag::RequiresOrderToken);
+  }
+
+  bool terminatesFrame() const {
+    return has(MemoryEffectFlag::TerminatesFrame);
+  }
+
+  bool preservesLogicalSizeProof() const {
+    return !has(MemoryEffectFlag::ResetsLogicalMemory);
+  }
+
+  bool preservesCachedMemoryBase() const {
+    return !has(MemoryEffectFlag::MayRebaseMemory);
+  }
+};
+
 enum class MemoryOpKind : uint8_t {
   MLoad,
   MStore,
@@ -188,6 +263,7 @@ struct MemoryOp {
   std::vector<MemoryInterval> Reads;
   std::vector<MemoryInterval> Writes;
   MemoryEffect Effect = MemoryEffect::None;
+  MemoryEffectSummary ObservableEffects;
   bool IsTerminator = false;
 };
 
@@ -203,6 +279,8 @@ struct MemoryBlockFacts {
   evmc_opcode FirstHardBarrierOpcode = OP_STOP;
   uint64_t FirstHardBarrierPC = 0;
   uint64_t MaxConstRequiredSize = 0;
+  bool PredecessorsComplete = true;
+  bool PredecessorsAreStatic = true;
   std::vector<uint64_t> Successors;
   std::vector<uint64_t> Predecessors;
 
@@ -222,6 +300,17 @@ struct MemoryFacts {
   bool empty() const { return Ops.empty(); }
   size_t size() const { return Ops.size(); }
 
+  const MemoryOp *getOp(uint32_t OpId) const {
+    if (OpId >= Ops.size() || Ops[OpId].Id != OpId) {
+      return nullptr;
+    }
+    return &Ops[OpId];
+  }
+
+  size_t getOpIndex(uint32_t OpId) const {
+    return getOp(OpId) == nullptr ? Ops.size() : static_cast<size_t>(OpId);
+  }
+
   const MemoryBlockFacts *getBlock(uint64_t EntryPC) const {
     auto It = Blocks.find(EntryPC);
     return It == Blocks.end() ? nullptr : &It->second;
@@ -232,7 +321,11 @@ struct MemoryFacts {
 // dependency on MIR builder, analysis, or optimization consumers.
 class MemoryFactsBuilder {
 public:
-  MemoryFactsBuilder() = default;
+  explicit MemoryFactsBuilder(evmc_revision Revision = EVMC_CANCUN)
+      : Revision(Revision) {}
+
+  void setRevision(evmc_revision NewRevision) { Revision = NewRevision; }
+  evmc_revision getRevision() const { return Revision; }
 
   void reset() {
     endBlock();
@@ -253,7 +346,9 @@ public:
                   const std::vector<MemoryEntryValue> &EntryValues,
                   const std::vector<uint64_t> &Successors = {},
                   const std::vector<uint64_t> &Predecessors = {},
-                  bool HasCompleteOpcodeFacts = true) {
+                  bool HasCompleteOpcodeFacts = true,
+                  bool PredecessorsComplete = true,
+                  bool PredecessorsAreStatic = true) {
     endBlock();
     HasCurrentBlock = true;
     CurrentBlockEntryPC = EntryPC;
@@ -265,6 +360,8 @@ public:
     Block.OpsBegin = Facts.Ops.size();
     Block.OpsEnd = Facts.Ops.size();
     Block.HasCompleteOpcodeFacts = HasCompleteOpcodeFacts;
+    Block.PredecessorsComplete = PredecessorsComplete;
+    Block.PredecessorsAreStatic = PredecessorsAreStatic;
     Block.Successors = Successors;
     Block.Predecessors = Predecessors;
     Facts.Blocks[EntryPC] = std::move(Block);
@@ -298,6 +395,18 @@ public:
         return;
       }
     }
+    const auto *InstructionNames = evmc_get_instruction_names_table(Revision);
+    if (InstructionNames == nullptr ||
+        InstructionNames[static_cast<uint8_t>(Opcode)] == nullptr) {
+      MemoryOp &Op =
+          addOp(Pc, Opcode, MemoryOpKind::Other, MemoryEffect::Unknown);
+      Op.ObservableEffects.add(MemoryEffectFlag::RequiresOrderToken);
+      Op.ObservableEffects.add(MemoryEffectFlag::MayTrapOrHalt);
+      Op.ObservableEffects.add(MemoryEffectFlag::TerminatesFrame);
+      noteBlockFact(Op);
+      return;
+    }
+
     if (Opcode >= OP_PUSH0 && Opcode <= OP_PUSH32) {
       observePush(Opcode, Pc, Bytecode, BytecodeSize);
       return;
@@ -412,22 +521,10 @@ private:
 
   MemoryFacts Facts;
   std::vector<StackValue> Stack;
+  evmc_revision Revision = EVMC_CANCUN;
   uint32_t NextValueId = 1;
   uint64_t CurrentBlockEntryPC = 0;
   bool HasCurrentBlock = false;
-
-  static bool isHardBarrierEffect(MemoryEffect Effect, MemoryOpKind Kind) {
-    if (Kind == MemoryOpKind::Log || Kind == MemoryOpKind::Call ||
-        Kind == MemoryOpKind::Create || Kind == MemoryOpKind::Return ||
-        Kind == MemoryOpKind::Revert || Kind == MemoryOpKind::MSize ||
-        Kind == MemoryOpKind::Gas) {
-      return true;
-    }
-    return Effect == MemoryEffect::Escape ||
-           Effect == MemoryEffect::MemorySizeObserver ||
-           Effect == MemoryEffect::GasSensitive ||
-           Effect == MemoryEffect::Unknown;
-  }
 
   static MemoryHardBarrierKind getHardBarrierKind(const MemoryOp &Op) {
     switch (Op.Kind) {
@@ -479,10 +576,18 @@ private:
     return MemoryHardBarrierKind::None;
   }
 
-  static bool isUnknownEffectBarrierOpcode(evmc_opcode Opcode) {
+  static bool requiresEffectOnlyRecord(evmc_opcode Opcode) {
     switch (Opcode) {
+    case OP_EXP:
+    case OP_BALANCE:
+    case OP_EXTCODESIZE:
+    case OP_EXTCODEHASH:
+    case OP_SLOAD:
     case OP_SSTORE:
     case OP_TSTORE:
+      // Dynamic gas or host-state access must remain ordered with respect to
+      // memory expansion even though it does not access EVM linear memory.
+      return true;
     case OP_SELFDESTRUCT:
     case OP_INVALID:
       return true;
@@ -533,7 +638,7 @@ private:
     }
     MemoryBlockFacts &Block = It->second;
     Block.OpsEnd = Facts.Ops.size();
-    if (isHardBarrierEffect(Op.Effect, Op.Kind)) {
+    if (Op.ObservableEffects.requiresOrderToken()) {
       Block.HasBarrier = true;
       if (Block.FirstHardBarrierKind == MemoryHardBarrierKind::None) {
         Block.FirstHardBarrierKind = getHardBarrierKind(Op);
@@ -669,8 +774,128 @@ private:
     Op.Opcode = Opcode;
     Op.Kind = Kind;
     Op.Effect = Effect;
+    Op.ObservableEffects = summarizeEffects(Opcode, Kind);
     Facts.Ops.push_back(std::move(Op));
     return Facts.Ops.back();
+  }
+
+  MemoryEffectSummary summarizeEffects(evmc_opcode Opcode,
+                                       MemoryOpKind Kind) const {
+    MemoryEffectSummary Summary;
+    const auto &Metrics = evmc_get_instruction_metrics_table(Revision);
+    const auto &Metric = Metrics[static_cast<uint8_t>(Opcode)];
+    const int PopCount =
+        std::max(0, static_cast<int>(Metric.stack_height_required));
+    const int PushCount = std::max(0, PopCount + Metric.stack_height_change);
+    Summary.StackPop = static_cast<uint8_t>(PopCount);
+    Summary.StackPush = static_cast<uint8_t>(PushCount);
+
+    auto AddMemoryAccessEffects = [&Summary]() {
+      Summary.add(MemoryEffectFlag::MayGrowMemory);
+      Summary.add(MemoryEffectFlag::MayRebaseMemory);
+      Summary.add(MemoryEffectFlag::MayTrapOrHalt);
+      Summary.add(MemoryEffectFlag::ChargesDynamicGas);
+      Summary.add(MemoryEffectFlag::MayExhaustGas);
+    };
+
+    switch (Kind) {
+    case MemoryOpKind::MLoad:
+    case MemoryOpKind::Keccak:
+      Summary.add(MemoryEffectFlag::ReadsMemory);
+      AddMemoryAccessEffects();
+      break;
+    case MemoryOpKind::MStore:
+    case MemoryOpKind::MStore8:
+    case MemoryOpKind::CallDataCopy:
+    case MemoryOpKind::CodeCopy:
+    case MemoryOpKind::ReturnDataCopy:
+    case MemoryOpKind::ExtCodeCopy:
+      Summary.add(MemoryEffectFlag::WritesMemory);
+      AddMemoryAccessEffects();
+      break;
+    case MemoryOpKind::MCopy:
+      Summary.add(MemoryEffectFlag::ReadsMemory);
+      Summary.add(MemoryEffectFlag::WritesMemory);
+      AddMemoryAccessEffects();
+      break;
+    case MemoryOpKind::Log:
+      Summary.add(MemoryEffectFlag::ReadsMemory);
+      Summary.add(MemoryEffectFlag::ExternalizesMemory);
+      Summary.add(MemoryEffectFlag::RequiresOrderToken);
+      AddMemoryAccessEffects();
+      break;
+    case MemoryOpKind::Return:
+    case MemoryOpKind::Revert:
+      Summary.add(MemoryEffectFlag::ReadsMemory);
+      Summary.add(MemoryEffectFlag::ExternalizesMemory);
+      Summary.add(MemoryEffectFlag::RequiresOrderToken);
+      Summary.add(MemoryEffectFlag::TerminatesFrame);
+      AddMemoryAccessEffects();
+      break;
+    case MemoryOpKind::Call:
+      Summary.add(MemoryEffectFlag::ReadsMemory);
+      Summary.add(MemoryEffectFlag::WritesMemory);
+      Summary.add(MemoryEffectFlag::ObservesGas);
+      Summary.add(MemoryEffectFlag::ExternalizesMemory);
+      Summary.add(MemoryEffectFlag::RequiresOrderToken);
+      AddMemoryAccessEffects();
+      break;
+    case MemoryOpKind::Create:
+      Summary.add(MemoryEffectFlag::ReadsMemory);
+      Summary.add(MemoryEffectFlag::ExternalizesMemory);
+      Summary.add(MemoryEffectFlag::RequiresOrderToken);
+      AddMemoryAccessEffects();
+      break;
+    case MemoryOpKind::MSize:
+      Summary.add(MemoryEffectFlag::ObservesMemorySize);
+      Summary.add(MemoryEffectFlag::RequiresOrderToken);
+      break;
+    case MemoryOpKind::Gas:
+      Summary.add(MemoryEffectFlag::ObservesGas);
+      Summary.add(MemoryEffectFlag::RequiresOrderToken);
+      break;
+    case MemoryOpKind::CallDataLoad:
+    case MemoryOpKind::Other:
+      break;
+    }
+
+    switch (Opcode) {
+    case OP_EXP:
+    case OP_BALANCE:
+    case OP_EXTCODESIZE:
+    case OP_EXTCODEHASH:
+    case OP_SLOAD:
+      Summary.add(MemoryEffectFlag::ObservesGas);
+      Summary.add(MemoryEffectFlag::ChargesDynamicGas);
+      Summary.add(MemoryEffectFlag::MayExhaustGas);
+      Summary.add(MemoryEffectFlag::RequiresOrderToken);
+      Summary.add(MemoryEffectFlag::MayTrapOrHalt);
+      break;
+    case OP_SSTORE:
+    case OP_TSTORE:
+      Summary.add(MemoryEffectFlag::ObservesGas);
+      Summary.add(MemoryEffectFlag::ChargesDynamicGas);
+      Summary.add(MemoryEffectFlag::MayExhaustGas);
+      Summary.add(MemoryEffectFlag::RequiresOrderToken);
+      Summary.add(MemoryEffectFlag::MayTrapOrHalt);
+      break;
+    case OP_SELFDESTRUCT:
+      Summary.add(MemoryEffectFlag::ObservesGas);
+      Summary.add(MemoryEffectFlag::ChargesDynamicGas);
+      Summary.add(MemoryEffectFlag::MayExhaustGas);
+      Summary.add(MemoryEffectFlag::RequiresOrderToken);
+      Summary.add(MemoryEffectFlag::MayTrapOrHalt);
+      Summary.add(MemoryEffectFlag::TerminatesFrame);
+      break;
+    case OP_INVALID:
+      Summary.add(MemoryEffectFlag::RequiresOrderToken);
+      Summary.add(MemoryEffectFlag::MayTrapOrHalt);
+      Summary.add(MemoryEffectFlag::TerminatesFrame);
+      break;
+    default:
+      break;
+    }
+    return Summary;
   }
 
   void observePush(evmc_opcode Opcode, uint64_t Pc, const uint8_t *Bytecode,
@@ -865,7 +1090,7 @@ private:
   }
 
   void observeGenericOpcode(evmc_opcode Opcode, uint64_t Pc) {
-    const auto &Metrics = evmc_get_instruction_metrics_table(EVMC_CANCUN);
+    const auto &Metrics = evmc_get_instruction_metrics_table(Revision);
     const auto &Metric = Metrics[static_cast<uint8_t>(Opcode)];
     const int PopCount = Metric.stack_height_required;
     const int PushCount = PopCount + Metric.stack_height_change;
@@ -875,7 +1100,7 @@ private:
     for (int I = 0; I < PushCount; ++I) {
       pushUnknown();
     }
-    if (isUnknownEffectBarrierOpcode(Opcode)) {
+    if (requiresEffectOnlyRecord(Opcode)) {
       noteBlockFact(
           addOp(Pc, Opcode, MemoryOpKind::Other, MemoryEffect::Unknown));
     }
