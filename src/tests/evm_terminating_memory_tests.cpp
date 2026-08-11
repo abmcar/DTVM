@@ -18,8 +18,8 @@ namespace {
 using COMPILER::EVMMirBuilder;
 
 #ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
-std::optional<size_t>
-countTerminatingExpandMemoryCalls(const std::vector<uint8_t> &Bytecode) {
+std::optional<std::string>
+compileTerminatingMemoryMir(const std::vector<uint8_t> &Bytecode) {
   COMPILER::EVMFrontendContext Ctx;
   Ctx.setRevision(EVMC_CANCUN);
   Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
@@ -43,18 +43,15 @@ countTerminatingExpandMemoryCalls(const std::vector<uint8_t> &Bytecode) {
   llvm::raw_string_ostream OS(Mir);
   Func.print(OS);
   OS.flush();
+  return Mir;
+}
 
-  const auto &RuntimeFunctions = COMPILER::getRuntimeFunctionTable();
-  const auto Address =
-      COMPILER::getFunctionAddress(RuntimeFunctions.ExpandMemoryNoGas);
+template <typename FuncType>
+bool containsTerminatingRuntimeCall(const std::string &Mir, FuncType Function) {
   const std::string Needle =
-      "target = const.i64 " + std::to_string(Address) + ", ";
-  size_t Count = 0;
-  for (size_t Pos = Mir.find(Needle); Pos != std::string::npos;
-       Pos = Mir.find(Needle, Pos + Needle.size())) {
-    ++Count;
-  }
-  return Count;
+      "target = const.i64 " +
+      std::to_string(COMPILER::getFunctionAddress(Function)) + ", ";
+  return Mir.find(Needle) != std::string::npos;
 }
 
 TEST(EVMMirBuilderTerminatingMemoryProofTest,
@@ -72,18 +69,28 @@ TEST(EVMMirBuilderTerminatingMemoryProofTest,
       OP_PUSH1, 0x01,        OP_PUSH1, 0x80, OP_MSTORE, OP_PUSH1, 0x08,
       OP_JUMP,  OP_JUMPDEST, OP_PUSH1, 0x20, OP_PUSH1,  0x80,     OP_REVERT};
 
-  const auto ZeroReturnCalls =
-      countTerminatingExpandMemoryCalls(ZeroSizeReturn);
-  const auto ReturnCalls = countTerminatingExpandMemoryCalls(CoveredReturn);
-  const auto ZeroRevertCalls =
-      countTerminatingExpandMemoryCalls(ZeroSizeRevert);
-  const auto RevertCalls = countTerminatingExpandMemoryCalls(CoveredRevert);
-  ASSERT_TRUE(ZeroReturnCalls.has_value());
-  ASSERT_TRUE(ReturnCalls.has_value());
-  ASSERT_TRUE(ZeroRevertCalls.has_value());
-  ASSERT_TRUE(RevertCalls.has_value());
-  EXPECT_EQ(*ReturnCalls, *ZeroReturnCalls);
-  EXPECT_EQ(*RevertCalls, *ZeroRevertCalls);
+  const auto ZeroReturnMir = compileTerminatingMemoryMir(ZeroSizeReturn);
+  const auto ReturnMir = compileTerminatingMemoryMir(CoveredReturn);
+  const auto ZeroRevertMir = compileTerminatingMemoryMir(ZeroSizeRevert);
+  const auto RevertMir = compileTerminatingMemoryMir(CoveredRevert);
+  ASSERT_TRUE(ZeroReturnMir.has_value());
+  ASSERT_TRUE(ReturnMir.has_value());
+  ASSERT_TRUE(ZeroRevertMir.has_value());
+  ASSERT_TRUE(RevertMir.has_value());
+
+  const auto &RuntimeFunctions = COMPILER::getRuntimeFunctionTable();
+  EXPECT_TRUE(containsTerminatingRuntimeCall(
+      *ZeroReturnMir, RuntimeFunctions.SetReturnNoExpand));
+  EXPECT_TRUE(containsTerminatingRuntimeCall(
+      *ReturnMir, RuntimeFunctions.SetReturnNoExpand));
+  EXPECT_FALSE(
+      containsTerminatingRuntimeCall(*ReturnMir, RuntimeFunctions.SetReturn));
+  EXPECT_TRUE(containsTerminatingRuntimeCall(
+      *ZeroRevertMir, RuntimeFunctions.SetRevertNoExpand));
+  EXPECT_TRUE(containsTerminatingRuntimeCall(
+      *RevertMir, RuntimeFunctions.SetRevertNoExpand));
+  EXPECT_FALSE(
+      containsTerminatingRuntimeCall(*RevertMir, RuntimeFunctions.SetRevert));
 }
 
 TEST(EVMMirBuilderTerminatingMemoryProofTest,
@@ -102,20 +109,27 @@ TEST(EVMMirBuilderTerminatingMemoryProofTest,
       OP_PUSH1, 0x01,    OP_PUSH1,    0x80,     OP_MSTORE, OP_PUSH1,
       0x08,     OP_JUMP, OP_JUMPDEST, OP_PUSH0, OP_PUSH0,  OP_REVERT};
 
-  const auto ZeroReturnCalls =
-      countTerminatingExpandMemoryCalls(ZeroSizeReturn);
-  const auto UncoveredCalls =
-      countTerminatingExpandMemoryCalls(UncoveredReturn);
-  const auto HugeOffsetZeroSizeCalls =
-      countTerminatingExpandMemoryCalls(HugeOffsetZeroSizeRevert);
-  const auto ZeroRevertCalls =
-      countTerminatingExpandMemoryCalls(ZeroSizeRevert);
-  ASSERT_TRUE(ZeroReturnCalls.has_value());
-  ASSERT_TRUE(UncoveredCalls.has_value());
-  ASSERT_TRUE(HugeOffsetZeroSizeCalls.has_value());
-  ASSERT_TRUE(ZeroRevertCalls.has_value());
-  EXPECT_EQ(*UncoveredCalls, *ZeroReturnCalls + 1);
-  EXPECT_EQ(*HugeOffsetZeroSizeCalls, *ZeroRevertCalls);
+  const auto ZeroReturnMir = compileTerminatingMemoryMir(ZeroSizeReturn);
+  const auto UncoveredMir = compileTerminatingMemoryMir(UncoveredReturn);
+  const auto HugeOffsetZeroSizeMir =
+      compileTerminatingMemoryMir(HugeOffsetZeroSizeRevert);
+  const auto ZeroRevertMir = compileTerminatingMemoryMir(ZeroSizeRevert);
+  ASSERT_TRUE(ZeroReturnMir.has_value());
+  ASSERT_TRUE(UncoveredMir.has_value());
+  ASSERT_TRUE(HugeOffsetZeroSizeMir.has_value());
+  ASSERT_TRUE(ZeroRevertMir.has_value());
+
+  const auto &RuntimeFunctions = COMPILER::getRuntimeFunctionTable();
+  EXPECT_TRUE(containsTerminatingRuntimeCall(
+      *ZeroReturnMir, RuntimeFunctions.SetReturnNoExpand));
+  EXPECT_TRUE(containsTerminatingRuntimeCall(*UncoveredMir,
+                                             RuntimeFunctions.SetReturn));
+  EXPECT_FALSE(containsTerminatingRuntimeCall(
+      *UncoveredMir, RuntimeFunctions.SetReturnNoExpand));
+  EXPECT_TRUE(containsTerminatingRuntimeCall(
+      *HugeOffsetZeroSizeMir, RuntimeFunctions.SetRevertNoExpand));
+  EXPECT_TRUE(containsTerminatingRuntimeCall(
+      *ZeroRevertMir, RuntimeFunctions.SetRevertNoExpand));
 }
 #endif
 

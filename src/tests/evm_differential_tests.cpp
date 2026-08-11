@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "compiler/evm_frontend/evm_analyzer.h"
@@ -264,6 +265,24 @@ std::string fixtureTestName(const testing::TestParamInfo<std::string> &Info) {
 }
 
 } // namespace
+
+TEST(EVMPreparedCopyFallbackDifferential,
+     DynamicDestinationMatchesInterpreterOutputAndGas) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,        0x04, // copy size
+      OP_PUSH0,              // code offset
+      OP_PUSH0,              // calldata offset
+      OP_CALLDATALOAD,
+      OP_CODECOPY, // dynamic destination offset
+      OP_PUSH1,        0x04, OP_PUSH1, 0x80, OP_RETURN,
+  };
+  std::vector<uint8_t> CallData(32, 0);
+  CallData.back() = 0x80;
+
+  const auto Output = expectInterpMatchesMultipassWithGas(
+      "codecopy_dynamic_destination_fallback", Bytecode, CallData);
+  EXPECT_EQ(Output, "60045F5F");
+}
 
 TEST(EVMKeccakMemoryProofDifferential,
      CrossBlockProofReusePreservesHashAndGas) {
@@ -1302,7 +1321,7 @@ std::vector<uint8_t> log0StaticHighOffsetBytecode() {
   return Code;
 }
 
-std::vector<uint8_t> staticCallPreparedMemoryBytecode() {
+std::vector<uint8_t> preparedCallMemoryBytecode(evmc_opcode Opcode) {
   std::vector<uint8_t> Code;
   appendPush32Pattern(Code, 0x21);
   Code.insert(Code.end(), {0x60, 0x80, 0x52}); // MSTORE(0x80, pattern)
@@ -1320,15 +1339,32 @@ std::vector<uint8_t> staticCallPreparedMemoryBytecode() {
                               0x60, 0xa0, // return offset
                               0x60, 0x20, // argument size
                               0x60, 0x80, // argument offset
-                              0x60, 0x04, // identity precompile
-                              0x61, 0xff, 0xff,
-                              0xfa,       // STATICCALL
-                              0x50,       // POP success
-                              0x60, 0x20, // RETURN size
-                              0x60, 0xa0, // RETURN offset
+                          });
+  if (Opcode == OP_CALL || Opcode == OP_CALLCODE) {
+    Code.push_back(OP_PUSH0); // value
+  }
+  Code.insert(Code.end(), {
+                              0x60,
+                              0x04, // identity precompile
+                              0x61,
+                              0xff,
+                              0xff,
+                              static_cast<uint8_t>(Opcode),
+                              0x50, // POP success
+                              0x60,
+                              0x20, // RETURN size
+                              0x60,
+                              0xa0, // RETURN offset
                               0xf3,
                           });
   return Code;
+}
+
+std::vector<uint8_t> twoWordKeccakBytecode() {
+  return {
+      OP_CALLER, OP_PUSH0,  OP_MSTORE, OP_PUSH1, 0x05,     OP_PUSH1,
+      0x20,      OP_MSTORE, OP_PUSH1,  0x40,     OP_PUSH0, OP_KECCAK256,
+  };
 }
 
 std::vector<uint8_t> staticCallEmptyHighOffsetsBytecode() {
@@ -1390,9 +1426,56 @@ TEST(EVMLogMemoryPreexpandDifferential, StaticModePrecedesMemoryExpansion) {
 
 TEST(EVMCallMemoryProofDifferential, PreparedIdentityCallMatchesInterpreter) {
   const auto Output = expectInterpMatchesMultipassWithGas(
-      "staticcall_prepared_memory", staticCallPreparedMemoryBytecode(), {});
+      "staticcall_prepared_memory", preparedCallMemoryBytecode(OP_STATICCALL),
+      {});
   EXPECT_EQ(Output,
             "2122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F40");
+}
+
+TEST(EVMCallMemoryProofDifferential,
+     PreparedCallKindsMatchInterpreterOutputAndGas) {
+  const std::pair<evmc_opcode, const char *> Cases[] = {
+      {OP_CALL, "call"},
+      {OP_CALLCODE, "callcode"},
+      {OP_DELEGATECALL, "delegatecall"},
+  };
+  for (const auto &[Opcode, Label] : Cases) {
+    const auto Output = expectInterpMatchesMultipassWithGas(
+        std::string(Label) + "_prepared_memory",
+        preparedCallMemoryBytecode(Opcode), {});
+    EXPECT_EQ(
+        Output,
+        "2122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F40")
+        << Label;
+  }
+}
+
+TEST(EVMKeccakMemoryProofDifferential,
+     TwoWordHelperWordGasOutOfGasBoundaryMatchesInterpreter) {
+  const auto Bytecode = twoWordKeccakBytecode();
+  constexpr uint64_t ProbeGasLimit = 1'000'000;
+  const auto Reference =
+      runEvmBytecode("two_word_keccak_word_gas_reference", Bytecode,
+                     common::RunMode::InterpMode, {}, 0u, true, ProbeGasLimit);
+  ASSERT_EQ(Reference.Status, EVMC_SUCCESS);
+  ASSERT_GE(Reference.GasLeft, 0);
+  const auto RequiredGas =
+      ProbeGasLimit - static_cast<uint64_t>(Reference.GasLeft);
+  ASSERT_GT(RequiredGas, uint64_t{1});
+
+  const auto Interp = runEvmBytecode("two_word_keccak_word_gas_oog_interp",
+                                     Bytecode, common::RunMode::InterpMode, {},
+                                     0u, true, RequiredGas - 1);
+  const auto Multi = runEvmBytecode("two_word_keccak_word_gas_oog_multipass",
+                                    Bytecode, common::RunMode::MultipassMode,
+                                    {}, 0u, true, RequiredGas - 1);
+#ifdef ZEN_ENABLE_JIT
+  EXPECT_TRUE(Multi.JITCompiled);
+#endif
+  EXPECT_EQ(Interp.Status, EVMC_OUT_OF_GAS);
+  EXPECT_EQ(Multi.Status, Interp.Status);
+  EXPECT_EQ(Multi.GasLeft, Interp.GasLeft);
+  EXPECT_EQ(Multi.OutputHex, Interp.OutputHex);
 }
 
 TEST(EVMCallMemoryProofDifferential, EmptyRangesIgnoreHighOffsets) {

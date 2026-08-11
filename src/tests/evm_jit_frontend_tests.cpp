@@ -617,17 +617,20 @@ TEST(EVMRuntimeMemoryHelperContractTest,
   const COMPILER::RuntimeMemoryHelperContract Copy =
       COMPILER::getRuntimeMemoryHelperContract(
           RuntimeMemoryHelperId::CodeCopyNoExpand);
-  EXPECT_TRUE(Copy.requires(RuntimeProofRequirementFlag::LogicalSize));
-  EXPECT_TRUE(Copy.requires(RuntimeProofRequirementFlag::AccessRange));
-  EXPECT_TRUE(Copy.requires(RuntimeProofRequirementFlag::DynamicGasCharged));
+  EXPECT_TRUE(Copy.hasRequirement(RuntimeProofRequirementFlag::LogicalSize));
+  EXPECT_TRUE(Copy.hasRequirement(RuntimeProofRequirementFlag::AccessRange));
+  EXPECT_TRUE(
+      Copy.hasRequirement(RuntimeProofRequirementFlag::DynamicGasCharged));
   EXPECT_TRUE(Copy.Effects.has(COMPILER::MemoryEffectFlag::WritesMemory));
   EXPECT_FALSE(Copy.Effects.mayGrowMemory());
 
   const COMPILER::RuntimeMemoryHelperContract Expand =
       COMPILER::getRuntimeMemoryHelperContract(
           RuntimeMemoryHelperId::ExpandMemoryNoGas);
-  EXPECT_TRUE(Expand.requires(RuntimeProofRequirementFlag::DynamicGasCharged));
-  EXPECT_TRUE(Expand.requires(RuntimeProofRequirementFlag::BoundsValidated));
+  EXPECT_TRUE(
+      Expand.hasRequirement(RuntimeProofRequirementFlag::DynamicGasCharged));
+  EXPECT_TRUE(
+      Expand.hasRequirement(RuntimeProofRequirementFlag::BoundsValidated));
   EXPECT_TRUE(Expand.EstablishesLogicalSize);
   EXPECT_TRUE(Expand.Effects.mayGrowMemory());
   EXPECT_TRUE(Expand.Effects.mayRebaseMemory());
@@ -700,6 +703,81 @@ TEST(EVMRuntimeMemoryHelperContractTest,
     EXPECT_FALSE(
         COMPILER::satisfiesRuntimeMemoryHelperContract(Contract, Incomplete));
   }
+}
+
+TEST(EVMRuntimeMemoryHelperContractTest,
+     EveryPreparedHelperRejectsEachMissingObligation) {
+  using COMPILER::RuntimeMemoryHelperId;
+  using COMPILER::RuntimeProofRequirementFlag;
+
+  const auto ExpectExactRequirements =
+      [](RuntimeMemoryHelperId Helper,
+         std::initializer_list<RuntimeProofRequirementFlag> Requirements) {
+        const COMPILER::RuntimeMemoryHelperContract Contract =
+            COMPILER::getRuntimeMemoryHelperContract(Helper);
+        ASSERT_TRUE(Contract.Valid);
+
+        COMPILER::RuntimeProofToken Complete;
+        for (RuntimeProofRequirementFlag Requirement : Requirements) {
+          Complete.establish(Requirement);
+        }
+        EXPECT_TRUE(
+            COMPILER::satisfiesRuntimeMemoryHelperContract(Contract, Complete));
+
+        for (RuntimeProofRequirementFlag Missing : Requirements) {
+          COMPILER::RuntimeProofToken Incomplete;
+          for (RuntimeProofRequirementFlag Requirement : Requirements) {
+            if (Requirement != Missing) {
+              Incomplete.establish(Requirement);
+            }
+          }
+          EXPECT_FALSE(COMPILER::satisfiesRuntimeMemoryHelperContract(
+              Contract, Incomplete));
+        }
+      };
+
+  const auto PreparedRangeAndGas = {
+      RuntimeProofRequirementFlag::LogicalSize,
+      RuntimeProofRequirementFlag::AccessRange,
+      RuntimeProofRequirementFlag::DynamicGasCharged,
+  };
+  ExpectExactRequirements(RuntimeMemoryHelperId::CodeCopyNoExpand,
+                          PreparedRangeAndGas);
+  ExpectExactRequirements(RuntimeMemoryHelperId::CallDataCopyNoExpand,
+                          PreparedRangeAndGas);
+  ExpectExactRequirements(RuntimeMemoryHelperId::KeccakNoExpand,
+                          PreparedRangeAndGas);
+
+  const auto PreparedRangeAndOrder = {
+      RuntimeProofRequirementFlag::LogicalSize,
+      RuntimeProofRequirementFlag::AccessRange,
+      RuntimeProofRequirementFlag::OrderToken,
+  };
+  ExpectExactRequirements(RuntimeMemoryHelperId::TwoWordKeccakNoExpand,
+                          PreparedRangeAndOrder);
+  ExpectExactRequirements(RuntimeMemoryHelperId::ReturnNoExpand,
+                          PreparedRangeAndOrder);
+  ExpectExactRequirements(RuntimeMemoryHelperId::RevertNoExpand,
+                          PreparedRangeAndOrder);
+
+  ExpectExactRequirements(RuntimeMemoryHelperId::ExpandMemoryNoGas,
+                          {RuntimeProofRequirementFlag::DynamicGasCharged,
+                           RuntimeProofRequirementFlag::BoundsValidated,
+                           RuntimeProofRequirementFlag::OrderToken});
+  ExpectExactRequirements(RuntimeMemoryHelperId::CallNoExpand,
+                          {RuntimeProofRequirementFlag::LogicalSize,
+                           RuntimeProofRequirementFlag::CallArgumentsRange,
+                           RuntimeProofRequirementFlag::CallReturnRange,
+                           RuntimeProofRequirementFlag::OrderToken});
+}
+
+TEST(EVMRuntimeMemoryHelperContractTest, RejectsUnknownHelperFailClosed) {
+  const COMPILER::RuntimeMemoryHelperContract Contract =
+      COMPILER::getRuntimeMemoryHelperContract(
+          static_cast<COMPILER::RuntimeMemoryHelperId>(255));
+  COMPILER::RuntimeProofToken Empty;
+  EXPECT_FALSE(Contract.Valid);
+  EXPECT_FALSE(COMPILER::satisfiesRuntimeMemoryHelperContract(Contract, Empty));
 }
 
 TEST(EVMMemoryFactsBuilderTest, AttributesOpsToAnalyzerBlocks) {
@@ -1366,8 +1444,8 @@ TEST(EVMMemoryGuaranteedMinBytesAnalysisTest, IgnoresZeroLengthKeccak) {
 }
 
 #ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
-std::optional<size_t>
-countKeccakExpandMemoryCalls(const std::vector<uint8_t> &Bytecode) {
+std::optional<std::string>
+compileKeccakMemoryMir(const std::vector<uint8_t> &Bytecode) {
   COMPILER::EVMFrontendContext Ctx;
   Ctx.setRevision(EVMC_CANCUN);
   Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
@@ -1391,25 +1469,19 @@ countKeccakExpandMemoryCalls(const std::vector<uint8_t> &Bytecode) {
   llvm::raw_string_ostream OS(Mir);
   Func.print(OS);
   OS.flush();
+  return Mir;
+}
 
-  const auto &RuntimeFunctions = COMPILER::getRuntimeFunctionTable();
-  const auto Address =
-      COMPILER::getFunctionAddress(RuntimeFunctions.ExpandMemoryNoGas);
+template <typename FuncType>
+bool containsKeccakRuntimeCall(const std::string &Mir, FuncType Function) {
   const std::string Needle =
-      "target = const.i64 " + std::to_string(Address) + ", ";
-  size_t Count = 0;
-  for (size_t Pos = Mir.find(Needle); Pos != std::string::npos;
-       Pos = Mir.find(Needle, Pos + Needle.size())) {
-    ++Count;
-  }
-  return Count;
+      "target = const.i64 " +
+      std::to_string(COMPILER::getFunctionAddress(Function)) + ", ";
+  return Mir.find(Needle) != std::string::npos;
 }
 
 TEST(EVMMirBuilderMemoryProofTest,
      ReusesCrossBlockGuaranteedSizeForKeccakConsumer) {
-  const std::vector<uint8_t> ProducerOnly = {
-      OP_PUSH1, 0x01, OP_PUSH1, 0x80,        OP_MSTORE,
-      OP_PUSH1, 0x08, OP_JUMP,  OP_JUMPDEST, OP_STOP};
   const std::vector<uint8_t> CoveredKeccak = {
       OP_PUSH1, 0x01,         OP_PUSH1,    0x80,     OP_MSTORE, OP_PUSH1,
       0x08,     OP_JUMP,      OP_JUMPDEST, OP_PUSH1, 0x20,      OP_PUSH1,
@@ -1419,18 +1491,20 @@ TEST(EVMMirBuilderMemoryProofTest,
       0x08,     OP_JUMP,      OP_JUMPDEST, OP_PUSH1, 0x20,      OP_PUSH1,
       0xa0,     OP_KECCAK256, OP_POP,      OP_STOP};
 
-  const std::optional<size_t> ProducerExpansionCalls =
-      countKeccakExpandMemoryCalls(ProducerOnly);
-  const std::optional<size_t> CoveredExpansionCalls =
-      countKeccakExpandMemoryCalls(CoveredKeccak);
-  const std::optional<size_t> UncoveredExpansionCalls =
-      countKeccakExpandMemoryCalls(UncoveredKeccak);
+  const auto CoveredMir = compileKeccakMemoryMir(CoveredKeccak);
+  const auto UncoveredMir = compileKeccakMemoryMir(UncoveredKeccak);
+  ASSERT_TRUE(CoveredMir.has_value());
+  ASSERT_TRUE(UncoveredMir.has_value());
 
-  ASSERT_TRUE(ProducerExpansionCalls.has_value());
-  ASSERT_TRUE(CoveredExpansionCalls.has_value());
-  ASSERT_TRUE(UncoveredExpansionCalls.has_value());
-  EXPECT_EQ(*CoveredExpansionCalls, *ProducerExpansionCalls);
-  EXPECT_EQ(*UncoveredExpansionCalls, *ProducerExpansionCalls + 1);
+  const auto &RuntimeFunctions = COMPILER::getRuntimeFunctionTable();
+  EXPECT_TRUE(containsKeccakRuntimeCall(*CoveredMir,
+                                        RuntimeFunctions.GetKeccak256NoExpand));
+  EXPECT_FALSE(
+      containsKeccakRuntimeCall(*CoveredMir, RuntimeFunctions.GetKeccak256));
+  EXPECT_TRUE(
+      containsKeccakRuntimeCall(*UncoveredMir, RuntimeFunctions.GetKeccak256));
+  EXPECT_FALSE(containsKeccakRuntimeCall(
+      *UncoveredMir, RuntimeFunctions.GetKeccak256NoExpand));
 }
 
 TEST(EVMMirBuilderMemoryProofTest, ReusesPriorKeccakProofAtExactOpcodePC) {
@@ -1441,14 +1515,18 @@ TEST(EVMMirBuilderMemoryProofTest, ReusesPriorKeccakProofAtExactOpcodePC) {
       OP_POP,       OP_PUSH1, 0x20,     OP_PUSH1, 0x80,
       OP_KECCAK256, OP_POP,   OP_STOP};
 
-  const std::optional<size_t> OneExpansionCalls =
-      countKeccakExpandMemoryCalls(OneKeccak);
-  const std::optional<size_t> TwoExpansionCalls =
-      countKeccakExpandMemoryCalls(TwoKeccaks);
+  const auto OneMir = compileKeccakMemoryMir(OneKeccak);
+  const auto TwoMir = compileKeccakMemoryMir(TwoKeccaks);
+  ASSERT_TRUE(OneMir.has_value());
+  ASSERT_TRUE(TwoMir.has_value());
 
-  ASSERT_TRUE(OneExpansionCalls.has_value());
-  ASSERT_TRUE(TwoExpansionCalls.has_value());
-  EXPECT_EQ(*TwoExpansionCalls, *OneExpansionCalls);
+  const auto &RuntimeFunctions = COMPILER::getRuntimeFunctionTable();
+  EXPECT_TRUE(
+      containsKeccakRuntimeCall(*OneMir, RuntimeFunctions.GetKeccak256));
+  EXPECT_TRUE(
+      containsKeccakRuntimeCall(*TwoMir, RuntimeFunctions.GetKeccak256));
+  EXPECT_TRUE(containsKeccakRuntimeCall(*TwoMir,
+                                        RuntimeFunctions.GetKeccak256NoExpand));
 }
 #endif
 

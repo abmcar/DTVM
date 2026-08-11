@@ -109,6 +109,60 @@ TEST(EVMMirBuilderCallMemoryProofTest,
   EXPECT_FALSE(containsRuntimeCall(*StaticCallMir,
                                    RuntimeFunctions.HandleStaticCallNoExpand));
 }
+
+TEST(EVMMirBuilderPreparedMemoryProofTest,
+     KeepsGenericRangeHelpersForDynamicOffsets) {
+  const auto &RuntimeFunctions = COMPILER::getRuntimeFunctionTable();
+  const std::vector<uint8_t> CodeCopyBytecode = {
+      OP_PUSH1,        0x20, // copy size
+      OP_PUSH0,              // code offset
+      OP_PUSH0,              // calldata offset
+      OP_CALLDATALOAD,
+      OP_CODECOPY, // dynamic destination offset
+      OP_STOP,
+  };
+  const std::vector<uint8_t> KeccakBytecode = {
+      OP_PUSH1,        0x20, // hash size
+      OP_PUSH0,              // calldata offset
+      OP_CALLDATALOAD,
+      OP_KECCAK256, // dynamic memory offset
+      OP_STOP,
+  };
+  const std::vector<uint8_t> ReturnBytecode = {
+      OP_PUSH1,        0x20, // return size
+      OP_PUSH0,              // calldata offset
+      OP_CALLDATALOAD,
+      OP_RETURN, // dynamic memory offset
+  };
+  const std::vector<uint8_t> RevertBytecode = {
+      OP_PUSH1,        0x20, // revert size
+      OP_PUSH0,              // calldata offset
+      OP_CALLDATALOAD,
+      OP_REVERT, // dynamic memory offset
+  };
+
+  const auto CodeCopyMir = compileCallMemoryMir(CodeCopyBytecode);
+  const auto KeccakMir = compileCallMemoryMir(KeccakBytecode);
+  const auto ReturnMir = compileCallMemoryMir(ReturnBytecode);
+  const auto RevertMir = compileCallMemoryMir(RevertBytecode);
+  ASSERT_TRUE(CodeCopyMir.has_value());
+  ASSERT_TRUE(KeccakMir.has_value());
+  ASSERT_TRUE(ReturnMir.has_value());
+  ASSERT_TRUE(RevertMir.has_value());
+
+  EXPECT_TRUE(containsRuntimeCall(*CodeCopyMir, RuntimeFunctions.SetCodeCopy));
+  EXPECT_FALSE(
+      containsRuntimeCall(*CodeCopyMir, RuntimeFunctions.SetCodeCopyNoExpand));
+  EXPECT_TRUE(containsRuntimeCall(*KeccakMir, RuntimeFunctions.GetKeccak256));
+  EXPECT_FALSE(
+      containsRuntimeCall(*KeccakMir, RuntimeFunctions.GetKeccak256NoExpand));
+  EXPECT_TRUE(containsRuntimeCall(*ReturnMir, RuntimeFunctions.SetReturn));
+  EXPECT_FALSE(
+      containsRuntimeCall(*ReturnMir, RuntimeFunctions.SetReturnNoExpand));
+  EXPECT_TRUE(containsRuntimeCall(*RevertMir, RuntimeFunctions.SetRevert));
+  EXPECT_FALSE(
+      containsRuntimeCall(*RevertMir, RuntimeFunctions.SetRevertNoExpand));
+}
 #endif
 
 } // namespace

@@ -65,9 +65,7 @@ struct RuntimeMemoryHelperContract {
     Requirements |= static_cast<uint16_t>(Requirement);
   }
 
-  bool
-    requires(RuntimeProofRequirementFlag Requirement)
-  const {
+  bool hasRequirement(RuntimeProofRequirementFlag Requirement) const {
     return (Requirements & static_cast<uint16_t>(Requirement)) != 0;
   }
 };
