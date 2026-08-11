@@ -30,6 +30,25 @@
 #include <string>
 #include <vector>
 
+namespace COMPILER {
+
+struct MemoryExpansionPlannerTestPeer {
+  static bool hasLinearRegions(const MemoryExpansionPlanner &Planner) {
+    return Planner.LinearRegions != nullptr;
+  }
+  static bool hasGuaranteedExtent(const MemoryExpansionPlanner &Planner) {
+    return Planner.GuaranteedExtent != nullptr;
+  }
+  static bool hasDeadStores(const MemoryExpansionPlanner &Planner) {
+    return Planner.DeadStores != nullptr;
+  }
+  static bool hasLoadForwarding(const MemoryExpansionPlanner &Planner) {
+    return Planner.LoadForwarding != nullptr;
+  }
+};
+
+} // namespace COMPILER
+
 namespace {
 
 using COMPILER::EVMAnalyzer;
@@ -370,6 +389,7 @@ std::vector<uint8_t> makeLargeStaticDynamicOffsetMStoreBlock(uint64_t Ops) {
 COMPILER::MemoryFacts collectMemoryFacts(const std::vector<uint8_t> &Bytecode,
                                          evmc_revision Revision = EVMC_CANCUN) {
   COMPILER::MemoryFactsBuilder FactsBuilder(Revision);
+  FactsBuilder.reset(Bytecode.size());
   FactsBuilder.beginBlock(0, 0);
 
   size_t PC = 0;
@@ -392,6 +412,7 @@ collectAnalyzerMemoryFacts(const std::vector<uint8_t> &Bytecode) {
   COMPILER::MemoryEntryAddressAnalysis EntryAddresses(Analyzer, Data,
                                                       Bytecode.size());
   COMPILER::MemoryFactsBuilder FactsBuilder(EVMC_CANCUN);
+  FactsBuilder.reset(Bytecode.size());
   const std::vector<uint64_t> DynamicDispatchSources =
       Analyzer.getDynamicJumpDispatchSourceBlocks();
   const auto &Blocks = Analyzer.getBlockInfos();
@@ -450,6 +471,7 @@ COMPILER::MemoryFacts
 collectManualBlockMemoryFacts(const std::vector<uint8_t> &Bytecode,
                               const std::vector<MemoryFactBlockSpec> &Blocks) {
   COMPILER::MemoryFactsBuilder FactsBuilder;
+  FactsBuilder.reset(Bytecode.size());
   const uint8_t *Data = Bytecode.empty() ? nullptr : Bytecode.data();
   for (const MemoryFactBlockSpec &Block : Blocks) {
     FactsBuilder.beginBlock(
@@ -848,7 +870,7 @@ TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
   COMPILER::MemoryFacts Facts = collectAnalyzerMemoryFacts(Bytecode);
   const COMPILER::MemoryBlockFacts *Target = Facts.getBlock(18);
   ASSERT_NE(Target, nullptr);
-  EXPECT_EQ(Target->Predecessors, std::vector<uint64_t>({9, 5}));
+  EXPECT_EQ(Target->Predecessors, std::vector<uint64_t>({5, 9}));
   COMPILER::MemoryGuaranteedMinBytesAnalysis Guaranteed(Facts);
   EXPECT_EQ(Guaranteed.getGuaranteedMinBytesAtEntry(18), 0u);
 }
@@ -909,6 +931,376 @@ TEST(EVMMemoryProofLifetimeAnalysisTest,
   EXPECT_TRUE(Proof.canReuseWithoutExpansion());
   EXPECT_FALSE(
       Lifetime.canMoveExpansionBetween(Facts.Ops[0].Id, Facts.Ops[2].Id));
+}
+
+TEST(EVMMemoryProofLifetimeAnalysisTest, CachesCompletedDemandQuery) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,        OP_PUSH1, 0x00, OP_MSTORE, OP_PUSH1, 0x08,
+      OP_JUMP,  OP_JUMPDEST, OP_PUSH1, 0x00, OP_MLOAD,  OP_STOP};
+  COMPILER::MemoryFacts Facts = collectAnalyzerMemoryFacts(Bytecode);
+  COMPILER::MemoryProofLifetimeAnalysis Lifetime(Facts);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_TRUE(Lifetime.queryBeforeOp(Facts.Ops[1].Id, Facts.Ops[1].Reads[0])
+                  .canReuseWithoutExpansion());
+  const COMPILER::MemoryExtentOracleStats AfterFirst =
+      Lifetime.getExtentOracleStats();
+  EXPECT_EQ(AfterFirst.QueryCount, 1u);
+  EXPECT_EQ(AfterFirst.QueryCacheHits, 0u);
+  EXPECT_GT(AfterFirst.BlockVisits, 0u);
+
+  EXPECT_TRUE(Lifetime.queryBeforeOp(Facts.Ops[1].Id, Facts.Ops[1].Reads[0])
+                  .canReuseWithoutExpansion());
+  const COMPILER::MemoryExtentOracleStats AfterSecond =
+      Lifetime.getExtentOracleStats();
+  EXPECT_EQ(AfterSecond.QueryCacheHits, 1u);
+  EXPECT_EQ(AfterSecond.BlockVisits, AfterFirst.BlockVisits);
+  EXPECT_EQ(AfterSecond.OpVisits, AfterFirst.OpVisits);
+}
+
+TEST(EVMMemoryProofLifetimeAnalysisTest,
+     FailsClosedAtPerQueryBudgetWithoutPublishingPartialCache) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,        OP_PUSH1, 0x00, OP_MSTORE, OP_PUSH1, 0x08,
+      OP_JUMP,  OP_JUMPDEST, OP_PUSH1, 0x00, OP_MLOAD,  OP_STOP};
+  COMPILER::MemoryFacts Facts = collectAnalyzerMemoryFacts(Bytecode);
+  COMPILER::MemoryProofQueryBudget Budget;
+  Budget.MaxBlockVisits = 1;
+  Budget.MaxOpVisits = 1;
+  COMPILER::MemoryProofLifetimeAnalysis Lifetime(Facts, Budget);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_FALSE(Lifetime.queryBeforeOp(Facts.Ops[1].Id, Facts.Ops[1].Reads[0])
+                   .canReuseWithoutExpansion());
+  EXPECT_FALSE(Lifetime.queryBeforeOp(Facts.Ops[1].Id, Facts.Ops[1].Reads[0])
+                   .canReuseWithoutExpansion());
+  const COMPILER::MemoryExtentOracleStats Stats =
+      Lifetime.getExtentOracleStats();
+  EXPECT_EQ(Stats.BudgetExhaustions, 2u);
+  EXPECT_EQ(Stats.QueryCacheHits, 0u);
+  EXPECT_EQ(Stats.DemandComputations, 2u);
+}
+
+TEST(EVMMemoryGuaranteedExtentOracleTest,
+     EnforcesCompilationWideBudgetAcrossDistinctQueries) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,     OP_PUSH1, 0x00,      OP_MSTORE,   OP_STOP,
+      OP_STOP,  OP_STOP,  OP_STOP,  OP_STOP,   OP_JUMPDEST, OP_PUSH1,
+      0x02,     OP_PUSH1, 0x20,     OP_MSTORE, OP_STOP};
+  const std::vector<MemoryFactBlockSpec> Blocks = {
+      {.EntryPC = 0,
+       .BodyStartPC = 0,
+       .BodyEndPC = 6,
+       .Successors = {},
+       .Predecessors = {},
+       .PredecessorsComplete = true},
+      {.EntryPC = 10,
+       .BodyStartPC = 11,
+       .BodyEndPC = 17,
+       .Successors = {},
+       .Predecessors = {},
+       .PredecessorsComplete = true}};
+  COMPILER::MemoryFacts Facts = collectManualBlockMemoryFacts(Bytecode, Blocks);
+  COMPILER::MemoryProofQueryBudget Budget;
+  Budget.MaxBlockVisits = 4;
+  Budget.MaxOpVisits = 4;
+  Budget.MaxCompilationBlockVisits = 1;
+  Budget.MaxCompilationOpVisits = 4;
+  COMPILER::MemoryGuaranteedExtentOracle Oracle(Facts, Budget);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_TRUE(Oracle.queryBeforeOp(Facts.Ops[0].Id).available());
+  const COMPILER::MemoryExtentQueryResult Second =
+      Oracle.queryBeforeOp(Facts.Ops[1].Id);
+  EXPECT_EQ(Second.Status,
+            COMPILER::MemoryExtentQueryStatus::CompilationBudgetExhausted);
+  EXPECT_EQ(Oracle.getStats().CompilationBudgetExhaustions, 1u);
+}
+
+TEST(EVMMemoryGuaranteedExtentOracleTest, HonorsExactQueryBudgetBoundary) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,        OP_PUSH1, 0x00, OP_MSTORE, OP_PUSH1, 0x08,
+      OP_JUMP,  OP_JUMPDEST, OP_PUSH1, 0x00, OP_MLOAD,  OP_STOP};
+  COMPILER::MemoryFacts Facts = collectAnalyzerMemoryFacts(Bytecode);
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+
+  COMPILER::MemoryProofQueryBudget Exact;
+  Exact.MaxBlockVisits = 2;
+  Exact.MaxOpVisits = 2;
+  COMPILER::MemoryGuaranteedExtentOracle ExactOracle(Facts, Exact);
+  EXPECT_TRUE(ExactOracle.queryBeforeOp(Facts.Ops[1].Id).available());
+  EXPECT_EQ(ExactOracle.getStats().BlockVisits, 2u);
+  EXPECT_EQ(ExactOracle.getStats().OpVisits, 2u);
+  EXPECT_EQ(ExactOracle.getStats().EdgeVisits, 1u);
+
+  COMPILER::MemoryProofQueryBudget TooSmall = Exact;
+  TooSmall.MaxBlockVisits = 1;
+  COMPILER::MemoryGuaranteedExtentOracle SmallOracle(Facts, TooSmall);
+  EXPECT_EQ(SmallOracle.queryBeforeOp(Facts.Ops[1].Id).Status,
+            COMPILER::MemoryExtentQueryStatus::BudgetExhausted);
+}
+
+TEST(EVMMemoryGuaranteedExtentOracleTest,
+     FailsClosedForIncompleteOrDynamicPredecessors) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,    OP_PUSH1, 0x00,     OP_MSTORE, OP_STOP,  OP_STOP,
+      OP_STOP,  OP_STOP, OP_STOP,  OP_PUSH1, 0x00,      OP_MLOAD, OP_STOP};
+  const std::vector<MemoryFactBlockSpec> Blocks = {
+      {.EntryPC = 0,
+       .BodyStartPC = 0,
+       .BodyEndPC = 6,
+       .Successors = {10},
+       .Predecessors = {}},
+      {.EntryPC = 10,
+       .BodyStartPC = 10,
+       .BodyEndPC = 14,
+       .Successors = {},
+       .Predecessors = {0},
+       .PredecessorsComplete = false,
+       .PredecessorsAreStatic = false}};
+  COMPILER::MemoryFacts Facts = collectManualBlockMemoryFacts(Bytecode, Blocks);
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  COMPILER::MemoryGuaranteedExtentOracle Oracle(Facts);
+
+  EXPECT_EQ(Oracle.queryBeforeOp(Facts.Ops[1].Id).Status,
+            COMPILER::MemoryExtentQueryStatus::IncompleteCFG);
+  EXPECT_EQ(Oracle.getStats().QueryCacheHits, 0u);
+  EXPECT_EQ(Oracle.getStats().IncompleteCFGRejects, 1u);
+}
+
+TEST(EVMMemoryGuaranteedExtentOracleTest, FailsClosedForStaticCycle) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_STOP,  OP_STOP, OP_STOP,   OP_STOP, OP_STOP,  OP_STOP,
+      OP_STOP,  OP_STOP, OP_STOP,   OP_STOP, OP_PUSH1, 0x01,
+      OP_PUSH1, 0x00,    OP_MSTORE, OP_STOP, OP_STOP,  OP_STOP,
+      OP_STOP,  OP_STOP, OP_PUSH1,  0x00,    OP_MLOAD, OP_STOP};
+  const std::vector<MemoryFactBlockSpec> Blocks = {{.EntryPC = 10,
+                                                    .BodyStartPC = 10,
+                                                    .BodyEndPC = 16,
+                                                    .Successors = {20},
+                                                    .Predecessors = {20}},
+                                                   {.EntryPC = 20,
+                                                    .BodyStartPC = 20,
+                                                    .BodyEndPC = 24,
+                                                    .Successors = {10},
+                                                    .Predecessors = {10}}};
+  COMPILER::MemoryFacts Facts = collectManualBlockMemoryFacts(Bytecode, Blocks);
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  COMPILER::MemoryGuaranteedExtentOracle Oracle(Facts);
+
+  EXPECT_EQ(Oracle.queryBeforeOp(Facts.Ops[1].Id).Status,
+            COMPILER::MemoryExtentQueryStatus::Cycle);
+  EXPECT_EQ(Oracle.getStats().CycleCutoffs, 1u);
+  EXPECT_EQ(Oracle.getStats().QueryCacheHits, 0u);
+}
+
+TEST(EVMMemoryGuaranteedExtentOracleTest,
+     NeverExceedsEagerResultOnCompleteDag) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,        OP_PUSH1, 0x00, OP_MSTORE, OP_PUSH1, 0x08,
+      OP_JUMP,  OP_JUMPDEST, OP_PUSH1, 0x00, OP_MLOAD,  OP_STOP};
+  COMPILER::MemoryFacts Facts = collectAnalyzerMemoryFacts(Bytecode);
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Eager(Facts);
+  ASSERT_TRUE(Eager.isComplete());
+  COMPILER::MemoryGuaranteedExtentOracle Oracle(Facts);
+
+  for (const COMPILER::MemoryOp &Op : Facts.Ops) {
+    const COMPILER::MemoryExtentQueryResult Demand =
+        Oracle.queryBeforeOp(Op.Id);
+    ASSERT_TRUE(Demand.available());
+    EXPECT_LE(Demand.GuaranteedMinBytes,
+              Eager.getGuaranteedMinBytesBeforeOp(Op.Id));
+  }
+}
+
+TEST(EVMMemoryGuaranteedExtentOracleTest,
+     BoundsPredecessorEdgesAndDoesNotPublishPartialQueryState) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,  0x01,    OP_PUSH1, 0x00,     OP_MSTORE, OP_STOP,  OP_STOP,
+      OP_STOP,   OP_STOP, OP_STOP,  OP_PUSH1, 0x02,      OP_PUSH1, 0x20,
+      OP_MSTORE, OP_STOP, OP_STOP,  OP_STOP,  OP_STOP,   OP_STOP,  OP_JUMPDEST,
+      OP_PUSH1,  0x00,    OP_MLOAD, OP_STOP};
+  const std::vector<MemoryFactBlockSpec> Blocks = {
+      {.EntryPC = 0,
+       .BodyStartPC = 0,
+       .BodyEndPC = 6,
+       .Successors = {20},
+       .Predecessors = {}},
+      {.EntryPC = 10,
+       .BodyStartPC = 10,
+       .BodyEndPC = 16,
+       .Successors = {20},
+       .Predecessors = {}},
+      {.EntryPC = 20,
+       .BodyStartPC = 21,
+       .BodyEndPC = 25,
+       .Successors = {},
+       .Predecessors = {10, 0, 10}}};
+  COMPILER::MemoryFacts Facts = collectManualBlockMemoryFacts(Bytecode, Blocks);
+  ASSERT_EQ(Facts.Ops.size(), 3u);
+  ASSERT_EQ(Facts.getBlock(20)->Predecessors, (std::vector<uint64_t>{0, 10}));
+  COMPILER::MemoryProofQueryBudget Budget;
+  Budget.MaxBlockVisits = 8;
+  Budget.MaxOpVisits = 8;
+  Budget.MaxEdgeVisits = 1;
+  COMPILER::MemoryGuaranteedExtentOracle Oracle(Facts, Budget);
+
+  EXPECT_EQ(Oracle.queryBeforeOp(Facts.Ops[2].Id).Status,
+            COMPILER::MemoryExtentQueryStatus::BudgetExhausted);
+  EXPECT_EQ(Oracle.getStats().EdgeVisits, 1u);
+  EXPECT_EQ(Oracle.getStats().QueryCacheHits, 0u);
+
+  EXPECT_TRUE(Oracle.queryBeforeOp(Facts.Ops[0].Id).available());
+  EXPECT_EQ(Oracle.getStats().QueryCacheHits, 0u);
+  EXPECT_EQ(Oracle.getStats().DemandComputations, 2u);
+}
+
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
+     BoundedRunPublishesOnlyCompleteResults) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH1, 0x01,      OP_PUSH1,
+                                         0x80,     OP_MSTORE, OP_STOP};
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryGlobalAnalysisBudget Budget;
+  Budget.MaxBlockTransfers = 0;
+  Budget.MaxOpVisits = 0;
+
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Analysis(Facts, Budget);
+
+  EXPECT_FALSE(Analysis.isComplete());
+  EXPECT_EQ(Analysis.getGuaranteedMinBytesAtEntry(0), 0u);
+  EXPECT_EQ(Analysis.getGuaranteedMinBytesBeforeOp(Facts.Ops.front().Id), 0u);
+  EXPECT_EQ(Analysis.getStats().BudgetExhaustions, 1u);
+}
+
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
+     CountsDependencyPropagationAtExactEdgeBudgetBoundary) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,    OP_PUSH1, 0x00,     OP_MSTORE, OP_STOP,  OP_STOP,
+      OP_STOP,  OP_STOP, OP_STOP,  OP_PUSH1, 0x00,      OP_MLOAD, OP_STOP};
+  const std::vector<MemoryFactBlockSpec> Blocks = {{.EntryPC = 0,
+                                                    .BodyStartPC = 0,
+                                                    .BodyEndPC = 6,
+                                                    .Successors = {10},
+                                                    .Predecessors = {}},
+                                                   {.EntryPC = 10,
+                                                    .BodyStartPC = 10,
+                                                    .BodyEndPC = 14,
+                                                    .Successors = {},
+                                                    .Predecessors = {0}}};
+  COMPILER::MemoryFacts Facts = collectManualBlockMemoryFacts(Bytecode, Blocks);
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+
+  COMPILER::MemoryGlobalAnalysisBudget TooSmall;
+  TooSmall.MaxEdgeVisits = 3;
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Rejected(Facts, TooSmall);
+  EXPECT_FALSE(Rejected.isComplete());
+  EXPECT_EQ(Rejected.getStats().EdgeVisits, 3u);
+  EXPECT_EQ(Rejected.getStats().BudgetExhaustions, 1u);
+
+  COMPILER::MemoryGlobalAnalysisBudget Exact;
+  Exact.MaxEdgeVisits = 4;
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Accepted(Facts, Exact);
+  EXPECT_TRUE(Accepted.isComplete());
+  EXPECT_EQ(Accepted.getStats().EdgeVisits, 4u);
+  EXPECT_EQ(Accepted.getStats().BudgetExhaustions, 0u);
+  EXPECT_EQ(Accepted.getGuaranteedMinBytesBeforeOp(Facts.Ops[1].Id), 0x20u);
+}
+
+TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
+     CountsRepeatedDependencyPropagationAcrossStaticBackedge) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,    OP_PUSH1,  0x00,    OP_MSTORE, OP_STOP,
+      OP_STOP,  OP_STOP, OP_STOP,   OP_STOP, OP_PUSH1,  0x02,
+      OP_PUSH1, 0x20,    OP_MSTORE, OP_STOP, OP_STOP,   OP_STOP,
+      OP_STOP,  OP_STOP, OP_PUSH1,  0x00,    OP_MLOAD,  OP_STOP};
+  const std::vector<MemoryFactBlockSpec> Blocks = {{.EntryPC = 0,
+                                                    .BodyStartPC = 0,
+                                                    .BodyEndPC = 6,
+                                                    .Successors = {10},
+                                                    .Predecessors = {}},
+                                                   {.EntryPC = 10,
+                                                    .BodyStartPC = 10,
+                                                    .BodyEndPC = 16,
+                                                    .Successors = {20},
+                                                    .Predecessors = {0, 20}},
+                                                   {.EntryPC = 20,
+                                                    .BodyStartPC = 20,
+                                                    .BodyEndPC = 24,
+                                                    .Successors = {10},
+                                                    .Predecessors = {10}}};
+  COMPILER::MemoryFacts Facts = collectManualBlockMemoryFacts(Bytecode, Blocks);
+  ASSERT_EQ(Facts.Ops.size(), 3u);
+
+  COMPILER::MemoryGlobalAnalysisBudget TooSmall;
+  TooSmall.MaxEdgeVisits = 13;
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Rejected(Facts, TooSmall);
+  EXPECT_FALSE(Rejected.isComplete());
+  EXPECT_EQ(Rejected.getStats().EdgeVisits, 13u);
+  EXPECT_EQ(Rejected.getStats().BudgetExhaustions, 1u);
+
+  COMPILER::MemoryGlobalAnalysisBudget Exact;
+  Exact.MaxEdgeVisits = 14;
+  COMPILER::MemoryGuaranteedMinBytesAnalysis Accepted(Facts, Exact);
+  EXPECT_TRUE(Accepted.isComplete());
+  EXPECT_EQ(Accepted.getStats().EdgeVisits, 14u);
+  EXPECT_EQ(Accepted.getStats().BudgetExhaustions, 0u);
+  EXPECT_EQ(Accepted.getGuaranteedMinBytesBeforeOp(Facts.Ops[2].Id), 0x40u);
+}
+
+TEST(EVMMemoryGuaranteedExtentOracleTest,
+     DefersPromotionUntilNextUncachedQuery) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,     OP_PUSH1,  0x40,      OP_MSTORE, OP_PUSH1,
+      0x02,     OP_PUSH1, 0x80,      OP_MSTORE, OP_PUSH1,  0x03,
+      OP_PUSH1, 0xc0,     OP_MSTORE, OP_STOP};
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  ASSERT_EQ(Facts.Ops.size(), 3u);
+  COMPILER::MemoryProofPromotionPolicy Promotion;
+  Promotion.Enabled = true;
+  Promotion.DemandComputationThreshold = 1;
+  Promotion.DemandWorkMultiplier = 0;
+  COMPILER::MemoryGuaranteedExtentOracle Oracle(Facts, {}, Promotion);
+
+  EXPECT_TRUE(Oracle.queryBeforeOp(Facts.Ops[0].Id).available());
+  EXPECT_EQ(Oracle.getStats().PromotionSchedules, 1u);
+  EXPECT_EQ(Oracle.getStats().GlobalPromotionAttempts, 0u);
+  EXPECT_EQ(Oracle.getStats().PromotionPending, 1u);
+
+  EXPECT_TRUE(Oracle.queryBeforeOp(Facts.Ops[0].Id).available());
+  EXPECT_EQ(Oracle.getStats().GlobalPromotionAttempts, 0u);
+  EXPECT_EQ(Oracle.getStats().PromotionPending, 1u);
+
+  const COMPILER::MemoryExtentQueryResult Second =
+      Oracle.queryBeforeOp(Facts.Ops[1].Id);
+  EXPECT_TRUE(Second.available());
+  EXPECT_EQ(Second.GuaranteedMinBytes, 0x60u);
+  EXPECT_EQ(Oracle.getStats().GlobalPromotionAttempts, 1u);
+  EXPECT_EQ(Oracle.getStats().GlobalPromotions, 1u);
+  EXPECT_EQ(Oracle.getStats().PromotionPending, 0u);
+}
+
+TEST(EVMMemoryGuaranteedExtentOracleTest,
+     FailedPromotionDoesNotPublishGlobalResults) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,     OP_PUSH1, 0x40,      OP_MSTORE, OP_PUSH1,
+      0x02,     OP_PUSH1, 0x80,     OP_MSTORE, OP_STOP};
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  COMPILER::MemoryProofPromotionPolicy Promotion;
+  Promotion.Enabled = true;
+  Promotion.DemandComputationThreshold = 1;
+  Promotion.DemandWorkMultiplier = 0;
+  Promotion.MaxGlobalBlockTransfers = 0;
+  Promotion.MaxGlobalOpVisits = 0;
+  COMPILER::MemoryGuaranteedExtentOracle Oracle(Facts, {}, Promotion);
+
+  EXPECT_TRUE(Oracle.queryBeforeOp(Facts.Ops[0].Id).available());
+  EXPECT_TRUE(Oracle.queryBeforeOp(Facts.Ops[1].Id).available());
+  EXPECT_EQ(Oracle.getStats().GlobalPromotionAttempts, 1u);
+  EXPECT_EQ(Oracle.getStats().GlobalPromotions, 0u);
+  EXPECT_EQ(Oracle.getStats().GlobalBudgetExhaustions, 1u);
+  EXPECT_TRUE(Oracle.queryBeforeOp(Facts.Ops[0].Id).available());
+  EXPECT_EQ(Oracle.getStats().GlobalPromotionAttempts, 1u);
 }
 
 TEST(EVMMemoryGuaranteedMinBytesAnalysisTest,
@@ -1617,6 +2009,27 @@ TEST(EVMMemoryPrecheckConsumerTest,
   EXPECT_EQ(EndOffset, 0xc0u);
 }
 
+TEST(EVMMemoryPrecheckConsumerTest,
+     RestrictsBlockPrecheckToIndexedOperationSpan) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01, OP_PUSH1, 0x00, OP_MSTORE,
+      OP_PUSH1, 0x02, OP_PUSH1, 0x20, OP_MSTORE,
+      OP_PUSH1, 0x03, OP_PUSH1, 0x40, OP_MSTORE};
+  const std::vector<MemoryFactBlockSpec> Blocks = {
+      {0, 0, 5, {5}, {}},
+      {5, 5, 15, {}, {0}},
+  };
+
+  COMPILER::MemoryFacts Facts = collectManualBlockMemoryFacts(Bytecode, Blocks);
+  COMPILER::MemoryAnalysisView View(Facts);
+  COMPILER::MemoryPrecheckConsumer Consumer(View);
+
+  // Even if a caller supplies a wider bytecode interval, the block index is
+  // authoritative. The first block contains only one direct memory operation
+  // and therefore cannot form a shared precheck.
+  EXPECT_FALSE(Consumer.getBlockPrecheckRange(0, Bytecode.size()).has_value());
+}
+
 TEST(EVMMemoryPrecheckConsumerTest, RejectsHelperBarrierInBlockRange) {
   const std::vector<uint8_t> Bytecode = {
       OP_PUSH1, 0x01, OP_PUSH1, 0x80, OP_MSTORE,
@@ -1859,6 +2272,110 @@ TEST(EVMMemoryConsumerFrameworkTest, ExpansionPlannerPrefersGroupingPlan) {
   EXPECT_EQ(Diag.GroupingCandidates, 1u);
   EXPECT_EQ(Diag.GroupingAccepted, 1u);
   EXPECT_EQ(Diag.PrecheckCandidates, 0u);
+}
+
+TEST(EVMMemoryExpansionPlannerLazyTest,
+     StartsWithoutMaterializingOptionalAnalyses) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,     0x20,     OP_PUSH1, 0x80,     OP_KECCAK256,
+      OP_POP,       OP_PUSH1, 0x20,     OP_PUSH1, 0x80,
+      OP_KECCAK256, OP_POP,   OP_STOP};
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryAnalysisView View(Facts);
+  COMPILER::MemoryExpansionPlanner Planner(View);
+
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasLinearRegions(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasGuaranteedExtent(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasDeadStores(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasLoadForwarding(Planner));
+}
+
+TEST(EVMMemoryExpansionPlannerLazyTest,
+     ExtentQueryMaterializesOnlyExtentOracle) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,     0x20,     OP_PUSH1, 0x80,     OP_KECCAK256,
+      OP_POP,       OP_PUSH1, 0x20,     OP_PUSH1, 0x80,
+      OP_KECCAK256, OP_POP,   OP_STOP};
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  ASSERT_GE(Facts.Ops.size(), 2u);
+  COMPILER::MemoryAnalysisView View(Facts);
+  COMPILER::MemoryExpansionPlanner Planner(View);
+
+  EXPECT_EQ(Planner.getGuaranteedMinBytesBeforeOp(Facts.Ops.back().Pc), 0xa0u);
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasLinearRegions(Planner));
+  EXPECT_TRUE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasGuaranteedExtent(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasDeadStores(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasLoadForwarding(Planner));
+}
+
+TEST(EVMMemoryExpansionPlannerLazyTest,
+     SharedPrecheckDoesNotMaterializeGlobalAnalyses) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH1, 0x20,     OP_PUSH1, 0x40,
+                                         OP_PUSH1, 0x00,     OP_MCOPY, OP_PUSH1,
+                                         0x20,     OP_PUSH1, 0x80,     OP_PUSH1,
+                                         0x40,     OP_MCOPY, OP_STOP};
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  COMPILER::MemoryAnalysisView View(Facts);
+  COMPILER::MemoryExpansionPlanner Planner(View);
+
+  EXPECT_TRUE(Planner.buildMemoryExpansionPlan(0, Bytecode.size()).has_value());
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasLinearRegions(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasGuaranteedExtent(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasDeadStores(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasLoadForwarding(Planner));
+}
+
+TEST(EVMMemoryExpansionPlannerLazyTest, DeadStoreQueryMaterializesOnlyDSE) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01,     OP_PUSH1, 0x80,      OP_MSTORE, OP_PUSH1,
+      0x02,     OP_PUSH1, 0x80,     OP_MSTORE, OP_STOP};
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  ASSERT_GE(Facts.Ops.size(), 2u);
+  COMPILER::MemoryAnalysisView View(Facts);
+  COMPILER::MemoryExpansionPlanner Planner(View);
+
+  EXPECT_TRUE(Planner.isDeadStore(Facts.Ops.front().Pc));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasLinearRegions(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasGuaranteedExtent(Planner));
+  EXPECT_TRUE(COMPILER::MemoryExpansionPlannerTestPeer::hasDeadStores(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasLoadForwarding(Planner));
+}
+
+TEST(EVMMemoryExpansionPlannerLazyTest,
+     ForwardingQueryMaterializesOnlyForwardingAnalysis) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01, OP_PUSH1, 0x80,   OP_MSTORE,
+      OP_PUSH1, 0x80, OP_MLOAD, OP_POP, OP_STOP};
+  COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+  ASSERT_GE(Facts.Ops.size(), 2u);
+  COMPILER::MemoryAnalysisView View(Facts);
+  COMPILER::MemoryExpansionPlanner Planner(View);
+
+  EXPECT_EQ(Planner.getForwardingStorePC(Facts.Ops.back().Pc),
+            std::optional<uint64_t>(Facts.Ops.front().Pc));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasLinearRegions(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasGuaranteedExtent(Planner));
+  EXPECT_FALSE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasDeadStores(Planner));
+  EXPECT_TRUE(
+      COMPILER::MemoryExpansionPlannerTestPeer::hasLoadForwarding(Planner));
 }
 
 TEST(EVMMemoryConsumerFrameworkTest, ExpansionPlannerGroupsIntervalsWithGaps) {
@@ -2858,11 +3375,162 @@ public:
 class MemoryFactsCapturingBuilder : public MockEVMBuilder {
 public:
   void setMemoryFacts(const COMPILER::MemoryFacts &Facts) {
+    ++SetMemoryFactsCount;
     CapturedFacts = Facts;
   }
 
   COMPILER::MemoryFacts CapturedFacts;
+  uint32_t SetMemoryFactsCount = 0;
 };
+
+TEST(EVMMemoryFactsIndexTest, MapsOpcodePCWithoutAcceptingPushPayload) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH1, 0x2a,      OP_PUSH1,
+                                         0x80,     OP_MSTORE, OP_STOP};
+
+  const COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+
+  const COMPILER::MemoryOp *Store = Facts.getOpByPC(4);
+  ASSERT_NE(Store, nullptr);
+  EXPECT_EQ(Store->Kind, COMPILER::MemoryOpKind::MStore);
+  EXPECT_EQ(Facts.getOpByPC(1), nullptr);
+  EXPECT_EQ(Facts.getOpByPC(Bytecode.size()), nullptr);
+}
+
+TEST(EVMMemoryPlannerAdmissionTest, RejectsSingleDynamicMemoryNoHit) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH1,        0x01,      OP_PUSH0,
+                                         OP_CALLDATALOAD, OP_MSTORE, OP_STOP};
+
+  const COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+
+  EXPECT_FALSE(Facts.Opportunities.hasPlannerOpportunity());
+}
+
+TEST(EVMMemoryPlannerAdmissionTest, AdmitsExactProducerConsumerPair) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,     0x20,     OP_PUSH1, 0x80,     OP_KECCAK256,
+      OP_POP,       OP_PUSH1, 0x20,     OP_PUSH1, 0x80,
+      OP_KECCAK256, OP_POP,   OP_STOP};
+
+  const COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_TRUE(Facts.Opportunities.hasPlannerOpportunity());
+}
+
+TEST(EVMMemoryPlannerAdmissionTest, RejectsSingleExactMemoryOperation) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH1, 0x2a,      OP_PUSH1,
+                                         0x80,     OP_MSTORE, OP_STOP};
+
+  const COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+
+  ASSERT_EQ(Facts.Ops.size(), 1u);
+  EXPECT_FALSE(Facts.Opportunities.hasPlannerOpportunity());
+}
+
+TEST(EVMMemoryPlannerAdmissionTest, RejectsStaticallyEmptyCopies) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH0,        OP_PUSH0,    OP_PUSH0,
+                                         OP_CALLDATACOPY, OP_PUSH0,    OP_PUSH0,
+                                         OP_PUSH0,        OP_CODECOPY, OP_STOP};
+
+  const COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_FALSE(Facts.Opportunities.hasPlannerOpportunity());
+}
+
+TEST(EVMMemoryPlannerAdmissionTest, AdmitsCopyToKeccakExtentReuse) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,        0x20,     OP_PUSH0, OP_PUSH1, 0x80,
+      OP_CALLDATACOPY, OP_PUSH1, 0x20,     OP_PUSH1, 0x80,
+      OP_KECCAK256,    OP_POP,   OP_STOP};
+
+  const COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+
+  ASSERT_EQ(Facts.Ops.size(), 2u);
+  EXPECT_TRUE(Facts.Opportunities.HasExtentReuseOpportunity);
+  EXPECT_TRUE(Facts.Opportunities.hasPlannerOpportunity());
+}
+
+TEST(EVMMemoryPlannerAdmissionTest, AdmitsStoreDSEAndForwardingShapes) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1, 0x01, OP_PUSH1, 0x80,   OP_MSTORE,
+      OP_PUSH1, 0x02, OP_PUSH1, 0x80,   OP_MSTORE,
+      OP_PUSH1, 0x80, OP_MLOAD, OP_POP, OP_STOP};
+
+  const COMPILER::MemoryFacts Facts = collectMemoryFacts(Bytecode);
+
+  EXPECT_TRUE(Facts.Opportunities.HasDeadStoreOpportunity);
+  EXPECT_TRUE(Facts.Opportunities.HasLoadForwardingOpportunity);
+  EXPECT_TRUE(Facts.Opportunities.hasPlannerOpportunity());
+}
+
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+TEST(EVMJITFrontendVisitorTest, DoesNotSetMemoryFactsForNoHitProgram) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH1, 0x01,   OP_PUSH1, 0x02,
+                                         OP_ADD,   OP_POP, OP_STOP};
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MemoryFactsCapturingBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MemoryFactsCapturingBuilder> Visitor(Builder,
+                                                                    &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_EQ(Builder.SetMemoryFactsCount, 0u);
+}
+
+TEST(EVMJITFrontendVisitorTest, IgnoresMemoryOpcodeInPushPayload) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH1, OP_MSTORE, OP_POP, OP_STOP};
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MemoryFactsCapturingBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MemoryFactsCapturingBuilder> Visitor(Builder,
+                                                                    &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_EQ(Builder.SetMemoryFactsCount, 0u);
+}
+
+TEST(EVMJITFrontendVisitorTest, ConservativelyAdmitsPotentialMultiBlockCFG) {
+  const std::vector<uint8_t> Bytecode = {OP_PUSH1,  0x01,        OP_PUSH1, 0x80,
+                                         OP_MSTORE, OP_JUMPDEST, OP_STOP};
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MemoryFactsCapturingBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MemoryFactsCapturingBuilder> Visitor(Builder,
+                                                                    &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_EQ(Builder.SetMemoryFactsCount, 1u);
+}
+
+TEST(EVMJITFrontendVisitorTest, PreservesDenseExactProofOpportunity) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_PUSH1,     0x20,     OP_PUSH1, 0x80,     OP_KECCAK256,
+      OP_POP,       OP_PUSH1, 0x20,     OP_PUSH1, 0x80,
+      OP_KECCAK256, OP_POP,   OP_STOP};
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  MemoryFactsCapturingBuilder Builder;
+  COMPILER::EVMByteCodeVisitor<MemoryFactsCapturingBuilder> Visitor(Builder,
+                                                                    &Ctx);
+  EXPECT_TRUE(Visitor.compile());
+  EXPECT_EQ(Builder.SetMemoryFactsCount, 1u);
+  EXPECT_EQ(Builder.CapturedFacts.Ops.size(), 2u);
+}
+#endif
 
 TEST(EVMJITFrontendVisitorTest, UsesActiveRevisionForMemoryEffectFacts) {
   const std::vector<uint8_t> Bytecode = {OP_PUSH0, OP_PUSH0, OP_PUSH0, OP_MCOPY,

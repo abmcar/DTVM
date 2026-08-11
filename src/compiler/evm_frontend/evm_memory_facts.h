@@ -289,13 +289,40 @@ struct MemoryBlockFacts {
   }
 };
 
+// Cheap admission facts collected during the bytecode walk. False positives
+// only enable a later lazy analysis; false negatives would suppress an
+// optimization and are therefore not allowed.
+struct MemoryOpportunitySummary {
+  uint64_t ClassifiedOps = 0;
+  uint64_t ExactMemoryOps = 0;
+  uint64_t ExactDirectMemoryOps = 0;
+  bool HasExtentReuseOpportunity = false;
+  bool HasSharedPrecheckOpportunity = false;
+  bool HasDeadStoreOpportunity = false;
+  bool HasLoadForwardingOpportunity = false;
+
+  bool hasPlannerOpportunity() const {
+    return HasExtentReuseOpportunity || hasRegionOpportunity() ||
+           HasSharedPrecheckOpportunity || HasDeadStoreOpportunity ||
+           HasLoadForwardingOpportunity;
+  }
+
+  bool hasRegionOpportunity() const { return ExactDirectMemoryOps >= 2; }
+};
+
 struct MemoryFacts {
+  static constexpr uint32_t InvalidOpId = std::numeric_limits<uint32_t>::max();
+
   std::vector<MemoryOp> Ops;
   std::map<uint64_t, MemoryBlockFacts> Blocks;
+  std::vector<uint32_t> OpIdByPC;
+  MemoryOpportunitySummary Opportunities;
 
-  void clear() {
+  void clear(size_t BytecodeSize = 0) {
     Ops.clear();
     Blocks.clear();
+    OpIdByPC.assign(BytecodeSize, InvalidOpId);
+    Opportunities = {};
   }
   bool empty() const { return Ops.empty(); }
   size_t size() const { return Ops.size(); }
@@ -311,28 +338,42 @@ struct MemoryFacts {
     return getOp(OpId) == nullptr ? Ops.size() : static_cast<size_t>(OpId);
   }
 
+  const MemoryOp *getOpByPC(uint64_t PC) const {
+    if (PC >= OpIdByPC.size()) {
+      return nullptr;
+    }
+    return getOp(OpIdByPC[static_cast<size_t>(PC)]);
+  }
+
   const MemoryBlockFacts *getBlock(uint64_t EntryPC) const {
     auto It = Blocks.find(EntryPC);
     return It == Blocks.end() ? nullptr : &It->second;
   }
 };
 
+enum class MemoryFactsBuildMode : uint8_t { Full, OpportunitySummary };
+
 // Fact builder: consumes bytecode order and builds MemoryFacts. It has no
 // dependency on MIR builder, analysis, or optimization consumers.
 class MemoryFactsBuilder {
 public:
-  explicit MemoryFactsBuilder(evmc_revision Revision = EVMC_CANCUN)
-      : Revision(Revision) {}
+  explicit MemoryFactsBuilder(
+      evmc_revision Revision = EVMC_CANCUN,
+      MemoryFactsBuildMode BuildMode = MemoryFactsBuildMode::Full)
+      : Revision(Revision), BuildMode(BuildMode) {}
 
   void setRevision(evmc_revision NewRevision) { Revision = NewRevision; }
   evmc_revision getRevision() const { return Revision; }
 
-  void reset() {
+  void reset(size_t BytecodeSize = 0) {
     endBlock();
-    Facts.clear();
+    Facts.clear(BuildMode == MemoryFactsBuildMode::Full ? BytecodeSize : 0);
     Stack.clear();
     NextValueId = 1;
     CurrentBlockEntryPC = 0;
+    CurrentBlockExactPlanningOps = 0;
+    CurrentBlockStores = 0;
+    CurrentBlockWrites = 0;
     HasCurrentBlock = false;
   }
 
@@ -352,19 +393,32 @@ public:
     endBlock();
     HasCurrentBlock = true;
     CurrentBlockEntryPC = EntryPC;
+    CurrentBlockExactPlanningOps = 0;
+    CurrentBlockStores = 0;
+    CurrentBlockWrites = 0;
 
-    MemoryBlockFacts Block;
-    Block.EntryPC = EntryPC;
-    Block.BodyStartPC = BodyStartPC;
-    Block.BodyEndPC = BodyEndPC;
-    Block.OpsBegin = Facts.Ops.size();
-    Block.OpsEnd = Facts.Ops.size();
-    Block.HasCompleteOpcodeFacts = HasCompleteOpcodeFacts;
-    Block.PredecessorsComplete = PredecessorsComplete;
-    Block.PredecessorsAreStatic = PredecessorsAreStatic;
-    Block.Successors = Successors;
-    Block.Predecessors = Predecessors;
-    Facts.Blocks[EntryPC] = std::move(Block);
+    if (BuildMode == MemoryFactsBuildMode::Full) {
+      MemoryBlockFacts Block;
+      Block.EntryPC = EntryPC;
+      Block.BodyStartPC = BodyStartPC;
+      Block.BodyEndPC = BodyEndPC;
+      Block.OpsBegin = Facts.Ops.size();
+      Block.OpsEnd = Facts.Ops.size();
+      Block.HasCompleteOpcodeFacts = HasCompleteOpcodeFacts;
+      Block.PredecessorsComplete = PredecessorsComplete;
+      Block.PredecessorsAreStatic = PredecessorsAreStatic;
+      Block.Successors = Successors;
+      Block.Predecessors = Predecessors;
+      std::sort(Block.Successors.begin(), Block.Successors.end());
+      Block.Successors.erase(
+          std::unique(Block.Successors.begin(), Block.Successors.end()),
+          Block.Successors.end());
+      std::sort(Block.Predecessors.begin(), Block.Predecessors.end());
+      Block.Predecessors.erase(
+          std::unique(Block.Predecessors.begin(), Block.Predecessors.end()),
+          Block.Predecessors.end());
+      Facts.Blocks[EntryPC] = std::move(Block);
+    }
 
     Stack.clear();
     for (const MemoryEntryValue &EntryValue : EntryValues) {
@@ -380,16 +434,18 @@ public:
     if (!HasCurrentBlock) {
       return;
     }
-    auto It = Facts.Blocks.find(CurrentBlockEntryPC);
-    if (It != Facts.Blocks.end()) {
-      It->second.OpsEnd = Facts.Ops.size();
+    if (BuildMode == MemoryFactsBuildMode::Full) {
+      auto It = Facts.Blocks.find(CurrentBlockEntryPC);
+      if (It != Facts.Blocks.end()) {
+        It->second.OpsEnd = Facts.Ops.size();
+      }
     }
     HasCurrentBlock = false;
   }
 
   void observeOpcode(evmc_opcode Opcode, uint64_t Pc, const uint8_t *Bytecode,
                      size_t BytecodeSize) {
-    if (HasCurrentBlock) {
+    if (BuildMode == MemoryFactsBuildMode::Full && HasCurrentBlock) {
       auto It = Facts.Blocks.find(CurrentBlockEntryPC);
       if (It == Facts.Blocks.end() || !It->second.HasCompleteOpcodeFacts) {
         return;
@@ -522,8 +578,13 @@ private:
   MemoryFacts Facts;
   std::vector<StackValue> Stack;
   evmc_revision Revision = EVMC_CANCUN;
+  MemoryFactsBuildMode BuildMode = MemoryFactsBuildMode::Full;
+  MemoryOp SummaryOp;
   uint32_t NextValueId = 1;
   uint64_t CurrentBlockEntryPC = 0;
+  uint32_t CurrentBlockExactPlanningOps = 0;
+  uint32_t CurrentBlockStores = 0;
+  uint32_t CurrentBlockWrites = 0;
   bool HasCurrentBlock = false;
 
   static MemoryHardBarrierKind getHardBarrierKind(const MemoryOp &Op) {
@@ -628,7 +689,100 @@ private:
     return Interval != nullptr && getDirectMemoryIntervalEnd(*Interval, End);
   }
 
+  static const MemoryInterval *getDirectInterval(const MemoryOp &Op) {
+    switch (Op.Kind) {
+    case MemoryOpKind::MLoad:
+      return Op.Reads.size() == 1 ? &Op.Reads[0] : nullptr;
+    case MemoryOpKind::MStore:
+    case MemoryOpKind::MStore8:
+      return Op.Writes.size() == 1 ? &Op.Writes[0] : nullptr;
+    default:
+      return nullptr;
+    }
+  }
+
+  static bool isExactConstMemoryInterval(const MemoryInterval &Interval) {
+    if (Interval.Empty || Interval.Space != AddressSpace::Memory ||
+        Interval.Addr.Kind != AddressBaseKind::Const ||
+        !Interval.Addr.isKnown() || !Interval.Size.Known ||
+        Interval.Addr.Offset < 0) {
+      return false;
+    }
+    const uint64_t Begin = static_cast<uint64_t>(Interval.Addr.Offset);
+    return Interval.Size.Value <= std::numeric_limits<uint64_t>::max() - Begin;
+  }
+
+  static bool hasExactMemoryInterval(const MemoryOp &Op) {
+    for (const MemoryInterval &Read : Op.Reads) {
+      if (isExactConstMemoryInterval(Read)) {
+        return true;
+      }
+    }
+    for (const MemoryInterval &Write : Op.Writes) {
+      if (isExactConstMemoryInterval(Write)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool isExactConstDirectMemoryOp(const MemoryOp &Op) {
+    const MemoryInterval *Interval = getDirectInterval(Op);
+    return Interval != nullptr && isExactConstMemoryInterval(*Interval);
+  }
+
+  static bool isExactPlanningOp(const MemoryOp &Op) {
+    if (isExactConstDirectMemoryOp(Op)) {
+      return true;
+    }
+    if (Op.Kind != MemoryOpKind::MCopy ||
+        (Op.Reads.empty() && Op.Writes.empty())) {
+      return false;
+    }
+    for (const MemoryInterval &Read : Op.Reads) {
+      if (!isExactConstMemoryInterval(Read)) {
+        return false;
+      }
+    }
+    for (const MemoryInterval &Write : Op.Writes) {
+      if (!isExactConstMemoryInterval(Write)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void noteOpportunity(const MemoryOp &Op) {
+    MemoryOpportunitySummary &Summary = Facts.Opportunities;
+    ++Summary.ClassifiedOps;
+
+    if (hasExactMemoryInterval(Op) && ++Summary.ExactMemoryOps >= 2) {
+      Summary.HasExtentReuseOpportunity = true;
+    }
+    if (isExactConstDirectMemoryOp(Op)) {
+      ++Summary.ExactDirectMemoryOps;
+    }
+    if (isExactPlanningOp(Op) && ++CurrentBlockExactPlanningOps >= 2) {
+      Summary.HasSharedPrecheckOpportunity = true;
+    }
+
+    if (Op.Kind == MemoryOpKind::MStore || Op.Kind == MemoryOpKind::MStore8) {
+      if (++CurrentBlockWrites >= 2) {
+        Summary.HasDeadStoreOpportunity = true;
+      }
+      if (Op.Kind == MemoryOpKind::MStore) {
+        ++CurrentBlockStores;
+      }
+    } else if (Op.Kind == MemoryOpKind::MLoad && CurrentBlockStores != 0) {
+      Summary.HasLoadForwardingOpportunity = true;
+    }
+  }
+
   void noteBlockFact(const MemoryOp &Op) {
+    noteOpportunity(Op);
+    if (BuildMode == MemoryFactsBuildMode::OpportunitySummary) {
+      return;
+    }
     if (!HasCurrentBlock) {
       return;
     }
@@ -768,14 +922,29 @@ private:
   MemoryOp &addOp(uint64_t Pc, evmc_opcode Opcode, MemoryOpKind Kind,
                   MemoryEffect Effect) {
     MemoryOp Op;
-    Op.Id = static_cast<uint32_t>(Facts.Ops.size());
+    Op.Id = BuildMode == MemoryFactsBuildMode::Full
+                ? static_cast<uint32_t>(Facts.Ops.size())
+                : static_cast<uint32_t>(Facts.Opportunities.ClassifiedOps);
     Op.Pc = Pc;
     Op.BlockEntryPC = CurrentBlockEntryPC;
     Op.Opcode = Opcode;
     Op.Kind = Kind;
     Op.Effect = Effect;
     Op.ObservableEffects = summarizeEffects(Opcode, Kind);
+    if (BuildMode == MemoryFactsBuildMode::OpportunitySummary) {
+      SummaryOp = std::move(Op);
+      return SummaryOp;
+    }
     Facts.Ops.push_back(std::move(Op));
+    if (Pc <= static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+      const size_t Index = static_cast<size_t>(Pc);
+      if (Facts.OpIdByPC.size() <= Index) {
+        Facts.OpIdByPC.resize(Index + 1, MemoryFacts::InvalidOpId);
+      }
+      if (Facts.OpIdByPC[Index] == MemoryFacts::InvalidOpId) {
+        Facts.OpIdByPC[Index] = Facts.Ops.back().Id;
+      }
+    }
     return Facts.Ops.back();
   }
 

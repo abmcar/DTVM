@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <queue>
 #include <set>
@@ -476,14 +477,7 @@ public:
 
   const MemoryFacts &getFacts() const { return Facts; }
 
-  const MemoryOp *getOp(uint32_t OpId) const {
-    for (const MemoryOp &Op : Facts.Ops) {
-      if (Op.Id == OpId) {
-        return &Op;
-      }
-    }
-    return nullptr;
-  }
+  const MemoryOp *getOp(uint32_t OpId) const { return Facts.getOp(OpId); }
 
   MemoryBarrierKind getBarrierKind(const MemoryOp &Op) const {
     return Barriers.getBarrierKind(Op);
@@ -819,12 +813,30 @@ private:
   const char *const *InstructionNames = nullptr;
 };
 
+struct MemoryGlobalAnalysisBudget {
+  uint64_t MaxBlockTransfers = std::numeric_limits<uint64_t>::max();
+  uint64_t MaxOpVisits = std::numeric_limits<uint64_t>::max();
+  uint64_t MaxEdgeVisits = std::numeric_limits<uint64_t>::max();
+};
+
+struct MemoryGlobalAnalysisStats {
+  uint64_t BlockTransfers = 0;
+  uint64_t OpVisits = 0;
+  uint64_t EdgeVisits = 0;
+  uint64_t BudgetExhaustions = 0;
+};
+
 class MemoryGuaranteedMinBytesAnalysis {
 public:
-  explicit MemoryGuaranteedMinBytesAnalysis(const MemoryFacts &Facts)
-      : Facts(Facts) {
+  explicit MemoryGuaranteedMinBytesAnalysis(
+      const MemoryFacts &Facts, MemoryGlobalAnalysisBudget Budget = {})
+      : Facts(Facts), Budget(Budget) {
     run();
   }
+
+  bool isComplete() const { return Complete; }
+
+  const MemoryGlobalAnalysisStats &getStats() const { return Stats; }
 
   uint64_t getGuaranteedMinBytesAtEntry(uint64_t EntryPC) const {
     auto It = EntryBytes.find(EntryPC);
@@ -879,16 +891,36 @@ private:
   struct TransferResult {
     uint64_t Bytes = 0;
     bool HasNormalExit = true;
+    bool WithinBudget = true;
   };
 
+  bool consumeOpVisit() {
+    if (Stats.OpVisits >= Budget.MaxOpVisits) {
+      return false;
+    }
+    ++Stats.OpVisits;
+    return true;
+  }
+
+  bool consumeEdgeVisit() {
+    if (Stats.EdgeVisits >= Budget.MaxEdgeVisits) {
+      return false;
+    }
+    ++Stats.EdgeVisits;
+    return true;
+  }
+
   TransferResult transfer(const MemoryBlockFacts &Block,
-                          uint64_t EntryBytesValue) const {
+                          uint64_t EntryBytesValue) {
     if (!Block.HasCompleteOpcodeFacts) {
       return {.Bytes = 0};
     }
     uint64_t Current = EntryBytesValue;
     for (size_t I = Block.OpsBegin; I < Block.OpsEnd && I < Facts.Ops.size();
          ++I) {
+      if (!consumeOpVisit()) {
+        return {.WithinBudget = false};
+      }
       const MemoryOp &Op = Facts.Ops[I];
       if (!Op.ObservableEffects.preservesLogicalSizeProof()) {
         Current = 0;
@@ -904,14 +936,17 @@ private:
     return {.Bytes = Current};
   }
 
-  void recordBeforeOpBytes(const MemoryBlockFacts &Block,
+  bool recordBeforeOpBytes(const MemoryBlockFacts &Block,
                            uint64_t EntryBytesValue) {
     if (!Block.HasCompleteOpcodeFacts) {
-      return;
+      return true;
     }
     uint64_t Current = EntryBytesValue;
     for (size_t I = Block.OpsBegin; I < Block.OpsEnd && I < Facts.Ops.size();
          ++I) {
+      if (!consumeOpVisit()) {
+        return false;
+      }
       const MemoryOp &Op = Facts.Ops[I];
       BeforeOpBytes[Op.Id] = Current;
       if (!Op.ObservableEffects.preservesLogicalSizeProof()) {
@@ -922,32 +957,43 @@ private:
         Current = std::max(Current, RequiredBytes);
       }
       if (Op.ObservableEffects.terminatesFrame()) {
-        return;
+        return true;
       }
     }
+    return true;
   }
 
-  uint64_t computeEntryFromPredecessors(const MemoryBlockFacts &Block) const {
+  bool computeEntryFromPredecessors(const MemoryBlockFacts &Block,
+                                    uint64_t &Result) {
     if (!Block.HasCompleteOpcodeFacts || Block.EntryPC == 0 ||
         !Block.PredecessorsComplete || !Block.PredecessorsAreStatic ||
         Block.Predecessors.empty()) {
-      return 0;
+      Result = 0;
+      return true;
     }
-    uint64_t Result = std::numeric_limits<uint64_t>::max();
+    Result = std::numeric_limits<uint64_t>::max();
     for (uint64_t PredPC : Block.Predecessors) {
+      if (!consumeEdgeVisit()) {
+        return false;
+      }
       auto PredValidIt = ExitAvailable.find(PredPC);
       if (PredValidIt == ExitAvailable.end() || !PredValidIt->second) {
-        return 0;
+        Result = 0;
+        return true;
       }
       auto PredExitIt = ExitBytes.find(PredPC);
       const uint64_t PredExit =
           PredExitIt == ExitBytes.end() ? 0 : PredExitIt->second;
       Result = std::min(Result, PredExit);
     }
-    return Result == std::numeric_limits<uint64_t>::max() ? 0 : Result;
+    if (Result == std::numeric_limits<uint64_t>::max()) {
+      Result = 0;
+    }
+    return true;
   }
 
   void run() {
+    Complete = false;
     std::queue<uint64_t> WorkList;
     std::map<uint64_t, bool> InQueue;
     for (const auto &[EntryPC, Block] : Facts.Blocks) {
@@ -957,9 +1003,17 @@ private:
       WorkList.push(EntryPC);
       InQueue[EntryPC] = true;
       for (uint64_t PredPC : Block.Predecessors) {
+        if (!consumeEdgeVisit()) {
+          failBudget();
+          return;
+        }
         Dependents[PredPC].push_back(EntryPC);
       }
       for (uint64_t SuccPC : Block.Successors) {
+        if (!consumeEdgeVisit()) {
+          failBudget();
+          return;
+        }
         Dependents[EntryPC].push_back(SuccPC);
       }
     }
@@ -979,9 +1033,22 @@ private:
         continue;
       }
       const MemoryBlockFacts &Block = BlockIt->second;
-      const uint64_t NewEntry = computeEntryFromPredecessors(Block);
+      if (Stats.BlockTransfers >= Budget.MaxBlockTransfers) {
+        failBudget();
+        return;
+      }
+      ++Stats.BlockTransfers;
+      uint64_t NewEntry = 0;
+      if (!computeEntryFromPredecessors(Block, NewEntry)) {
+        failBudget();
+        return;
+      }
       EntryBytes[EntryPC] = NewEntry;
       const TransferResult NewExit = transfer(Block, NewEntry);
+      if (!NewExit.WithinBudget) {
+        failBudget();
+        return;
+      }
       if (!NewExit.HasNormalExit) {
         ExitAvailable[EntryPC] = false;
         ExitBytes[EntryPC] = 0;
@@ -994,6 +1061,10 @@ private:
       ExitBytes[EntryPC] = NewExit.Bytes;
 
       for (uint64_t SuccPC : Dependents[EntryPC]) {
+        if (!consumeEdgeVisit()) {
+          failBudget();
+          return;
+        }
         if (Facts.Blocks.find(SuccPC) == Facts.Blocks.end()) {
           continue;
         }
@@ -1005,16 +1076,600 @@ private:
     }
 
     for (const auto &[EntryPC, Block] : Facts.Blocks) {
-      recordBeforeOpBytes(Block, getGuaranteedMinBytesAtEntry(EntryPC));
+      if (!recordBeforeOpBytes(Block, getGuaranteedMinBytesAtEntry(EntryPC))) {
+        failBudget();
+        return;
+      }
     }
+    Complete = true;
+  }
+
+  void failBudget() {
+    ++Stats.BudgetExhaustions;
+    EntryBytes.clear();
+    ExitBytes.clear();
+    ExitAvailable.clear();
+    Dependents.clear();
+    BeforeOpBytes.clear();
+    Complete = false;
   }
 
   const MemoryFacts &Facts;
+  MemoryGlobalAnalysisBudget Budget;
+  MemoryGlobalAnalysisStats Stats;
+  bool Complete = false;
   std::map<uint64_t, uint64_t> EntryBytes;
   std::map<uint64_t, uint64_t> ExitBytes;
   std::map<uint64_t, bool> ExitAvailable;
   std::map<uint64_t, std::vector<uint64_t>> Dependents;
   std::map<uint32_t, uint64_t> BeforeOpBytes;
+};
+
+struct MemoryProofQueryBudget {
+  uint32_t MaxBlockVisits = 64;
+  uint32_t MaxOpVisits = 1024;
+  uint32_t MaxEdgeVisits = 256;
+  uint64_t MaxCompilationBlockVisits = 4096;
+  uint64_t MaxCompilationOpVisits = 65536;
+  uint64_t MaxCompilationEdgeVisits = 16384;
+};
+
+struct MemoryProofPromotionPolicy {
+  bool Enabled = true;
+  uint32_t DemandComputationThreshold = 8;
+  uint32_t DemandWorkMultiplier = 2;
+  uint32_t FailureThreshold = 2;
+  uint32_t MaxBlocks = 256;
+  uint32_t MaxOps = 4096;
+  uint64_t MaxGlobalBlockTransfers = 4096;
+  uint64_t MaxGlobalOpVisits = 65536;
+  uint64_t MaxGlobalEdgeVisits = 65536;
+};
+
+enum class MemoryExtentQueryStatus : uint8_t {
+  Available,
+  BudgetExhausted,
+  CompilationBudgetExhausted,
+  Cycle,
+  IncompleteCFG,
+  InvalidProgramPoint,
+  NoNormalExit
+};
+
+struct MemoryExtentQueryResult {
+  MemoryExtentQueryStatus Status = MemoryExtentQueryStatus::InvalidProgramPoint;
+  uint64_t GuaranteedMinBytes = 0;
+
+  bool available() const {
+    return Status == MemoryExtentQueryStatus::Available;
+  }
+};
+
+struct MemoryExtentOracleStats {
+  uint64_t QueryCount = 0;
+  uint64_t QueryCacheHits = 0;
+  uint64_t DemandComputations = 0;
+  uint64_t InternalCacheHits = 0;
+  uint64_t BlockVisits = 0;
+  uint64_t OpVisits = 0;
+  uint64_t EdgeVisits = 0;
+  uint64_t BudgetExhaustions = 0;
+  uint64_t CompilationBudgetExhaustions = 0;
+  uint64_t CycleCutoffs = 0;
+  uint64_t IncompleteCFGRejects = 0;
+  uint64_t InvalidProgramPointRejects = 0;
+  uint64_t NoNormalExitRejects = 0;
+  uint64_t PromotionSchedules = 0;
+  uint64_t PromotionPending = 0;
+  uint64_t PromotionSizeCapRejects = 0;
+  uint64_t GlobalPromotionAttempts = 0;
+  uint64_t GlobalPromotions = 0;
+  uint64_t GlobalQueries = 0;
+  uint64_t GlobalBlockTransfers = 0;
+  uint64_t GlobalOpVisits = 0;
+  uint64_t GlobalEdgeVisits = 0;
+  uint64_t GlobalBudgetExhaustions = 0;
+};
+
+// Demand-driven lower-bound oracle for EVM logical memory extent. Every
+// uncached query has a deterministic local budget and also consumes a bounded
+// compilation-wide budget. Query-local facts are published only after the
+// complete query succeeds, so repeated failures cannot accumulate a proof.
+class MemoryGuaranteedExtentOracle {
+public:
+  explicit MemoryGuaranteedExtentOracle(
+      const MemoryFacts &Facts, MemoryProofQueryBudget Budget = {},
+      MemoryProofPromotionPolicy Promotion = {})
+      : Facts(Facts), Budget(Budget), Promotion(Promotion),
+        BeforeOpBytes(Facts.Ops.size(), 0),
+        BeforeOpValid(Facts.Ops.size(), false) {}
+
+  MemoryExtentQueryResult queryAtEntry(uint64_t EntryPC) const {
+    ++Stats.QueryCount;
+    if (Facts.getBlock(EntryPC) == nullptr) {
+      ++Stats.IncompleteCFGRejects;
+      return {MemoryExtentQueryStatus::IncompleteCFG, 0};
+    }
+    if (GlobalAnalysis) {
+      ++Stats.GlobalQueries;
+      return {MemoryExtentQueryStatus::Available,
+              GlobalAnalysis->getGuaranteedMinBytesAtEntry(EntryPC)};
+    }
+    auto Cached = EntryBytes.find(EntryPC);
+    if (Cached != EntryBytes.end()) {
+      ++Stats.QueryCacheHits;
+      return {MemoryExtentQueryStatus::Available, Cached->second};
+    }
+    if (tryPendingPromotion()) {
+      ++Stats.GlobalQueries;
+      return {MemoryExtentQueryStatus::Available,
+              GlobalAnalysis->getGuaranteedMinBytesAtEntry(EntryPC)};
+    }
+
+    ++Stats.DemandComputations;
+    QueryContext Context(*this);
+    uint64_t Result = 0;
+    const MemoryExtentQueryStatus Status =
+        computeEntry(EntryPC, Context, Result);
+    finishQuery(Context, Status);
+    if (Status == MemoryExtentQueryStatus::Available) {
+      commit(Context);
+    }
+    if (shouldSchedulePromotion(Status)) {
+      schedulePromotion();
+    }
+    return {Status, Status == MemoryExtentQueryStatus::Available ? Result : 0};
+  }
+
+  MemoryExtentQueryResult queryBeforeOp(uint32_t OpId) const {
+    ++Stats.QueryCount;
+    if (Facts.getOp(OpId) == nullptr) {
+      ++Stats.InvalidProgramPointRejects;
+      return {MemoryExtentQueryStatus::InvalidProgramPoint, 0};
+    }
+    if (GlobalAnalysis) {
+      ++Stats.GlobalQueries;
+      return {MemoryExtentQueryStatus::Available,
+              GlobalAnalysis->getGuaranteedMinBytesBeforeOp(OpId)};
+    }
+    if (OpId < BeforeOpValid.size() && BeforeOpValid[OpId]) {
+      ++Stats.QueryCacheHits;
+      return {MemoryExtentQueryStatus::Available, BeforeOpBytes[OpId]};
+    }
+    if (tryPendingPromotion()) {
+      ++Stats.GlobalQueries;
+      return {MemoryExtentQueryStatus::Available,
+              GlobalAnalysis->getGuaranteedMinBytesBeforeOp(OpId)};
+    }
+
+    ++Stats.DemandComputations;
+    QueryContext Context(*this);
+    uint64_t Result = 0;
+    const MemoryExtentQueryStatus Status =
+        computeBeforeOp(OpId, Context, Result);
+    finishQuery(Context, Status);
+    if (Status == MemoryExtentQueryStatus::Available) {
+      commit(Context);
+    }
+    if (shouldSchedulePromotion(Status)) {
+      schedulePromotion();
+    }
+    return {Status, Status == MemoryExtentQueryStatus::Available ? Result : 0};
+  }
+
+  const MemoryExtentOracleStats &getStats() const {
+    Stats.PromotionPending = PromotionPending ? 1 : 0;
+    return Stats;
+  }
+
+private:
+  struct QueryContext {
+    explicit QueryContext(const MemoryGuaranteedExtentOracle &Oracle)
+        : Oracle(Oracle) {}
+
+    bool visitBlock(uint64_t EntryPC) {
+      if (VisitedBlocks.count(EntryPC) != 0) {
+        return true;
+      }
+      if (Oracle.Stats.BlockVisits + VisitedBlocks.size() >=
+          Oracle.Budget.MaxCompilationBlockVisits) {
+        Failure = MemoryExtentQueryStatus::CompilationBudgetExhausted;
+        return false;
+      }
+      if (VisitedBlocks.size() >= Oracle.Budget.MaxBlockVisits) {
+        Failure = MemoryExtentQueryStatus::BudgetExhausted;
+        return false;
+      }
+      VisitedBlocks.insert(EntryPC);
+      return true;
+    }
+
+    bool visitOp() {
+      if (Oracle.Stats.OpVisits + OpVisits >=
+          Oracle.Budget.MaxCompilationOpVisits) {
+        Failure = MemoryExtentQueryStatus::CompilationBudgetExhausted;
+        return false;
+      }
+      if (OpVisits >= Oracle.Budget.MaxOpVisits) {
+        Failure = MemoryExtentQueryStatus::BudgetExhausted;
+        return false;
+      }
+      ++OpVisits;
+      return true;
+    }
+
+    bool visitEdge() {
+      if (Oracle.Stats.EdgeVisits + EdgeVisits >=
+          Oracle.Budget.MaxCompilationEdgeVisits) {
+        Failure = MemoryExtentQueryStatus::CompilationBudgetExhausted;
+        return false;
+      }
+      if (EdgeVisits >= Oracle.Budget.MaxEdgeVisits) {
+        Failure = MemoryExtentQueryStatus::BudgetExhausted;
+        return false;
+      }
+      ++EdgeVisits;
+      return true;
+    }
+
+    MemoryExtentQueryStatus budgetFailure() const { return Failure; }
+
+    const MemoryGuaranteedExtentOracle &Oracle;
+    std::set<uint64_t> VisitedBlocks;
+    std::set<uint64_t> VisitingEntries;
+    uint32_t OpVisits = 0;
+    uint32_t EdgeVisits = 0;
+    MemoryExtentQueryStatus Failure = MemoryExtentQueryStatus::BudgetExhausted;
+    std::map<uint64_t, uint64_t> LocalEntryBytes;
+    std::map<uint64_t, uint64_t> LocalExitBytes;
+    std::map<uint32_t, uint64_t> LocalBeforeOpBytes;
+  };
+
+  static bool getIntervalEnd(const MemoryInterval &Interval, uint64_t &End) {
+    if (Interval.Space != AddressSpace::Memory || Interval.Empty ||
+        !Interval.Addr.isKnown() ||
+        Interval.Addr.Kind != AddressBaseKind::Const || !Interval.Size.Known ||
+        Interval.Addr.Offset < 0) {
+      return false;
+    }
+    const uint64_t Begin = static_cast<uint64_t>(Interval.Addr.Offset);
+    if (Interval.Size.Value > std::numeric_limits<uint64_t>::max() - Begin) {
+      return false;
+    }
+    End = Begin + Interval.Size.Value;
+    return true;
+  }
+
+  static bool getGuaranteedRequiredBytes(const MemoryOp &Op, uint64_t &End) {
+    bool Found = false;
+    End = 0;
+    auto Accumulate = [&Found, &End](const MemoryInterval &Interval) {
+      uint64_t IntervalEnd = 0;
+      if (getIntervalEnd(Interval, IntervalEnd)) {
+        End = std::max(End, IntervalEnd);
+        Found = true;
+      }
+    };
+    for (const MemoryInterval &Read : Op.Reads) {
+      Accumulate(Read);
+    }
+    for (const MemoryInterval &Write : Op.Writes) {
+      Accumulate(Write);
+    }
+    return Found;
+  }
+
+  static void transferOp(const MemoryOp &Op, uint64_t &Current) {
+    if (!Op.ObservableEffects.preservesLogicalSizeProof()) {
+      Current = 0;
+    }
+    uint64_t RequiredBytes = 0;
+    if (getGuaranteedRequiredBytes(Op, RequiredBytes)) {
+      Current = std::max(Current, RequiredBytes);
+    }
+  }
+
+  bool lookupEntry(uint64_t EntryPC, const QueryContext &Context,
+                   uint64_t &Result) const {
+    auto Local = Context.LocalEntryBytes.find(EntryPC);
+    if (Local != Context.LocalEntryBytes.end()) {
+      ++Stats.InternalCacheHits;
+      Result = Local->second;
+      return true;
+    }
+    auto Cached = EntryBytes.find(EntryPC);
+    if (Cached != EntryBytes.end()) {
+      ++Stats.InternalCacheHits;
+      Result = Cached->second;
+      return true;
+    }
+    return false;
+  }
+
+  bool lookupExit(uint64_t EntryPC, const QueryContext &Context,
+                  uint64_t &Result) const {
+    auto Local = Context.LocalExitBytes.find(EntryPC);
+    if (Local != Context.LocalExitBytes.end()) {
+      ++Stats.InternalCacheHits;
+      Result = Local->second;
+      return true;
+    }
+    auto Cached = ExitBytes.find(EntryPC);
+    if (Cached != ExitBytes.end()) {
+      ++Stats.InternalCacheHits;
+      Result = Cached->second;
+      return true;
+    }
+    return false;
+  }
+
+  MemoryExtentQueryStatus computeEntry(uint64_t EntryPC, QueryContext &Context,
+                                       uint64_t &Result) const {
+    if (lookupEntry(EntryPC, Context, Result)) {
+      return MemoryExtentQueryStatus::Available;
+    }
+    if (!Context.visitBlock(EntryPC)) {
+      return Context.budgetFailure();
+    }
+    const MemoryBlockFacts *Block = Facts.getBlock(EntryPC);
+    if (Block == nullptr) {
+      return MemoryExtentQueryStatus::IncompleteCFG;
+    }
+    if (!Block->HasCompleteOpcodeFacts) {
+      return MemoryExtentQueryStatus::IncompleteCFG;
+    }
+    // A backedge into the entry block cannot establish a fact for the first
+    // execution of that block.
+    if (EntryPC == 0) {
+      Result = 0;
+      Context.LocalEntryBytes[EntryPC] = Result;
+      return MemoryExtentQueryStatus::Available;
+    }
+    if (!Block->PredecessorsComplete || !Block->PredecessorsAreStatic) {
+      return MemoryExtentQueryStatus::IncompleteCFG;
+    }
+    if (Block->Predecessors.empty()) {
+      Result = 0;
+      Context.LocalEntryBytes[EntryPC] = Result;
+      return MemoryExtentQueryStatus::Available;
+    }
+    if (Context.VisitingEntries.count(EntryPC) != 0) {
+      return MemoryExtentQueryStatus::Cycle;
+    }
+
+    Context.VisitingEntries.insert(EntryPC);
+    uint64_t Meet = std::numeric_limits<uint64_t>::max();
+    for (uint64_t PredPC : Block->Predecessors) {
+      if (!Context.visitEdge()) {
+        Context.VisitingEntries.erase(EntryPC);
+        return Context.budgetFailure();
+      }
+      uint64_t PredExit = 0;
+      const MemoryExtentQueryStatus Status =
+          computeExit(PredPC, Context, PredExit);
+      if (Status != MemoryExtentQueryStatus::Available) {
+        Context.VisitingEntries.erase(EntryPC);
+        return Status;
+      }
+      Meet = std::min(Meet, PredExit);
+      if (Meet == 0) {
+        break;
+      }
+    }
+    Context.VisitingEntries.erase(EntryPC);
+    Result = Meet == std::numeric_limits<uint64_t>::max() ? 0 : Meet;
+    Context.LocalEntryBytes[EntryPC] = Result;
+    return MemoryExtentQueryStatus::Available;
+  }
+
+  MemoryExtentQueryStatus computeExit(uint64_t EntryPC, QueryContext &Context,
+                                      uint64_t &Result) const {
+    if (lookupExit(EntryPC, Context, Result)) {
+      return MemoryExtentQueryStatus::Available;
+    }
+    if (!Context.visitBlock(EntryPC)) {
+      return Context.budgetFailure();
+    }
+    const MemoryBlockFacts *Block = Facts.getBlock(EntryPC);
+    if (Block == nullptr) {
+      return MemoryExtentQueryStatus::IncompleteCFG;
+    }
+    const MemoryExtentQueryStatus EntryStatus =
+        computeEntry(EntryPC, Context, Result);
+    if (EntryStatus != MemoryExtentQueryStatus::Available) {
+      return EntryStatus;
+    }
+    for (size_t I = Block->OpsBegin; I < Block->OpsEnd && I < Facts.Ops.size();
+         ++I) {
+      if (!Context.visitOp()) {
+        return Context.budgetFailure();
+      }
+      const MemoryOp &Op = Facts.Ops[I];
+      Context.LocalBeforeOpBytes[Op.Id] = Result;
+      transferOp(Op, Result);
+      if (Op.ObservableEffects.terminatesFrame()) {
+        return MemoryExtentQueryStatus::NoNormalExit;
+      }
+    }
+    Context.LocalExitBytes[EntryPC] = Result;
+    return MemoryExtentQueryStatus::Available;
+  }
+
+  MemoryExtentQueryStatus computeBeforeOp(uint32_t OpId, QueryContext &Context,
+                                          uint64_t &Result) const {
+    const MemoryOp *Target = Facts.getOp(OpId);
+    if (Target == nullptr) {
+      return MemoryExtentQueryStatus::InvalidProgramPoint;
+    }
+    const MemoryBlockFacts *Block = Facts.getBlock(Target->BlockEntryPC);
+    if (Block == nullptr) {
+      return MemoryExtentQueryStatus::IncompleteCFG;
+    }
+    if (!Context.visitBlock(Block->EntryPC)) {
+      return Context.budgetFailure();
+    }
+    const MemoryExtentQueryStatus EntryStatus =
+        computeEntry(Block->EntryPC, Context, Result);
+    if (EntryStatus != MemoryExtentQueryStatus::Available) {
+      return EntryStatus;
+    }
+    for (size_t I = Block->OpsBegin; I < Block->OpsEnd && I < Facts.Ops.size();
+         ++I) {
+      if (!Context.visitOp()) {
+        return Context.budgetFailure();
+      }
+      const MemoryOp &Op = Facts.Ops[I];
+      Context.LocalBeforeOpBytes[Op.Id] = Result;
+      if (Op.Id == OpId) {
+        return MemoryExtentQueryStatus::Available;
+      }
+      transferOp(Op, Result);
+      if (Op.ObservableEffects.terminatesFrame()) {
+        return MemoryExtentQueryStatus::NoNormalExit;
+      }
+    }
+    return MemoryExtentQueryStatus::InvalidProgramPoint;
+  }
+
+  void finishQuery(const QueryContext &Context,
+                   MemoryExtentQueryStatus Status) const {
+    Stats.BlockVisits += Context.VisitedBlocks.size();
+    Stats.OpVisits += Context.OpVisits;
+    Stats.EdgeVisits += Context.EdgeVisits;
+    switch (Status) {
+    case MemoryExtentQueryStatus::BudgetExhausted:
+      ++Stats.BudgetExhaustions;
+      break;
+    case MemoryExtentQueryStatus::CompilationBudgetExhausted:
+      ++Stats.CompilationBudgetExhaustions;
+      break;
+    case MemoryExtentQueryStatus::Cycle:
+      ++Stats.CycleCutoffs;
+      break;
+    case MemoryExtentQueryStatus::IncompleteCFG:
+      ++Stats.IncompleteCFGRejects;
+      break;
+    case MemoryExtentQueryStatus::InvalidProgramPoint:
+      ++Stats.InvalidProgramPointRejects;
+      break;
+    case MemoryExtentQueryStatus::NoNormalExit:
+      ++Stats.NoNormalExitRejects;
+      break;
+    case MemoryExtentQueryStatus::Available:
+      break;
+    }
+  }
+
+  void commit(const QueryContext &Context) const {
+    EntryBytes.insert(Context.LocalEntryBytes.begin(),
+                      Context.LocalEntryBytes.end());
+    ExitBytes.insert(Context.LocalExitBytes.begin(),
+                     Context.LocalExitBytes.end());
+    for (const auto &[OpId, Bytes] : Context.LocalBeforeOpBytes) {
+      if (OpId >= BeforeOpValid.size()) {
+        continue;
+      }
+      BeforeOpBytes[OpId] = Bytes;
+      BeforeOpValid[OpId] = true;
+    }
+  }
+
+  bool shouldSchedulePromotion(MemoryExtentQueryStatus Status) const {
+    if (!Promotion.Enabled || PromotionPending ||
+        PromotionPermanentlyDisabled || GlobalAnalysis) {
+      return false;
+    }
+    bool Triggered = false;
+    if (Status == MemoryExtentQueryStatus::Available) {
+      const uint64_t DemandWork =
+          Stats.BlockVisits + Stats.OpVisits + Stats.EdgeVisits;
+      const uint64_t FullWorkEstimate =
+          (Facts.Blocks.size() + Facts.Ops.size()) *
+          Promotion.DemandWorkMultiplier;
+      Triggered =
+          Stats.DemandComputations >= Promotion.DemandComputationThreshold &&
+          DemandWork >= FullWorkEstimate;
+    } else if (Status == MemoryExtentQueryStatus::BudgetExhausted ||
+               Status == MemoryExtentQueryStatus::Cycle) {
+      Triggered = Stats.BudgetExhaustions + Stats.CycleCutoffs >=
+                  Promotion.FailureThreshold;
+    }
+    if (!Triggered) {
+      return false;
+    }
+    if (Facts.Blocks.size() > Promotion.MaxBlocks ||
+        Facts.Ops.size() > Promotion.MaxOps) {
+      ++Stats.PromotionSizeCapRejects;
+      PromotionPermanentlyDisabled = true;
+      return false;
+    }
+    return true;
+  }
+
+  void schedulePromotion() const {
+    PromotionPending = true;
+    ++Stats.PromotionSchedules;
+  }
+
+  bool tryPendingPromotion() const {
+    if (!PromotionPending || PromotionPermanentlyDisabled || GlobalAnalysis) {
+      return false;
+    }
+    PromotionPending = false;
+    return promoteToGlobal();
+  }
+
+  bool promoteToGlobal() const {
+    ++Stats.GlobalPromotionAttempts;
+    const uint64_t RemainingBlocks =
+        Stats.BlockVisits >= Budget.MaxCompilationBlockVisits
+            ? 0
+            : Budget.MaxCompilationBlockVisits - Stats.BlockVisits;
+    const uint64_t RemainingOps =
+        Stats.OpVisits >= Budget.MaxCompilationOpVisits
+            ? 0
+            : Budget.MaxCompilationOpVisits - Stats.OpVisits;
+    const uint64_t RemainingEdges =
+        Stats.EdgeVisits >= Budget.MaxCompilationEdgeVisits
+            ? 0
+            : Budget.MaxCompilationEdgeVisits - Stats.EdgeVisits;
+    MemoryGlobalAnalysisBudget GlobalBudget;
+    GlobalBudget.MaxBlockTransfers =
+        std::min(Promotion.MaxGlobalBlockTransfers, RemainingBlocks);
+    GlobalBudget.MaxOpVisits =
+        std::min(Promotion.MaxGlobalOpVisits, RemainingOps);
+    GlobalBudget.MaxEdgeVisits =
+        std::min(Promotion.MaxGlobalEdgeVisits, RemainingEdges);
+    auto Candidate =
+        std::make_unique<MemoryGuaranteedMinBytesAnalysis>(Facts, GlobalBudget);
+    const MemoryGlobalAnalysisStats CandidateStats = Candidate->getStats();
+    Stats.BlockVisits += CandidateStats.BlockTransfers;
+    Stats.OpVisits += CandidateStats.OpVisits;
+    Stats.EdgeVisits += CandidateStats.EdgeVisits;
+    Stats.GlobalBlockTransfers += CandidateStats.BlockTransfers;
+    Stats.GlobalOpVisits += CandidateStats.OpVisits;
+    Stats.GlobalEdgeVisits += CandidateStats.EdgeVisits;
+    Stats.GlobalBudgetExhaustions += CandidateStats.BudgetExhaustions;
+    if (!Candidate->isComplete()) {
+      PromotionPermanentlyDisabled = true;
+      return false;
+    }
+    GlobalAnalysis = std::move(Candidate);
+    ++Stats.GlobalPromotions;
+    return true;
+  }
+
+  const MemoryFacts &Facts;
+  MemoryProofQueryBudget Budget;
+  MemoryProofPromotionPolicy Promotion;
+  mutable MemoryExtentOracleStats Stats;
+  mutable std::unique_ptr<MemoryGuaranteedMinBytesAnalysis> GlobalAnalysis;
+  mutable bool PromotionPending = false;
+  mutable bool PromotionPermanentlyDisabled = false;
+  mutable std::map<uint64_t, uint64_t> EntryBytes;
+  mutable std::map<uint64_t, uint64_t> ExitBytes;
+  mutable std::vector<uint64_t> BeforeOpBytes;
+  mutable std::vector<bool> BeforeOpValid;
 };
 
 struct MemoryProofAvailability {
@@ -1032,9 +1687,13 @@ struct MemoryProofAvailability {
 // moved across their protocol-visible ordering points.
 class MemoryProofLifetimeAnalysis {
 public:
-  explicit MemoryProofLifetimeAnalysis(const MemoryFacts &Facts)
-      : Facts(Facts), GuaranteedBytes(Facts) {}
+  explicit MemoryProofLifetimeAnalysis(const MemoryFacts &Facts,
+                                       MemoryProofQueryBudget Budget = {})
+      : Facts(Facts), GuaranteedBytes(Facts, Budget) {}
 
+  // AdditionalGuaranteedBytes is trusted proof input: callers must establish
+  // that it is a true lower bound on every path reaching OpId. This analysis
+  // does not validate or infer that caller-provided bound.
   MemoryProofAvailability
   queryBeforeOp(uint32_t OpId, const MemoryInterval &RequiredRange,
                 uint64_t AdditionalGuaranteedBytes = 0) const {
@@ -1043,9 +1702,7 @@ public:
     }
 
     MemoryProofAvailability Result;
-    Result.GuaranteedMinBytes =
-        std::max(AdditionalGuaranteedBytes,
-                 GuaranteedBytes.getGuaranteedMinBytesBeforeOp(OpId));
+    Result.GuaranteedMinBytes = AdditionalGuaranteedBytes;
     Result.HasLogicalSize = true;
 
     if (RequiredRange.Empty) {
@@ -1054,18 +1711,31 @@ public:
     }
 
     uint64_t RequiredEnd = 0;
-    Result.HasAccessRange = getExactMemoryEnd(RequiredRange, RequiredEnd) &&
-                            RequiredEnd <= Result.GuaranteedMinBytes;
+    if (!getExactMemoryEnd(RequiredRange, RequiredEnd)) {
+      return Result;
+    }
+    if (RequiredEnd > Result.GuaranteedMinBytes) {
+      const MemoryExtentQueryResult Guaranteed =
+          GuaranteedBytes.queryBeforeOp(OpId);
+      if (Guaranteed.available()) {
+        Result.GuaranteedMinBytes =
+            std::max(Result.GuaranteedMinBytes, Guaranteed.GuaranteedMinBytes);
+      }
+    }
+    Result.HasAccessRange = RequiredEnd <= Result.GuaranteedMinBytes;
     return Result;
+  }
+
+  const MemoryExtentOracleStats &getExtentOracleStats() const {
+    return GuaranteedBytes.getStats();
   }
 
   bool canMoveExpansionBetween(uint32_t ProducerOpId,
                                uint32_t ConsumerOpId) const {
-    size_t ProducerIndex = 0;
-    size_t ConsumerIndex = 0;
-    if (!findOpIndex(ProducerOpId, ProducerIndex) ||
-        !findOpIndex(ConsumerOpId, ConsumerIndex) ||
-        ProducerIndex >= ConsumerIndex) {
+    const size_t ProducerIndex = Facts.getOpIndex(ProducerOpId);
+    const size_t ConsumerIndex = Facts.getOpIndex(ConsumerOpId);
+    if (ProducerIndex == Facts.Ops.size() ||
+        ConsumerIndex == Facts.Ops.size() || ProducerIndex >= ConsumerIndex) {
       return false;
     }
 
@@ -1104,18 +1774,8 @@ private:
     return true;
   }
 
-  bool findOpIndex(uint32_t OpId, size_t &Index) const {
-    for (size_t I = 0; I < Facts.Ops.size(); ++I) {
-      if (Facts.Ops[I].Id == OpId) {
-        Index = I;
-        return true;
-      }
-    }
-    return false;
-  }
-
   const MemoryFacts &Facts;
-  MemoryGuaranteedMinBytesAnalysis GuaranteedBytes;
+  mutable MemoryGuaranteedExtentOracle GuaranteedBytes;
 };
 
 } // namespace COMPILER

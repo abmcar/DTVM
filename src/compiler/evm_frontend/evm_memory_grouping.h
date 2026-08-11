@@ -9,11 +9,14 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <vector>
 
 namespace COMPILER {
+
+struct MemoryExpansionPlannerTestPeer;
 
 // Consumer result: a consecutive run of MemoryOps that can share one memory
 // expansion precheck. It carries no store optimization decision.
@@ -716,29 +719,32 @@ private:
 class MemoryExpansionPlanner final : public MemoryOptimizationPlanProvider {
 public:
   explicit MemoryExpansionPlanner(const MemoryAnalysisView &View)
-      : View(View), Prechecks(View), Grouping(View, Prechecks),
-        LinearRegions(View), GuaranteedMinBytes(View.getFacts()),
-        DeadStores(View.getFacts()), LoadForwarding(View.getFacts()) {}
+      : View(View), Prechecks(View), Grouping(View, Prechecks) {}
 
   std::optional<MemoryExpansionPlan>
   buildMemoryExpansionPlan(uint64_t EntryPC,
                            uint64_t BodyEndPC) const override {
     LastDiagnostics.clear();
-    LastDiagnostics.noteLinearRegionHeadSelection(
-        LinearRegions.getHeadSelectionInfo(EntryPC));
-
-    if (std::optional<MemoryExpansionPlan> LinearRegionPlan =
-            LinearRegions.buildMemoryExpansionPlan(EntryPC, BodyEndPC)) {
-      ++LastDiagnostics.LinearRegionCandidates;
-      ++LastDiagnostics.LinearRegionAccepted;
-      LastDiagnostics.noteLinearRegionPrefix(
-          LinearRegions.getPrefixInfo(EntryPC), true);
-      return LinearRegionPlan;
+    if (const MemoryLinearRegionConsumer *Regions = getLinearRegions()) {
+      LastDiagnostics.noteLinearRegionHeadSelection(
+          Regions->getHeadSelectionInfo(EntryPC));
+      if (std::optional<MemoryExpansionPlan> LinearRegionPlan =
+              Regions->buildMemoryExpansionPlan(EntryPC, BodyEndPC)) {
+        ++LastDiagnostics.LinearRegionCandidates;
+        ++LastDiagnostics.LinearRegionAccepted;
+        LastDiagnostics.noteLinearRegionPrefix(Regions->getPrefixInfo(EntryPC),
+                                               true);
+        return LinearRegionPlan;
+      }
+      LastDiagnostics.noteLinearRegionPrefix(Regions->getPrefixInfo(EntryPC),
+                                             false);
+      LastDiagnostics.noteLinearRegionReject(Regions->getRejectReason(EntryPC));
     }
-    LastDiagnostics.noteLinearRegionPrefix(LinearRegions.getPrefixInfo(EntryPC),
-                                           false);
-    LastDiagnostics.noteLinearRegionReject(
-        LinearRegions.getRejectReason(EntryPC));
+
+    if (!View.getFacts().Opportunities.HasSharedPrecheckOpportunity) {
+      LastDiagnostics.noteReject(MemoryExpansionPlanRejectReason::NoCandidate);
+      return std::nullopt;
+    }
 
     if (std::optional<SharedPrecheck> Shared =
             Grouping.getSharedPrecheck(EntryPC, BodyEndPC)) {
@@ -781,56 +787,114 @@ public:
   }
 
   uint64_t getGuaranteedMinBytesAtEntry(uint64_t EntryPC) const {
-    return std::max(GuaranteedMinBytes.getGuaranteedMinBytesAtEntry(EntryPC),
-                    LinearRegions.getGuaranteedMinBytesAtEntry(EntryPC));
+    uint64_t GuaranteedBytes = 0;
+    if (MemoryGuaranteedExtentOracle *Oracle = getGuaranteedExtent()) {
+      const MemoryExtentQueryResult Result = Oracle->queryAtEntry(EntryPC);
+      if (Result.available()) {
+        GuaranteedBytes = Result.GuaranteedMinBytes;
+      }
+    }
+    if (const MemoryLinearRegionConsumer *Regions = getLinearRegions()) {
+      GuaranteedBytes = std::max(
+          GuaranteedBytes, Regions->getGuaranteedMinBytesAtEntry(EntryPC));
+    }
+    return GuaranteedBytes;
   }
 
   uint64_t getGuaranteedMinBytesBeforeOp(uint64_t PC) const {
-    for (const MemoryOp &Op : View.getFacts().Ops) {
-      if (Op.Pc != PC) {
-        continue;
-      }
-      return std::max(
-          GuaranteedMinBytes.getGuaranteedMinBytesBeforeOp(Op.Id),
-          LinearRegions.getGuaranteedMinBytesAtEntry(Op.BlockEntryPC));
+    const MemoryOp *Op = View.getFacts().getOpByPC(PC);
+    if (Op == nullptr) {
+      return 0;
     }
-    return 0;
+    uint64_t GuaranteedBytes = 0;
+    if (MemoryGuaranteedExtentOracle *Oracle = getGuaranteedExtent()) {
+      const MemoryExtentQueryResult Result = Oracle->queryBeforeOp(Op->Id);
+      if (Result.available()) {
+        GuaranteedBytes = Result.GuaranteedMinBytes;
+      }
+    }
+    if (const MemoryLinearRegionConsumer *Regions = getLinearRegions()) {
+      GuaranteedBytes =
+          std::max(GuaranteedBytes,
+                   Regions->getGuaranteedMinBytesAtEntry(Op->BlockEntryPC));
+    }
+    return GuaranteedBytes;
   }
 
   bool isDeadStore(uint64_t PC) const {
-    for (const MemoryOp &Op : View.getFacts().Ops) {
-      if (Op.Pc == PC) {
-        return DeadStores.isDeadStore(Op.Id);
-      }
-    }
-    return false;
+    const MemoryOp *Op = View.getFacts().getOpByPC(PC);
+    MemoryDeadStoreAnalysis *Analysis = getDeadStores();
+    return Op != nullptr && Analysis != nullptr &&
+           Analysis->isDeadStore(Op->Id);
   }
 
   std::optional<uint64_t> getForwardingStorePC(uint64_t LoadPC) const {
-    for (const MemoryOp &Op : View.getFacts().Ops) {
-      if (Op.Pc != LoadPC) {
-        continue;
-      }
-      std::optional<uint32_t> StoreId =
-          LoadForwarding.getReachingStoreId(Op.Id);
-      if (!StoreId) {
-        return std::nullopt;
-      }
-      const MemoryOp *Store = View.getOp(*StoreId);
-      return Store == nullptr ? std::nullopt
-                              : std::optional<uint64_t>(Store->Pc);
+    const MemoryOp *Op = View.getFacts().getOpByPC(LoadPC);
+    MemoryLoadForwardingAnalysis *Analysis = getLoadForwarding();
+    if (Op == nullptr || Analysis == nullptr) {
+      return std::nullopt;
     }
-    return std::nullopt;
+    const std::optional<uint32_t> StoreId =
+        Analysis->getReachingStoreId(Op->Id);
+    if (!StoreId) {
+      return std::nullopt;
+    }
+    const MemoryOp *Store = View.getOp(*StoreId);
+    return Store == nullptr ? std::nullopt : std::optional<uint64_t>(Store->Pc);
   }
 
 private:
+  friend struct MemoryExpansionPlannerTestPeer;
+
+  const MemoryLinearRegionConsumer *getLinearRegions() const {
+    if (!View.getFacts().Opportunities.hasRegionOpportunity()) {
+      return nullptr;
+    }
+    if (!LinearRegions) {
+      LinearRegions = std::make_unique<MemoryLinearRegionConsumer>(View);
+    }
+    return LinearRegions.get();
+  }
+
+  MemoryGuaranteedExtentOracle *getGuaranteedExtent() const {
+    if (!View.getFacts().Opportunities.HasExtentReuseOpportunity) {
+      return nullptr;
+    }
+    if (!GuaranteedExtent) {
+      GuaranteedExtent =
+          std::make_unique<MemoryGuaranteedExtentOracle>(View.getFacts());
+    }
+    return GuaranteedExtent.get();
+  }
+
+  MemoryDeadStoreAnalysis *getDeadStores() const {
+    if (!View.getFacts().Opportunities.HasDeadStoreOpportunity) {
+      return nullptr;
+    }
+    if (!DeadStores) {
+      DeadStores = std::make_unique<MemoryDeadStoreAnalysis>(View.getFacts());
+    }
+    return DeadStores.get();
+  }
+
+  MemoryLoadForwardingAnalysis *getLoadForwarding() const {
+    if (!View.getFacts().Opportunities.HasLoadForwardingOpportunity) {
+      return nullptr;
+    }
+    if (!LoadForwarding) {
+      LoadForwarding =
+          std::make_unique<MemoryLoadForwardingAnalysis>(View.getFacts());
+    }
+    return LoadForwarding.get();
+  }
+
   const MemoryAnalysisView &View;
   MemoryPrecheckConsumer Prechecks;
   MemoryGroupingConsumer Grouping;
-  MemoryLinearRegionConsumer LinearRegions;
-  MemoryGuaranteedMinBytesAnalysis GuaranteedMinBytes;
-  MemoryDeadStoreAnalysis DeadStores;
-  MemoryLoadForwardingAnalysis LoadForwarding;
+  mutable std::unique_ptr<MemoryLinearRegionConsumer> LinearRegions;
+  mutable std::unique_ptr<MemoryGuaranteedExtentOracle> GuaranteedExtent;
+  mutable std::unique_ptr<MemoryDeadStoreAnalysis> DeadStores;
+  mutable std::unique_ptr<MemoryLoadForwardingAnalysis> LoadForwarding;
   mutable MemoryExpansionPlanDiagnostics LastDiagnostics;
 };
 

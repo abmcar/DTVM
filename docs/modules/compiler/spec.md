@@ -183,6 +183,21 @@ component has been established. Cached host-base and memory-content proof
 domains are deliberately not propagated until a lowering consumer requires
 them.
 
+Memory proof recovery is admitted and budgeted for online compilation. The
+initial bytecode scan records a conservative `MemoryOpportunitySummary` and a
+direct opcode-PC index. Modules without a reusable consumer opportunity skip
+planner setup, while revision-invalid opcodes still retain the effect facts
+needed for fail-closed lowering. Optional extent, region, dead-store, and load-
+forwarding analyses are constructed only when a matching query is issued.
+
+Guaranteed extent is recovered by a sparse demand oracle with independent
+per-query and compilation-wide limits on block, operation, and CFG-edge work.
+Only a completed query publishes its touched facts; incomplete CFGs, cycles,
+or exhausted budgets retain the generic expansion path without a partial
+proof. Repeated uncached queries may schedule a bounded full analysis, but the
+promotion result becomes visible only after the full run completes. Cache
+hits neither spend query budget nor trigger eager promotion.
+
 The framework may eliminate only the write of an exact, fully overwritten
 `MSTORE` or `MSTORE8`, and may forward an exact 32-byte `MSTORE` value to a
 later `MLOAD`. Both transformations are block-local, require strict

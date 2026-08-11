@@ -8291,8 +8291,6 @@ void EVMMirBuilder::beginMemoryCompileBlock(uint64_t EntryPC,
   CurrentBlockMStoreValues.clear();
   CurBlockMemStats.Active = true;
   if (MemoryExpansionPlans) {
-    CurrentBlockGuaranteedMinBytes =
-        MemoryExpansionPlans->getGuaranteedMinBytesAtEntry(EntryPC);
     std::optional<MemoryExpansionPlan> Plan =
         MemoryExpansionPlans->buildMemoryExpansionPlan(EntryPC, BodyEndPC);
     noteMemoryExpansionPlanDiagnostics(
@@ -9065,13 +9063,7 @@ bool EVMMirBuilder::tryConsumeConstBlockMemoryPrecheck() {
     }
   }
   if (!CurBlockConstPrecheckPlan.CoveredOpIds.empty()) {
-    const MemoryOp *CurrentOp = nullptr;
-    for (const MemoryOp &Op : MemoryFactsData.Ops) {
-      if (Op.Pc == CurrentMemoryOpPC) {
-        CurrentOp = &Op;
-        break;
-      }
-    }
+    const MemoryOp *CurrentOp = MemoryFactsData.getOpByPC(CurrentMemoryOpPC);
     if (CurrentOp == nullptr ||
         std::find(CurBlockConstPrecheckPlan.CoveredOpIds.begin(),
                   CurBlockConstPrecheckPlan.CoveredOpIds.end(),

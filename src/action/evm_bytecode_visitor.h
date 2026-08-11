@@ -142,7 +142,7 @@ private:
 
   void buildMemoryFacts(const EVMAnalyzer &Analyzer, const uint8_t *Bytecode,
                         size_t BytecodeSize) {
-    MemoryFacts.reset();
+    MemoryFacts.reset(BytecodeSize);
     MemoryFacts.setRevision(Analyzer.getRevision());
     MemoryEntryAddressAnalysis EntryAddresses(Analyzer, Bytecode, BytecodeSize);
     const auto &BlockInfos = Analyzer.getBlockInfos();
@@ -300,8 +300,10 @@ private:
       }
       Analyzer.analyze(Bytecode, BytecodeSize);
       if constexpr (HasSetMemoryFacts<IRBuilder>::value) {
-        buildMemoryFacts(Analyzer, Bytecode, BytecodeSize);
-        setMemoryFactsCompat();
+        if (Analyzer.shouldBuildMemoryFacts()) {
+          buildMemoryFacts(Analyzer, Bytecode, BytecodeSize);
+          setMemoryFactsCompat();
+        }
       }
       initializeLiftedBlocks(Analyzer);
 

@@ -5,6 +5,7 @@
 #define EVM_FRONTEND_EVM_ANALYZER_H
 
 #include "common/defines.h"
+#include "compiler/evm_frontend/evm_memory_facts.h"
 #include "compiler/evm_frontend/evm_value_range.h"
 #include "evm/evm.h"
 #include "evmc/evmc.h"
@@ -117,6 +118,13 @@ struct JITSuitabilityResult {
   size_t MaxConsecutiveExpensive = 0; // longest unbroken run
   size_t MaxBlockExpensiveCount = 0;  // max RA-expensive ops in one block
   size_t DupFeedbackPatternCount = 0; // DUPn immediately before RA-expensive
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+  bool HasMemoryPlanningRoot = false;
+  bool RequiresMemoryEffectFacts = false;
+  bool HasPotentialMultiBlockControlFlow = false;
+  bool UseMemoryOpportunityScout = false;
+  bool ShouldBuildMemoryFacts = false;
+#endif
 };
 
 /// Thresholds for JIT suitability fallback. These limits bound bytecode size
@@ -133,7 +141,9 @@ class EVMAnalyzer {
   using Byte = zen::common::Byte;
 
 public:
-  EVMAnalyzer(evmc_revision Rev = zen::evm::DEFAULT_REVISION) : Revision(Rev) {
+  EVMAnalyzer(evmc_revision Rev = zen::evm::DEFAULT_REVISION)
+      : Revision(Rev),
+        MemoryOpportunityScout(Rev, MemoryFactsBuildMode::OpportunitySummary) {
     InstructionMetrics = evmc_get_instruction_metrics_table(Revision);
     if (!InstructionMetrics) {
       InstructionMetrics =
@@ -487,6 +497,14 @@ public:
 
   bool hasUnknownDynamicJumpTargets() const { return HasUnknownDynamicJump; }
 
+  bool shouldBuildMemoryFacts() const {
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+    return JITResult.ShouldBuildMemoryFacts;
+#else
+    return true;
+#endif
+  }
+
   bool analyzeSuitabilityOnly(const uint8_t *Bytecode, size_t BytecodeSize) {
     resetAnalysisState();
     analyzeSuitability(Bytecode, BytecodeSize);
@@ -498,6 +516,9 @@ public:
     analyzeSuitability(Bytecode, BytecodeSize);
     buildJumpDestRuns(Bytecode, BytecodeSize);
     buildBlocks(Bytecode, BytecodeSize);
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+    finalizeMemoryPlanningAdmission();
+#endif
     linkPredecessors();
     resolveEntryDepths();
     markDynamicJumpTargetCandidates();
@@ -631,6 +652,9 @@ private:
     JumpDestCanonicalPCs.clear();
     EntryBlockPC = 0;
     HasUnknownDynamicJump = false;
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+    MemoryOpportunityScout.reset();
+#endif
   }
 
   struct AbstractValue {
@@ -699,6 +723,60 @@ private:
     return 0;
   }
 
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+  static bool isMemoryPlanningRootOpcode(evmc_opcode Opcode) {
+    switch (Opcode) {
+    case OP_KECCAK256:
+    case OP_CALLDATACOPY:
+    case OP_CODECOPY:
+    case OP_EXTCODECOPY:
+    case OP_RETURNDATACOPY:
+    case OP_MLOAD:
+    case OP_MSTORE:
+    case OP_MSTORE8:
+    case OP_MCOPY:
+    case OP_LOG0:
+    case OP_LOG1:
+    case OP_LOG2:
+    case OP_LOG3:
+    case OP_LOG4:
+    case OP_CREATE:
+    case OP_CREATE2:
+    case OP_CALL:
+    case OP_CALLCODE:
+    case OP_DELEGATECALL:
+    case OP_STATICCALL:
+    case OP_RETURN:
+    case OP_REVERT:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  void finalizeMemoryPlanningAdmission() {
+    if (JITResult.RequiresMemoryEffectFacts) {
+      // Preserve the active-revision effect record for undefined opcodes. The
+      // frontend may use it to terminate conservatively even though the opcode
+      // is not a memory-planning root.
+      JITResult.ShouldBuildMemoryFacts = true;
+      return;
+    }
+    if (!JITResult.HasMemoryPlanningRoot) {
+      JITResult.ShouldBuildMemoryFacts = false;
+      return;
+    }
+    if (!JITResult.UseMemoryOpportunityScout) {
+      // The cheap scout deliberately does not model cross-block stack flow.
+      // Preserve every potential multi-block opportunity for the full builder.
+      JITResult.ShouldBuildMemoryFacts = true;
+      return;
+    }
+    JITResult.ShouldBuildMemoryFacts =
+        MemoryOpportunityScout.getFacts().Opportunities.hasPlannerOpportunity();
+  }
+#endif
+
   void analyzeSuitability(const uint8_t *Bytecode, size_t BytecodeSize) {
     JITResult = JITSuitabilityResult();
     JITResult.BytecodeSize = BytecodeSize;
@@ -711,6 +789,18 @@ private:
     while (PCIndex < BytecodeSize) {
       evmc_opcode Opcode = static_cast<evmc_opcode>(Bytecode[PCIndex]);
       uint8_t OpcodeU8 = static_cast<uint8_t>(Opcode);
+
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+      const bool IsDefined =
+          InstructionNames != nullptr && InstructionNames[OpcodeU8] != nullptr;
+      JITResult.RequiresMemoryEffectFacts |= !IsDefined;
+      if (IsDefined && isMemoryPlanningRootOpcode(Opcode)) {
+        JITResult.HasMemoryPlanningRoot = true;
+      }
+      if (Opcode == OP_JUMP || Opcode == OP_JUMPI || Opcode == OP_JUMPDEST) {
+        JITResult.HasPotentialMultiBlockControlFlow = true;
+      }
+#endif
 
       JITResult.MirEstimate += MIR_OPCODE_WEIGHT[OpcodeU8];
 
@@ -758,6 +848,11 @@ private:
         JITResult.MaxConsecutiveExpensive > MAX_CONSECUTIVE_RA_EXPENSIVE ||
         JITResult.MaxBlockExpensiveCount > MAX_BLOCK_RA_EXPENSIVE ||
         JITResult.DupFeedbackPatternCount > MAX_DUP_FEEDBACK_PATTERN;
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+    JITResult.UseMemoryOpportunityScout =
+        JITResult.HasMemoryPlanningRoot &&
+        !JITResult.HasPotentialMultiBlockControlFlow;
+#endif
   }
 
   void buildJumpDestRuns(const uint8_t *Bytecode, size_t BytecodeSize) {
@@ -846,6 +941,13 @@ private:
                      NextBodyStartPC, HasNextBlock);
         break;
       }
+
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+      if (JITResult.UseMemoryOpportunityScout) {
+        MemoryOpportunityScout.observeOpcode(
+            Opcode, static_cast<uint64_t>(ScanPC), Bytecode, BytecodeSize);
+      }
+#endif
 
       uint8_t OpcodeU8 = static_cast<uint8_t>(Opcode);
       if (isRAExpensiveOpcode(OpcodeU8)) {
@@ -1029,8 +1131,18 @@ private:
       uint64_t NextEntryPC = 0;
       size_t NextBodyStartPC = BytecodeSize;
       bool HasNextBlock = false;
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+      if (JITResult.UseMemoryOpportunityScout) {
+        MemoryOpportunityScout.beginBlock(CurEntryPC, 0);
+      }
+#endif
       analyzeBlockBody(Info, Bytecode, BytecodeSize, ScanPC, NextEntryPC,
                        NextBodyStartPC, HasNextBlock);
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
+      if (JITResult.UseMemoryOpportunityScout) {
+        MemoryOpportunityScout.endBlock();
+      }
+#endif
       BlockInfos[CurEntryPC] = Info;
       if (!HasNextBlock) {
         break;
@@ -2358,6 +2470,7 @@ private:
   const evmc_instruction_metrics *InstructionMetrics = nullptr;
   const char *const *InstructionNames = nullptr;
   JITSuitabilityResult JITResult;
+  MemoryFactsBuilder MemoryOpportunityScout;
   const std::unordered_map<uint32_t, uint32_t> *SharedResolvedJumpTargets =
       nullptr;
 };

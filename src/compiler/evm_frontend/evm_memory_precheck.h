@@ -511,12 +511,19 @@ public:
       Current.EntryPC = EntryPC;
     };
 
-    for (const MemoryOp &Op : View.getFacts().Ops) {
-      if (Op.Pc < EntryPC) {
-        continue;
-      }
+    const MemoryFacts &Facts = View.getFacts();
+    const MemoryBlockFacts *Block = Facts.getBlock(EntryPC);
+    if (Block == nullptr) {
+      return std::nullopt;
+    }
+    const size_t OpsEnd = std::min(Block->OpsEnd, Facts.Ops.size());
+    for (size_t I = Block->OpsBegin; I < OpsEnd; ++I) {
+      const MemoryOp &Op = Facts.Ops[I];
       if (Op.Pc >= BodyEndPC) {
         break;
+      }
+      if (Op.Pc < EntryPC) {
+        continue;
       }
 
       const MemoryInterval *Interval = getDirectMemoryInterval(Op);
