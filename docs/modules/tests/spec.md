@@ -81,6 +81,14 @@ This module does not include: EVM interpreter (evm), Host implementation (host),
   statements so stack-SSA builds cannot silently return to per-source
   `O(dynamic sources × JUMPDESTs)` expansion.
 
+### 10. EVM Factorial and Metrics Tests
+
+- `evmJitFrontendTests` verifies that the u64 fast paths route together and
+  that disabling the memory-plan pipeline suppresses facts and consumers.
+- `evmProfileGuidedJITTests` includes the EVMC phase-metrics ABI tests. They
+  cover disabled builds, schema negotiation, cache/compile counters, reset,
+  reentrant `BUSY` behavior, active wall accounting, and fallback reasons.
+
 ## External Contracts
 
 | Dependent Module | Contract |
@@ -100,7 +108,11 @@ This module does not include: EVM interpreter (evm), Host implementation (host),
 - **Determinism**: Test results independent of execution order; no host-dependent non-determinism
 - **Isolation**: State isolated per test case; no shared mutable globals
 - **Prerequisites**: EVM tests need `tools/easm2bytecode.sh`/`solc_batch_compile.sh`; State tests need JSON conforming to Ethereum spec
-- **Build switches**: `ZEN_ENABLE_SPEC_TEST` enables test targets; `ZEN_ENABLE_EVM` for EVM; `ZEN_ENABLE_LIBEVM` for evmone integration
+- **Build switches**: `ZEN_ENABLE_SPEC_TEST` enables test targets;
+  `ZEN_ENABLE_EVM` for EVM; `ZEN_ENABLE_LIBEVM` for evmone integration;
+  factorial cells also vary `ZEN_ENABLE_EVM_U64_ARITH_FASTPATH` and
+  `ZEN_ENABLE_EVM_MEMORY_PLAN_PIPELINE`; metrics ABI tests run with
+  `ZEN_ENABLE_EVMC_PHASE_METRICS` both enabled and disabled.
 
 ## Error Codes
 

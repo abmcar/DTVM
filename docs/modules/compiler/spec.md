@@ -114,6 +114,9 @@ From `common/errors.h`, used by the compiler module:
 
 - **Multipass-only EVM JIT**: EVM bytecode is compiled only in Multipass JIT mode; if run mode is Singlepass, report an error and reject EVM JIT
 - **Lazy not supported**: EVM currently supports Eager compilation only; warn and skip when Lazy is requested
+- **u64 factorial gate**: `ZEN_ENABLE_EVM_U64_ARITH_FASTPATH` defaults to
+  enabled and jointly gates the scoped ADD, SUB, MUL, DIV, and MOD u64
+  lowerings. Disabling it retains the generic U256 lowering.
 
 ### JIT Suitability Analysis
 
@@ -130,6 +133,11 @@ From `common/errors.h`, used by the compiler module:
 **RA-expensive opcode classification**: SHL (0x1b), SHR (0x1c), SAR (0x1d), MUL (0x02), SIGNEXTEND (0x0b).
 
 ### EVM Memory Plan Framework
+
+`ZEN_ENABLE_EVM_MEMORY_PLAN_PIPELINE` defaults to enabled and is effective only
+with `ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK`. Disabling the pipeline suppresses
+both `MemoryFacts` publication and planner construction, so an experimental
+off-cell cannot retain producer cost or consume a partial plan.
 
 When `ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK` is enabled, the EVM frontend builds
 block-aware `MemoryFacts` from `EVMAnalyzer` block ranges. A conservative

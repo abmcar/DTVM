@@ -90,6 +90,9 @@ if(ZEN_ENABLE_SPEC_TEST)
       add_executable(evmFallbackExecutionTests evm_fallback_execution_tests.cpp)
       add_executable(evmModuleCacheTests evm_module_cache_tests.cpp)
       add_executable(evmProfileGuidedJITTests evm_profile_guided_jit_tests.cpp)
+      target_sources(
+        evmProfileGuidedJITTests PRIVATE evmc_phase_metrics_tests.cpp
+      )
     endif()
     add_executable(mptCompareCpp mpt_compare_cpp.cpp)
   else()

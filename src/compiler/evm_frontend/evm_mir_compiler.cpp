@@ -2108,7 +2108,8 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleMul(Operand MultiplicandOp,
   // Phase 1: Range-based u64×u64 → u128 fast path
   // When both operands provably fit in u64, a single 64×64→128 multiply
   // replaces the expensive 4×4 schoolbook multiplication.
-  if (Operand::bothFitU64(MultiplicandOp, MultiplierOp) &&
+  if (EnableEVMU64ArithFastPath &&
+      Operand::bothFitU64(MultiplicandOp, MultiplierOp) &&
       !MultiplicandOp.isConstant() && !MultiplierOp.isConstant()) {
     U256Inst A = extractU256Operand(MultiplicandOp);
     U256Inst B = extractU256Operand(MultiplierOp);
@@ -2126,7 +2127,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleMul(Operand MultiplicandOp,
   // Phase 4: u64 fast path - one operand fits in u64 (4x1 multiplication)
   bool AIsU64 = MultiplicandOp.isConstU64();
   bool BIsU64 = MultiplierOp.isConstU64();
-  if (AIsU64 || BIsU64) {
+  if (EnableEVMU64ArithFastPath && (AIsU64 || BIsU64)) {
     const Operand &U256Op = AIsU64 ? MultiplierOp : MultiplicandOp;
     const Operand &U64Op = AIsU64 ? MultiplicandOp : MultiplierOp;
 
@@ -2258,8 +2259,8 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleDiv(Operand DividendOp,
   // Range-based u64÷u64 fast path: single OP_udiv with div-by-zero guard.
   // DIV(u64, u64) → u64 result.  Inserted before the isConstU64() path so
   // that non-constant operands with proven narrow range benefit too.
-  if (Operand::bothFitU64(DividendOp, DivisorOp) && !DividendOp.isConstant() &&
-      !DivisorOp.isConstant()) {
+  if (EnableEVMU64ArithFastPath && Operand::bothFitU64(DividendOp, DivisorOp) &&
+      !DividendOp.isConstant() && !DivisorOp.isConstant()) {
     U256Inst A = extractU256Operand(DividendOp);
     U256Inst B = extractU256Operand(DivisorOp);
     MType *I64Type = &Ctx.I64Type;
@@ -2284,7 +2285,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleDiv(Operand DividendOp,
   }
 
   // u64 divisor: inline cascading 128/64 division
-  if (DivisorOp.isConstU64()) {
+  if (EnableEVMU64ArithFastPath && DivisorOp.isConstU64()) {
     uint64_t D = DivisorOp.getConstValue()[0];
     if (D != 0) {
       if (!DividendOp.isConstant()) {
@@ -2362,7 +2363,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleDiv(Operand DividendOp,
   }
 
   // u64 dividend: OR-fold + select
-  if (DividendOp.isConstU64()) {
+  if (EnableEVMU64ArithFastPath && DividendOp.isConstU64()) {
     uint64_t A = DividendOp.getConstValue()[0];
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
     ++MemStats.DivFastConstU64Count;
@@ -2456,8 +2457,8 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleMod(Operand DividendOp,
 
   // Range-based u64%u64 fast path: single OP_urem with div-by-zero guard.
   // MOD(u64, u64) → u64 result (remainder < divisor).
-  if (Operand::bothFitU64(DividendOp, DivisorOp) && !DividendOp.isConstant() &&
-      !DivisorOp.isConstant()) {
+  if (EnableEVMU64ArithFastPath && Operand::bothFitU64(DividendOp, DivisorOp) &&
+      !DividendOp.isConstant() && !DivisorOp.isConstant()) {
     U256Inst A = extractU256Operand(DividendOp);
     U256Inst B = extractU256Operand(DivisorOp);
     MType *I64Type = &Ctx.I64Type;
@@ -2482,7 +2483,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleMod(Operand DividendOp,
   }
 
   // u64 divisor: inline cascading 128/64 mod
-  if (DivisorOp.isConstU64()) {
+  if (EnableEVMU64ArithFastPath && DivisorOp.isConstU64()) {
     uint64_t D = DivisorOp.getConstValue()[0];
     if (D != 0) {
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
@@ -2493,7 +2494,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleMod(Operand DividendOp,
   }
 
   // u64 dividend: OR-fold + select
-  if (DividendOp.isConstU64()) {
+  if (EnableEVMU64ArithFastPath && DividendOp.isConstU64()) {
     uint64_t A = DividendOp.getConstValue()[0];
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
     ++MemStats.ModFastConstU64Count;
