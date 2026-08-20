@@ -8,10 +8,12 @@
 #include "host/evm/crypto.h"
 #include "runtime/evm_instance.h"
 #include "runtime/evm_module.h"
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <evmc/evmc.h>
 #include <evmc/instructions.h>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -282,6 +284,75 @@ const RuntimeFunctions &getRuntimeFunctionTable() {
       .GetKeccak256CallerSlotNoExpand = &evmGetKeccak256CallerSlotNoExpand,
       .HandleFallback = &evmHandleFallback};
   return Table;
+}
+
+namespace {
+
+using HostFuncTable = std::array<const void *, NumHostFuncSlots>;
+
+HostFuncTable buildHostFuncTable() {
+  HostFuncTable Table{};
+  // RuntimeFunctions is a dense run of function pointers (static_asserted in
+  // the header), so its member order defines slots [0, NumRuntimeFuncSlots).
+  std::memcpy(Table.data(), &getRuntimeFunctionTable(),
+              sizeof(RuntimeFunctions));
+
+  Table[getHostFuncSlotFor(ExtraHostFunc::MemMove)] =
+      reinterpret_cast<const void *>(&std::memmove);
+  Table[getHostFuncSlotFor(ExtraHostFunc::SetInstanceException)] =
+      reinterpret_cast<const void *>(
+          &zen::runtime::EVMInstance::setInstanceExceptionOnJIT);
+  Table[getHostFuncSlotFor(ExtraHostFunc::TriggerInstanceException)] =
+      reinterpret_cast<const void *>(
+          &zen::runtime::EVMInstance::triggerInstanceExceptionOnJIT);
+  Table[getHostFuncSlotFor(ExtraHostFunc::ThrowInstanceException)] =
+      reinterpret_cast<const void *>(
+          &zen::runtime::EVMInstance::throwInstanceExceptionOnJIT);
+
+  for (uint32_t Slot = 0; Slot < NumHostFuncSlots; ++Slot) {
+    ZEN_ASSERT(Table[Slot] && "host dispatch table has an unfilled slot");
+  }
+  return Table;
+}
+
+const HostFuncTable &hostFuncTable() {
+  static const HostFuncTable Table = buildHostFuncTable();
+  return Table;
+}
+
+} // namespace
+
+const void *const *getHostFuncTable() { return hostFuncTable().data(); }
+
+int32_t getHostFuncSlotOffset(uint32_t Slot) {
+  ZEN_ASSERT(Slot < NumHostFuncSlots);
+  return zen::runtime::EVMInstance::getHostFuncTableOffset() +
+         static_cast<int32_t>(Slot * sizeof(const void *));
+}
+
+uint32_t getHostFuncSlot(uint64_t FuncAddr) {
+  // Reverse index of the dispatch table. Built once; read-only afterwards, so
+  // concurrent JIT compilations may share it.
+  static const std::unordered_map<uint64_t, uint32_t> SlotOf = [] {
+    std::unordered_map<uint64_t, uint32_t> Map;
+    const HostFuncTable &Table = hostFuncTable();
+    Map.reserve(NumHostFuncSlots);
+    for (uint32_t Slot = 0; Slot < NumHostFuncSlots; ++Slot) {
+      // Aliasing entries resolve to the same routine, so the first slot wins.
+      Map.emplace(reinterpret_cast<uint64_t>(Table[Slot]), Slot);
+    }
+    return Map;
+  }();
+
+  auto It = SlotOf.find(FuncAddr);
+  if (It == SlotOf.end()) {
+    // Deliberately fatal rather than falling back to an immediate: a silent
+    // fallback would keep working today and quietly reintroduce a baked
+    // address that only a .text diff could ever catch.
+    ZEN_ASSERT(false && "host routine is missing from the dispatch table");
+    ZEN_ABORT();
+  }
+  return It->second;
 }
 
 const intx::uint256 *evmGetMul(zen::runtime::EVMInstance *Instance,

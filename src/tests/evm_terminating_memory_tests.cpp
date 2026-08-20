@@ -46,12 +46,19 @@ compileTerminatingMemoryMir(const std::vector<uint8_t> &Bytecode) {
   return Mir;
 }
 
+// Host calls load their target out of the instance dispatch table, so a call
+// to a given helper shows up as a load at that helper's slot offset.
+std::string hostCallNeedle(uint64_t FuncAddr) {
+  return "target = load (base = $0, offset = " +
+         std::to_string(COMPILER::getHostFuncSlotOffset(
+             COMPILER::getHostFuncSlot(FuncAddr))) +
+         "), ";
+}
+
 template <typename FuncType>
 bool containsTerminatingRuntimeCall(const std::string &Mir, FuncType Function) {
-  const std::string Needle =
-      "target = const.i64 " +
-      std::to_string(COMPILER::getFunctionAddress(Function)) + ", ";
-  return Mir.find(Needle) != std::string::npos;
+  return Mir.find(hostCallNeedle(COMPILER::getFunctionAddress(Function))) !=
+         std::string::npos;
 }
 
 TEST(EVMMirBuilderTerminatingMemoryProofTest,

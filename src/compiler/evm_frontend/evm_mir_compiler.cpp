@@ -577,9 +577,9 @@ void EVMMirBuilder::finalizeEVMBase() {
     }
   };
 
-  auto HandleException = [&](uintptr_t ExceptionHandlerAddr) {
+  auto HandleException = [&](ExtraHostFunc ExceptionHandler) {
     MInstruction *HandlerAddr =
-        createIntConstInstruction(&Ctx.I64Type, ExceptionHandlerAddr);
+        loadHostFuncAddr(getHostFuncSlotFor(ExceptionHandler));
 
     CompileVector<MInstruction *> SetExceptionArgs{
         {
@@ -600,9 +600,8 @@ void EVMMirBuilder::finalizeEVMBase() {
   // When check call exception after call_indirect or call hostapi, just
   // throw, no need set args again
   auto ThrowException = [&] {
-    MInstruction *ThrowExceptionAddr = createIntConstInstruction(
-        &Ctx.I64Type,
-        uintptr_t(zen::runtime::EVMInstance::throwInstanceExceptionOnJIT));
+    MInstruction *ThrowExceptionAddr = loadHostFuncAddr(
+        getHostFuncSlotFor(ExtraHostFunc::ThrowInstanceException));
 
     CompileVector<MInstruction *> ThrowExceptionArgs{
         {InstanceAddr},
@@ -621,8 +620,7 @@ void EVMMirBuilder::finalizeEVMBase() {
   if (HasPureSoftException) {
     GenExceptionSetBBs();
     setInsertBlock(ExceptionHandlingBB);
-    HandleException(
-        uintptr_t(zen::runtime::EVMInstance::setInstanceExceptionOnJIT));
+    HandleException(ExtraHostFunc::SetInstanceException);
     setInsertBlock(ExceptionReturnBB);
     ThrowException();
     handleVoidReturn();
@@ -633,8 +631,7 @@ void EVMMirBuilder::finalizeEVMBase() {
 #else
   GenExceptionSetBBs();
   setInsertBlock(ExceptionHandlingBB);
-  HandleException(
-      uintptr_t(zen::runtime::EVMInstance::triggerInstanceExceptionOnJIT));
+  HandleException(ExtraHostFunc::TriggerInstanceException);
   setInsertBlock(ExceptionReturnBB);
   handleVoidReturn();
 #endif
@@ -5509,8 +5506,8 @@ void EVMMirBuilder::handleMCopy(Operand DestAddrComponents,
       false, OP_inttoptr, VoidPtrType, DestBase);
   MInstruction *SrcPtr = createInstruction<ConversionInstruction>(
       false, OP_inttoptr, VoidPtrType, SrcBase);
-  MInstruction *MemmoveAddr = createIntConstInstruction(
-      I64Type, reinterpret_cast<uint64_t>(std::memmove));
+  MInstruction *MemmoveAddr =
+      loadHostFuncAddr(getHostFuncSlotFor(ExtraHostFunc::MemMove));
   CompileVector<MInstruction *> MemmoveArgs{
       {DestPtr, SrcPtr, Len},
       Ctx.MemPool,
@@ -6989,10 +6986,8 @@ void EVMMirBuilder::chargeWordCopyGasIR(MInstruction *Size) {
 template <typename RetType>
 typename EVMMirBuilder::Operand
 EVMMirBuilder::callRuntimeFor(RetType (*RuntimeFunc)(runtime::EVMInstance *)) {
-  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
-
-  uint64_t FuncAddr = getFunctionAddress(RuntimeFunc);
-  MInstruction *FuncAddrInst = createIntConstInstruction(I64Type, FuncAddr);
+  MInstruction *FuncAddrInst =
+      loadHostFuncAddr(getHostFuncSlotFor(RuntimeFunc));
   MInstruction *InstancePtr = getCurrentInstancePointer();
 
   MType *ReturnType = getMIRReturnType<RetType>();
@@ -7007,9 +7002,8 @@ EVMMirBuilder::callRuntimeFor(RetType (*RuntimeFunc)(runtime::EVMInstance *)) {
 template <typename RetType>
 typename EVMMirBuilder::Operand EVMMirBuilder::callRuntimeForWithErrorCheck(
     RetType (*RuntimeFunc)(runtime::EVMInstance *)) {
-  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
-  uint64_t FuncAddr = getFunctionAddress(RuntimeFunc);
-  MInstruction *FuncAddrInst = createIntConstInstruction(I64Type, FuncAddr);
+  MInstruction *FuncAddrInst =
+      loadHostFuncAddr(getHostFuncSlotFor(RuntimeFunc));
   MInstruction *InstancePtr = getCurrentInstancePointer();
 
   MType *ReturnType = getMIRReturnType<RetType>();
@@ -7217,9 +7211,8 @@ template <typename RetType, typename... ArgTypes, typename... ParamTypes>
 EVMMirBuilder::Operand EVMMirBuilder::callRuntimeFor(
     RetType (*RuntimeFunc)(runtime::EVMInstance *, ArgTypes...),
     const ParamTypes &...Params) {
-  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
-  uint64_t FuncAddr = getFunctionAddress(RuntimeFunc);
-  MInstruction *FuncAddrInst = createIntConstInstruction(I64Type, FuncAddr);
+  MInstruction *FuncAddrInst =
+      loadHostFuncAddr(getHostFuncSlotFor(RuntimeFunc));
   MInstruction *InstancePtr = getCurrentInstancePointer();
 
   std::vector<MInstruction *> Args = {InstancePtr};
@@ -7255,9 +7248,8 @@ template <typename RetType, typename... ArgTypes, typename... ParamTypes>
 EVMMirBuilder::Operand EVMMirBuilder::callRuntimeForWithErrorCheck(
     RetType (*RuntimeFunc)(runtime::EVMInstance *, ArgTypes...),
     const ParamTypes &...Params) {
-  MType *I64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
-  uint64_t FuncAddr = getFunctionAddress(RuntimeFunc);
-  MInstruction *FuncAddrInst = createIntConstInstruction(I64Type, FuncAddr);
+  MInstruction *FuncAddrInst =
+      loadHostFuncAddr(getHostFuncSlotFor(RuntimeFunc));
   MInstruction *InstancePtr = getCurrentInstancePointer();
 
   std::vector<MInstruction *> Args = {InstancePtr};
@@ -7295,8 +7287,8 @@ EVMMirBuilder::Operand EVMMirBuilder::callRuntimeForWithErrorCheck(
 void EVMMirBuilder::emitRuntimeSoftErrorCheck(MInstruction *InstancePtr) {
 #if !defined(ZEN_ENABLE_CPU_EXCEPTION)
   MType *U64Type = EVMFrontendContext::getMIRTypeFromEVMType(EVMType::UINT64);
-  MInstruction *GetErrAddr = createIntConstInstruction(
-      &Ctx.I64Type, getFunctionAddress(evmGetErrorCode));
+  MInstruction *GetErrAddr =
+      loadHostFuncAddr(getHostFuncSlotFor(evmGetErrorCode));
   MInstruction *ErrCodeInstr = createInstruction<ICallInstruction>(
       false, U64Type, GetErrAddr, llvm::ArrayRef<MInstruction *>(InstancePtr));
   Variable *ErrCodeVar =
@@ -7361,6 +7353,11 @@ void EVMMirBuilder::emitRuntimeNullPointerCheck(MInstruction *PtrValue) {
   addUniqueSuccessor(TrapBB);
   addSuccessor(ContinueBB);
   setInsertBlock(ContinueBB);
+}
+
+MInstruction *EVMMirBuilder::loadHostFuncAddr(uint32_t Slot) {
+  // Lowers to a single `mov Offset(%instance), %reg`.
+  return getInstanceElement(&Ctx.I64Type, getHostFuncSlotOffset(Slot));
 }
 
 MInstruction *EVMMirBuilder::getCurrentInstancePointer() {

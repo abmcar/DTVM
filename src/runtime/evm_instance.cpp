@@ -5,6 +5,9 @@
 
 #include "common/errors.h"
 #include "common/evm_traphandler.h"
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+#include "compiler/evm_frontend/evm_imported.h"
+#endif
 #include "entrypoint/entrypoint.h"
 #include "evm/evm.h"
 #include "utils/backtrace.h"
@@ -58,6 +61,16 @@ EVMInstanceUniquePtr EVMInstance::newEVMInstance(Isolation &Iso,
   EVMInstanceUniquePtr Inst(new (Buf) EVMInstance(Mod, *RT));
 
   Inst->Iso = &Iso;
+
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+  // JIT code loads host routines out of this table rather than from immediates
+  // baked into .text, so it must be live before any compiled code runs.
+  static_assert(COMPILER::NumHostFuncSlots <= HostFuncTableCapacity,
+                "EVMInstance::HostFuncTableCapacity is too small for the "
+                "EVM frontend's host dispatch table");
+  std::memcpy(Inst->HostFuncTable, COMPILER::getHostFuncTable(),
+              COMPILER::NumHostFuncSlots * sizeof(const void *));
+#endif // ZEN_ENABLE_MULTIPASS_JIT
 
   Inst->setGas(GasLimit);
 

@@ -292,6 +292,18 @@ public:
     return static_cast<int32_t>(offsetof(EVMInstance, EVMStackSize));
   }
 
+  // Capacity of the JIT host-call dispatch table. The authoritative slot count
+  // is COMPILER::NumHostFuncSlots, which static_asserts against this value; the
+  // capacity lives here so the runtime need not include the EVM frontend.
+  static constexpr size_t HostFuncTableCapacity = 96;
+
+  static constexpr int32_t getHostFuncTableOffset() {
+    static_assert(offsetof(EVMInstance, HostFuncTable) <=
+                      std::numeric_limits<int32_t>::max(),
+                  "EVMInstance offsets should fit in 32-bit signed range");
+    return static_cast<int32_t>(offsetof(EVMInstance, HostFuncTable));
+  }
+
   static constexpr int32_t getMemoryBaseOffset() {
     static_assert(offsetof(EVMInstance, MemoryBase) <=
                       std::numeric_limits<int32_t>::max(),
@@ -386,6 +398,11 @@ private:
 
   static EVMInstanceUniquePtr
   newEVMInstance(Isolation &Iso, const EVMModule &Mod, uint64_t GasLimit = 0);
+
+  // Populated once at construction and never reset: JIT code reaches every
+  // host routine through this table so that emitted .text carries slot indices
+  // instead of absolute addresses.
+  const void *HostFuncTable[HostFuncTableCapacity] = {};
 
   const EVMModule *Mod = nullptr;
   int64_t GasRefund = 0;

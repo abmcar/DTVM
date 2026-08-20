@@ -1924,6 +1924,12 @@ private:
 
   // Helper method to get instance pointer as instruction
   MInstruction *getCurrentInstancePointer();
+
+  // Materializes a host routine's address by loading its slot from the
+  // instance-carried dispatch table. Every host call must go through this
+  // instead of an integer constant, otherwise the emitted .text is only valid
+  // for the emitting process and libdtvmapi.so build.
+  MInstruction *loadHostFuncAddr(uint32_t Slot);
 };
 
 } // namespace COMPILER

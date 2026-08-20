@@ -178,6 +178,61 @@ template <typename FuncType> uint64_t getFunctionAddress(FuncType Func) {
   return reinterpret_cast<uint64_t>(Func);
 }
 
+// ============ Position-independent host dispatch ============
+//
+// The JIT must not materialize host routine addresses as immediates in .text.
+// A baked address is only valid for the process and the libdtvmapi.so build
+// that emitted it, which makes the compiled object impossible to reuse across
+// processes. Instead every host call loads its target from a dispatch table
+// carried by the EVMInstance, so the emitted code depends only on a slot
+// index.
+//
+// Slots [0, NumRuntimeFuncSlots) mirror the member order of RuntimeFunctions;
+// the remaining slots hold host routines that are not EVM helpers.
+
+static_assert(sizeof(RuntimeFunctions) % sizeof(void *) == 0,
+              "RuntimeFunctions must be a dense array of function pointers");
+
+inline constexpr uint32_t NumRuntimeFuncSlots =
+    sizeof(RuntimeFunctions) / sizeof(void *);
+
+// Host routines the JIT calls that are not RuntimeFunctions members.
+enum class ExtraHostFunc : uint32_t {
+  MemMove = 0,
+  SetInstanceException,
+  TriggerInstanceException,
+  ThrowInstanceException,
+  Count,
+};
+
+inline constexpr uint32_t NumExtraHostFuncSlots =
+    static_cast<uint32_t>(ExtraHostFunc::Count);
+
+inline constexpr uint32_t NumHostFuncSlots =
+    NumRuntimeFuncSlots + NumExtraHostFuncSlots;
+
+/// Process-global dispatch table, copied into every EVMInstance.
+const void *const *getHostFuncTable();
+
+/// Byte offset of \p Slot relative to an EVMInstance pointer. This is the
+/// displacement the JIT emits, so tests reading MIR share it rather than
+/// recomputing the layout.
+int32_t getHostFuncSlotOffset(uint32_t Slot);
+
+/// Slot of the host routine at \p FuncAddr. Used only while emitting code.
+/// Aborts when \p FuncAddr is not a registered host routine: falling back to
+/// an immediate would silently reintroduce the position dependence this table
+/// exists to remove.
+uint32_t getHostFuncSlot(uint64_t FuncAddr);
+
+template <typename FuncType> uint32_t getHostFuncSlotFor(FuncType Func) {
+  return getHostFuncSlot(getFunctionAddress(Func));
+}
+
+constexpr uint32_t getHostFuncSlotFor(ExtraHostFunc Slot) {
+  return NumRuntimeFuncSlots + static_cast<uint32_t>(Slot);
+}
+
 const intx::uint256 *evmGetMul(zen::runtime::EVMInstance *Instance,
                                const intx::uint256 &Multiplicand,
                                const intx::uint256 &Multiplier);

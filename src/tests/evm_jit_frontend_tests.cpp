@@ -308,8 +308,12 @@ size_t countRuntimeCalls(const COMPILER::MFunction &Func, uint64_t Address) {
   Func.print(OS);
   OS.flush();
 
-  const std::string Needle =
-      "target = const.i64 " + std::to_string(Address) + ", ";
+  // Host calls load their target out of the instance dispatch table, so a call
+  // to a given helper shows up as a load at that helper's slot offset.
+  const std::string Needle = "target = load (base = $0, offset = " +
+                             std::to_string(COMPILER::getHostFuncSlotOffset(
+                                 COMPILER::getHostFuncSlot(Address))) +
+                             "), ";
   size_t Count = 0;
   for (size_t Pos = Mir.find(Needle); Pos != std::string::npos;
        Pos = Mir.find(Needle, Pos + Needle.size())) {
@@ -1474,9 +1478,13 @@ compileKeccakMemoryMir(const std::vector<uint8_t> &Bytecode) {
 
 template <typename FuncType>
 bool containsKeccakRuntimeCall(const std::string &Mir, FuncType Function) {
+  // Host calls load their target out of the instance dispatch table, so a call
+  // to a given helper shows up as a load at that helper's slot offset.
   const std::string Needle =
-      "target = const.i64 " +
-      std::to_string(COMPILER::getFunctionAddress(Function)) + ", ";
+      "target = load (base = $0, offset = " +
+      std::to_string(COMPILER::getHostFuncSlotOffset(
+          COMPILER::getHostFuncSlot(COMPILER::getFunctionAddress(Function)))) +
+      "), ";
   return Mir.find(Needle) != std::string::npos;
 }
 
