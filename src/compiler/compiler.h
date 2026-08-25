@@ -22,6 +22,15 @@ protected:
   static void compileMIRToCgIR(MModule &Mod, MFunction &MFunc,
                                CgFunction &CgFunc, bool DisableGreedyRA);
   static void emitObjectBuffer(CompileContext *Ctx);
+  /// emitObjectBuffer, additionally copying the finalized ELF object into
+  /// \p Captured before it is consumed (persistent code cache write path).
+  static void emitObjectBufferCapturing(CompileContext *Ctx,
+                                        llvm::SmallVectorImpl<char> &Captured);
+  /// Parses Ctx->ObjBuffer as a relocatable ELF object, copies its text
+  /// section into Ctx->CodeMPool and fills the offset/relocation maps.
+  /// Requires only ObjBuffer and CodeMPool -- no MC state -- so it also
+  /// serves as the load path for cached objects.
+  static void installObjectFromBuffer(CompileContext *Ctx);
 };
 
 class WasmJITCompiler : public JITCompilerBase {

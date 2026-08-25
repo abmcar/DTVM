@@ -7,6 +7,8 @@
 #include "common/defines.h"
 #include "utils/logging.h"
 
+#include <string>
+
 namespace zen::runtime {
 
 struct RuntimeConfig {
@@ -52,6 +54,14 @@ struct RuntimeConfig {
   uint64_t JITTriggerTotalGas = 100000;
   // Ring buffer capacity for the sliding-window call profiler.
   size_t RingBufferCapacity = 100;
+  // Persistent EVM code cache (experimental). Empty dir = disabled. The
+  // cache stores the relocatable ELF object per compiled contract, keyed by
+  // every codegen-affecting input; loading a corrupt or mismatched entry
+  // silently falls back to compilation.
+  std::string EVMCodeCacheDir;
+  // 0 = off, 1 = read-only (measurement mode: zero write-back jitter),
+  // 2 = read-write.
+  uint8_t EVMCodeCacheMode = 0;
 #endif // ZEN_ENABLE_MULTIPASS_JIT
 
   bool validate() {

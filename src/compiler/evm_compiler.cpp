@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "compiler/evm_compiler.h"
+
+#include "compiler/evm_code_cache.h"
 #include "common/thread_pool.h"
 #include "compiler/cgir/cg_function.h"
 #include "compiler/mir/module.h"
@@ -79,6 +81,46 @@ void EagerEVMJITCompiler::compile() {
   } TimerGuard{Finalize};
 
   try {
+    // Persistent code cache decision. Key derivation reads the *effective*
+    // config: a regalloc-retry reload swaps Config via ScopedConfig before
+    // this compiler is constructed, so DisableMultipassGreedyRA here is the
+    // configuration that actually takes effect.
+    const bool CacheEnabled =
+        !Config.EVMCodeCacheDir.empty() && Config.EVMCodeCacheMode != 0;
+    const bool CacheWrite = CacheEnabled && Config.EVMCodeCacheMode == 2;
+    std::string CacheKey;
+    if (CacheEnabled) {
+      EVMCodeCacheKeyInputs KeyInputs;
+      KeyInputs.Bytecode = reinterpret_cast<const uint8_t *>(EVMMod->Code);
+      KeyInputs.BytecodeSize = EVMMod->CodeSize;
+      KeyInputs.Revision = static_cast<int32_t>(EVMMod->getRevision());
+      KeyInputs.GasMetering = Config.EnableEvmGasMetering;
+      KeyInputs.DisableGreedyRA = Config.DisableMultipassGreedyRA;
+      KeyInputs.MemoryStrideSkipLeadingZeroLimbStores =
+          EVMMod->getMemoryLinearStrideSkipLeadingZeroLimbStores();
+      CacheKey = deriveEVMCodeCacheKey(KeyInputs);
+      if (auto Cached =
+              loadEVMObjectFromCache(Config.EVMCodeCacheDir, CacheKey)) {
+        // Load path: no MC state, no frontend -- install the cached ELF
+        // object through the same parse/copy path a fresh compilation uses.
+        EVMFrontendContext LoadCtx;
+        LoadCtx.CodeMPool = &EVMMod->getJITCodeMemPool();
+        LoadCtx.getObjBuffer().assign(Cached->begin(), Cached->end());
+        installObjectFromBuffer(&LoadCtx);
+        ZEN_ASSERT(LoadCtx.ExternRelocs.empty());
+        auto &LoadPool = EVMMod->getJITCodeMemPool();
+        uint8_t *LoadedCode = const_cast<uint8_t *>(LoadPool.getMemStart());
+        uint8_t *LoadedFuncPtr = LoadCtx.CodePtr + LoadCtx.FuncOffsetMap[0];
+        size_t LoadedProtectSize = LoadPool.getMemEnd() - LoadedCode;
+        platform::mprotect(LoadedCode, TO_MPROTECT_CODE_SIZE(LoadedProtectSize),
+                           PROT_READ | PROT_EXEC);
+        size_t LoadedPublishedSize = LoadPool.getMemEnd() - LoadedFuncPtr;
+        EVMMod->setJITCodeAndSize(LoadedFuncPtr, LoadedPublishedSize);
+        Committed = true;
+        return;
+      }
+    }
+
     EVMFrontendContext Ctx;
     Ctx.setGasMeteringEnabled(Config.EnableEvmGasMetering);
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
@@ -116,7 +158,12 @@ void EagerEVMJITCompiler::compile() {
 
     // EVM has only 1 function, use direct single-threaded compilation
     compileEVMToMC(Ctx, Mod, 0, Config.DisableMultipassGreedyRA);
-    emitObjectBuffer(&Ctx);
+    llvm::SmallVector<char, 0> CapturedObj;
+    if (CacheWrite) {
+      emitObjectBufferCapturing(&Ctx, CapturedObj);
+    } else {
+      emitObjectBuffer(&Ctx);
+    }
     ZEN_ASSERT(Ctx.ExternRelocs.empty());
 
     uint8_t *JITFuncPtr = Ctx.CodePtr + Ctx.FuncOffsetMap[0];
@@ -145,6 +192,12 @@ void EagerEVMJITCompiler::compile() {
     // Publish JITFuncPtr only after mprotect — atomic release ensures the
     // interpreter thread sees fully executable code.
     EVMMod->setJITCodeAndSize(JITFuncPtr, PublishedCodeSize);
+
+    if (CacheWrite && !CapturedObj.empty()) {
+      // Best-effort write-back after successful publication.
+      storeEVMObjectToCache(Config.EVMCodeCacheDir, CacheKey,
+                            CapturedObj.data(), CapturedObj.size());
+    }
 
     Committed = true;
   } catch (const std::exception &E) {

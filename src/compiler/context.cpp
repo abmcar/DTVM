@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "compiler/context.h"
+#include "compiler/evm_code_cache.h"
 #include "compiler/mir/function.h"
 #include "compiler/mir/pointer.h"
 #include "compiler/target/x86/x86_llvm_workaround.h"
@@ -59,6 +60,16 @@ static std::string getX86FeaturesStr() {
   return Features.getString();
 }
 #endif
+
+// Exposed for the persistent EVM code cache key (evm_code_cache.h): the key
+// must record the same feature set codegen selects, from the same source.
+std::string COMPILER::getTargetFeatureString() {
+#ifdef ZEN_BUILD_TARGET_X86_64
+  return getX86FeaturesStr();
+#else
+#error "Unsupported target"
+#endif
+}
 
 static std::string getCPUName() {
 #ifdef ZEN_BUILD_TARGET_X86_64

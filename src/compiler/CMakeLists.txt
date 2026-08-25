@@ -32,6 +32,7 @@ endif()
 set(COMPILER_SRCS
     compiler.cpp
     context.cpp
+    evm_code_cache.cpp
     common/llvm_workaround.cpp
     frontend/parser.cpp
     frontend/lexer.cpp

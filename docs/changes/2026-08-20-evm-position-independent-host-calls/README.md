@@ -80,14 +80,36 @@ instruction sequence used to reach a host routine changes.
       absent from the table.
 - [x] Update the MIR-golden tests to match the load-based call form.
 
-### Phase 2: Cache storage and loading (not in this change)
+### Phase 2: Cache storage and loading (branch `feat/evm-persistent-code-cache`)
 
-- [ ] Store `ObjBuffer` at the point it is wrapped in `emitObjectBuffer`.
-- [ ] Load a cached object through the existing parse/copy/mprotect path.
+- [x] Store the finalized ELF object: `emitObjectBufferCapturing` copies it
+      before consumption; write-back is atomic (tmp + rename) and best-effort.
+- [x] Load through the existing parse/copy path: `installObjectFromBuffer`
+      (split out of `emitObjectBuffer`; no MC state required) followed by the
+      same mprotect/publish tail a fresh compilation uses.
+- [x] Config surface: `RuntimeConfig::EVMCodeCacheDir` / `EVMCodeCacheMode`
+      (0 off / 1 ro / 2 rw), EVMC options `code_cache_dir` /
+      `code_cache_mode`. Read-only mode is the measurement mode (zero
+      write-back jitter). All failures fall back to compilation.
+- [x] Entry format v1: magic + format + payload size + payload SHA-256 +
+      ELF object. Corrupt or mismatched entries are rejected and recompiled.
+- [x] Tests (`evmCodeCachePersistTests`, 3): unit store/load round-trip with
+      corruption rejection and key sensitivity; cross-runtime reload
+      byte-identical to fresh compilation; and a payload-swap test proving
+      the loader installs cache content rather than deterministically
+      recompiling.
 
-### Phase 3: Cache key derivation (not in this change)
+### Phase 3: Cache key derivation (partially in Phase 2, completion open)
 
-- [ ] Derive a key covering every codegen-affecting input.
+- [x] Key covers: bytecode (hash + length), EVM revision, gas metering,
+      effective `DisableMultipassGreedyRA` (read inside `compile()`, i.e.
+      after any regalloc-retry `ScopedConfig` swap), memory stride
+      specialization, target feature string from codegen's own computation
+      (`getTargetFeatureString`), and the `ZEN_ENABLE_EVM_GAS_REGISTER` /
+      virtual-stack / cpu-exception build flags.
+- [ ] Replace the conservative build tag (`__DATE__ __TIME__`, invalidates
+      the cache on every library rebuild) with a build-system-provided
+      source hash so caches survive rebuilds of identical source.
 
 ## Compatibility Notes
 

@@ -82,6 +82,11 @@ if(ZEN_ENABLE_SPEC_TEST)
       # Hot-execution A/B micro-bench for host-call emission (build-only tool).
       add_executable(evmExecBenchTool evm_exec_bench_tool.cpp)
       target_link_libraries(evmExecBenchTool PRIVATE dtvmcore utils gtest)
+      # Persistent code cache round-trip tests.
+      add_executable(evmCodeCachePersistTests evm_code_cache_persist_tests.cpp)
+      target_link_libraries(
+        evmCodeCachePersistTests PRIVATE dtvmcore utils gtest gtest_main
+      )
     endif()
     add_executable(
       solidityContractTests evm_precompiles.hpp solidity_contract_tests.cpp

@@ -155,6 +155,23 @@ void JITCompilerBase::emitObjectBuffer(CompileContext *Ctx) {
   }
 
   Ctx->finalize();
+  installObjectFromBuffer(Ctx);
+}
+
+void JITCompilerBase::emitObjectBufferCapturing(
+    CompileContext *Ctx, llvm::SmallVectorImpl<char> &Captured) {
+  ZEN_ASSERT(Ctx);
+  if (!Ctx->Inited) {
+    return;
+  }
+  Ctx->finalize();
+  // Copy before installObjectFromBuffer consumes the buffer.
+  Captured.assign(Ctx->getObjBuffer().begin(), Ctx->getObjBuffer().end());
+  installObjectFromBuffer(Ctx);
+}
+
+void JITCompilerBase::installObjectFromBuffer(CompileContext *Ctx) {
+  ZEN_ASSERT(Ctx);
 
   auto ObjectToLoad = std::make_unique<llvm::SmallVectorMemoryBuffer>(
       std::move(Ctx->getObjBuffer()), false);

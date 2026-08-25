@@ -385,6 +385,26 @@ enum evmc_set_option_result set_option(evmc_vm *VMInstance, const char *Name,
       return EVMC_SET_OPTION_SUCCESS;
     }
     return EVMC_SET_OPTION_INVALID_VALUE;
+  } else if (std::strcmp(Name, "code_cache_dir") == 0) {
+    if (Value != nullptr && Value[0] != '\0') {
+      VM->Config.EVMCodeCacheDir = Value;
+      return EVMC_SET_OPTION_SUCCESS;
+    }
+    return EVMC_SET_OPTION_INVALID_VALUE;
+  } else if (std::strcmp(Name, "code_cache_mode") == 0) {
+    if (std::strcmp(Value, "off") == 0) {
+      VM->Config.EVMCodeCacheMode = 0;
+      return EVMC_SET_OPTION_SUCCESS;
+    }
+    if (std::strcmp(Value, "ro") == 0) {
+      VM->Config.EVMCodeCacheMode = 1;
+      return EVMC_SET_OPTION_SUCCESS;
+    }
+    if (std::strcmp(Value, "rw") == 0) {
+      VM->Config.EVMCodeCacheMode = 2;
+      return EVMC_SET_OPTION_SUCCESS;
+    }
+    return EVMC_SET_OPTION_INVALID_VALUE;
   } else if (std::strcmp(Name, "ring_buffer_capacity") == 0) {
     int Parsed = std::atoi(Value);
     if (Parsed > 0 &&
