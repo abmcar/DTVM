@@ -76,6 +76,12 @@ if(ZEN_ENABLE_SPEC_TEST)
       add_executable(
         evmMemoryExecuteOnlyBench evm_memory_execute_only_bench.cpp
       )
+      # Position-independence / determinism probe (build-only tool).
+      add_executable(evmTextHashTool evm_text_hash_tool.cpp)
+      target_link_libraries(evmTextHashTool PRIVATE dtvmcore utils gtest)
+      # Hot-execution A/B micro-bench for host-call emission (build-only tool).
+      add_executable(evmExecBenchTool evm_exec_bench_tool.cpp)
+      target_link_libraries(evmExecBenchTool PRIVATE dtvmcore utils gtest)
     endif()
     add_executable(
       solidityContractTests evm_precompiles.hpp solidity_contract_tests.cpp

@@ -128,3 +128,34 @@ machines), and compiler build identity.
 must record the configuration that actually took effect, not the one requested.
 Mismatches in this class produce plausible-looking wrong answers and surface as
 consensus bugs rather than crashes.
+
+## Validation (2026-08-25)
+
+Build: Release, GCC 12, LLVM 15, `ZEN_ENABLE_SINGLEPASS_JIT=OFF` required.
+`evmJitFrontendTests`: 179/179 passed (includes the updated MIR-golden and
+call/terminating memory suites).
+
+**Position independence & determinism** (`evmTextHashTool`, added by this
+change): three contracts (host-call-dense, arithmetic-dense, memory-dense)
+compiled in three separate processes with ASLR active
+(`randomize_va_space=2`, differing libc bases confirmed) produced
+byte-identical JIT `.text` (equal FNV-1a64). This simultaneously verifies
+that no process-specific absolute address survives in emitted code and that
+codegen is deterministic for identical inputs.
+
+**Same-config hot-execution A/B** (`evmExecBenchTool`, added by this change;
+baseline = parent commit `338d123`, 5 interleaved rounds x 200 timed
+executions, medians):
+
+| contract | baseline | candidate | delta | JIT size |
+|---|---:|---:|---:|---|
+| host-call-dense (worst case) | 30.0 us | 31.8 us | **+6.0%** | 81920 -> 77824 |
+| arithmetic-dense | 2176 ns | 2162 ns | -0.6% (noise) | unchanged |
+| memory-dense | 4942 ns | 4993 ns | +1.0% | unchanged |
+
+The regression is confined to host-call sites; the synthetic worst case is
+denser than any real contract, so real-block impact is bounded above by 6%
+and remains to be measured at cache-acceptance time on real blocks. Fallback
+trigger recorded: if real-block regression exceeds 2-3%, switch host calls to
+symbolisation + load-time relocation (codegen quality identical to baseline,
+persistence preserved via the loader).
