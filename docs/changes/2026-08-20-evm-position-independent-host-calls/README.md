@@ -110,6 +110,9 @@ instruction sequence used to reach a host routine changes.
 - [ ] Replace the conservative build tag (`__DATE__ __TIME__`, invalidates
       the cache on every library rebuild) with a build-system-provided
       source hash so caches survive rebuilds of identical source.
+      Operational consequence until then: a cache directory is only valid
+      for the exact `libdtvmapi.so` build that wrote it — deploy them as a
+      pair; never migrate a cache across independently built libraries.
 
 ## Compatibility Notes
 
