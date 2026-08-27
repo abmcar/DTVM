@@ -3,7 +3,7 @@
 把 JIT 编译产物(ELF object)落盘复用,避免每次进程重启都重新编译合约。
 **默认关闭,纯 opt-in**;不开时行为与合入前完全一致。
 
-分支:`feat/evm-persistent-code-cache`(基于 `338d123`,4 个 commit)
+分支:`feat/evm-persistent-code-cache`(基于 `338d123a5d9d4a464d8d0151158447d500a9997a`,4 个 commit)
 无需任何 CMake 开关(位于已启用的 `ZEN_ENABLE_MULTIPASS_JIT` 内)。
 
 ---
@@ -24,7 +24,7 @@
 - `off`(=0)默认。完全不启用。
 
 经由 reth 适配器时(需 `abmcar/reth` 分支 `evmc-backend-and-replay-docs`
-提交 `b778d43f7` 及之后——该提交加入了透传;逗号分隔的 name=value 走
+提交 `b778d43f755fcf5eec566146ac399e5bc45de5e1` 及之后——该提交加入了透传;逗号分隔的 name=value 走
 与固定选项相同的受检 `set_option` 路径,非法条目启动即失败):
 
 ```
