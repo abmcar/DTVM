@@ -1056,6 +1056,23 @@ DTVM::DTVM()
                    StrictValidation);
     }
   }
+
+  // Benchmark affordance: the L1 module cache bound is a capacity knob, not a
+  // correctness one. Long replay corpora hold more unique contracts than the
+  // 4096 default, so every pass evicts and recompiles; raising the bound
+  // isolates execution cost from that eviction traffic. Production keeps the
+  // default -- this is opt-in and off unless the variable is set.
+  if (const char *MaxCacheEnv = std::getenv("DTVM_EVM_MAX_MODULE_CACHE_SIZE");
+      MaxCacheEnv != nullptr) {
+    char *ParseEnd = nullptr;
+    const unsigned long ParsedMax = std::strtoul(MaxCacheEnv, &ParseEnd, 10);
+    if (ParseEnd != MaxCacheEnv && *ParseEnd == '\0' && ParsedMax > 0) {
+      MaxModuleCacheSize = static_cast<size_t>(ParsedMax);
+    } else {
+      ZEN_LOG_WARN("ignore invalid DTVM_EVM_MAX_MODULE_CACHE_SIZE=%s",
+                   MaxCacheEnv);
+    }
+  }
 }
 } // namespace
 
