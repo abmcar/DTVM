@@ -4770,7 +4770,7 @@ void EVMMirBuilder::handleCodeCopy(Operand DestOffsetComponents,
   }
 #endif
   if (!UsePreparedMemory) {
-    reloadMemorySizeFromInstance();
+    reloadMemoryCachesFromInstance();
   }
 }
 
@@ -5576,7 +5576,7 @@ void EVMMirBuilder::handleLogWithTopics(Operand OffsetOp, Operand SizeOp,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
+  reloadMemoryCachesFromInstance();
 }
 
 typename EVMMirBuilder::Operand
@@ -5593,7 +5593,7 @@ EVMMirBuilder::handleCreate(Operand ValueOp, Operand OffsetOp, Operand SizeOp) {
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
+  reloadMemoryCachesFromInstance();
   return Result;
 }
 
@@ -5613,7 +5613,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleCreate2(Operand ValueOp,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
+  reloadMemoryCachesFromInstance();
   return Result;
 }
 
@@ -5695,7 +5695,7 @@ EVMMirBuilder::handleCall(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
+  reloadMemoryCachesFromInstance();
   return Result;
 }
 
@@ -5727,7 +5727,7 @@ EVMMirBuilder::handleCallCode(Operand GasOp, Operand ToAddrOp, Operand ValueOp,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
+  reloadMemoryCachesFromInstance();
   return Result;
 }
 
@@ -5795,7 +5795,7 @@ EVMMirBuilder::handleDelegateCall(Operand GasOp, Operand ToAddrOp,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
+  reloadMemoryCachesFromInstance();
   return Result;
 }
 
@@ -5825,7 +5825,7 @@ EVMMirBuilder::handleStaticCall(Operand GasOp, Operand ToAddrOp,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
+  reloadMemoryCachesFromInstance();
   return Result;
 }
 
@@ -6008,7 +6008,7 @@ EVMMirBuilder::handleKeccak256(Operand OffsetComponents,
   reloadGasFromMemory();
 #endif
   if (!UsePreparedMemory) {
-    reloadMemorySizeFromInstance();
+    reloadMemoryCachesFromInstance();
   }
   return Result;
 }
@@ -6040,7 +6040,7 @@ EVMMirBuilder::handleKeccak256TwoWord(Operand OffsetComponents, Operand Word0,
   reloadGasFromMemory();
 #endif
   if (!UsePreparedMemory) {
-    reloadMemorySizeFromInstance();
+    reloadMemoryCachesFromInstance();
   }
   return Result;
 }
@@ -6073,7 +6073,7 @@ typename EVMMirBuilder::Operand EVMMirBuilder::handleKeccak256CallDataConstSlot(
   reloadGasFromMemory();
 #endif
   if (!UsePreparedMemory) {
-    reloadMemorySizeFromInstance();
+    reloadMemoryCachesFromInstance();
   }
   return Result;
 }
@@ -6105,7 +6105,7 @@ EVMMirBuilder::handleKeccak256CallerConstSlot(Operand OffsetComponents,
   reloadGasFromMemory();
 #endif
   if (!UsePreparedMemory) {
-    reloadMemorySizeFromInstance();
+    reloadMemoryCachesFromInstance();
   }
   return Result;
 }
@@ -7407,7 +7407,7 @@ void EVMMirBuilder::handleCallDataCopy(Operand DestOffsetComponents,
   }
 #endif
   if (!UsePreparedMemory) {
-    reloadMemorySizeFromInstance();
+    reloadMemoryCachesFromInstance();
   }
 }
 
@@ -7445,7 +7445,7 @@ void EVMMirBuilder::handleExtCodeCopy(Operand AddressComponents,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
+  reloadMemoryCachesFromInstance();
 }
 
 void EVMMirBuilder::handleReturnDataCopy(Operand DestOffsetComponents,
@@ -7487,7 +7487,7 @@ void EVMMirBuilder::handleReturnDataCopy(Operand DestOffsetComponents,
 #ifdef ZEN_ENABLE_EVM_GAS_REGISTER
   reloadGasFromMemory();
 #endif
-  reloadMemorySizeFromInstance();
+  reloadMemoryCachesFromInstance();
 }
 
 typename EVMMirBuilder::Operand EVMMirBuilder::handleReturnDataSize() {
@@ -9521,22 +9521,42 @@ MInstruction *EVMMirBuilder::getMemorySize() {
   return getInstanceElement(I64Type, MemorySizeOffset);
 }
 
-void EVMMirBuilder::reloadMemorySizeFromInstance() {
+void EVMMirBuilder::reloadMemoryBaseFromInstance() {
+  if (!MemoryBaseVar) {
+    return;
+  }
+  MPointerType *VoidPtrType = createVoidPtrType();
+  const int32_t MemoryBaseOffset =
+      zen::runtime::EVMInstance::getMemoryBaseOffset();
+  MInstruction *MemPtr = getInstanceElement(VoidPtrType, MemoryBaseOffset);
+  MInstruction *MemBaseInt = createInstruction<ConversionInstruction>(
+      false, OP_ptrtoint, &Ctx.I64Type, MemPtr);
+  createInstruction<DassignInstruction>(true, &(Ctx.VoidType), MemBaseInt,
+                                        MemoryBaseVar->getVarIdx());
+}
+
+void EVMMirBuilder::reloadMemoryCachesFromInstance() {
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
   ++MemStats.ReloadMemorySizeCount;
   if (CurBlockMemStats.Active) {
     CurBlockMemStats.ReloadMemSizeCount++;
   }
 #endif // ZEN_ENABLE_MULTIPASS_JIT_LOGGING
-  if (!MemorySizeVar) {
-    return;
+  if (MemorySizeVar) {
+    MType *I64Type = &Ctx.I64Type;
+    const int32_t MemorySizeOffset =
+        zen::runtime::EVMInstance::getMemorySizeOffset();
+    MInstruction *MemSize = getInstanceElement(I64Type, MemorySizeOffset);
+    createInstruction<DassignInstruction>(true, &(Ctx.VoidType), MemSize,
+                                          MemorySizeVar->getVarIdx());
   }
-  MType *I64Type = &Ctx.I64Type;
-  const int32_t MemorySizeOffset =
-      zen::runtime::EVMInstance::getMemorySizeOffset();
-  MInstruction *MemSize = getInstanceElement(I64Type, MemorySizeOffset);
-  createInstruction<DassignInstruction>(true, &(Ctx.VoidType), MemSize,
-                                        MemorySizeVar->getVarIdx());
+  // The base must be reloaded with the size, never on its own schedule. A
+  // runtime helper that grows memory performs the frame's lazy first
+  // allocation, which moves MemoryBase from null to the new buffer. Refreshing
+  // only the size leaves a cached null base that later memory ops then trust,
+  // because a large enough cached size makes them skip expandMemoryIR - the
+  // only other place the base is refreshed.
+  reloadMemoryBaseFromInstance();
 }
 
 MInstruction *
@@ -9780,16 +9800,7 @@ void EVMMirBuilder::expandMemoryIR(MInstruction *RequiredSize,
     createInstruction<DassignInstruction>(true, &(Ctx.VoidType), AlignedSize,
                                           MemorySizeVar->getVarIdx());
   }
-  if (MemoryBaseVar) {
-    MPointerType *VoidPtrType = createVoidPtrType();
-    const int32_t MemoryBaseOffset =
-        zen::runtime::EVMInstance::getMemoryBaseOffset();
-    MInstruction *MemPtr = getInstanceElement(VoidPtrType, MemoryBaseOffset);
-    MInstruction *MemBaseInt = createInstruction<ConversionInstruction>(
-        false, OP_ptrtoint, I64Type, MemPtr);
-    createInstruction<DassignInstruction>(true, &(Ctx.VoidType), MemBaseInt,
-                                          MemoryBaseVar->getVarIdx());
-  }
+  reloadMemoryBaseFromInstance();
 
   createInstruction<BrInstruction>(true, Ctx, ContinueBB);
   addSuccessor(ContinueBB);
