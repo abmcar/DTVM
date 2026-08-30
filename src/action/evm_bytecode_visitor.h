@@ -299,7 +299,8 @@ private:
         Analyzer.setResolvedJumpTargets(Ctx->getResolvedJumpTargets());
       }
       Analyzer.analyze(Bytecode, BytecodeSize);
-      if constexpr (HasSetMemoryFacts<IRBuilder>::value) {
+      if constexpr (HasSetMemoryFacts<IRBuilder>::value &&
+                    EnableEVMMemoryPlanPipeline) {
         if (Analyzer.shouldBuildMemoryFacts()) {
           buildMemoryFacts(Analyzer, Bytecode, BytecodeSize);
           setMemoryFactsCompat();

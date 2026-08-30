@@ -35,6 +35,18 @@ class EVMInstance;
 
 namespace COMPILER {
 
+#ifdef ZEN_ENABLE_EVM_U64_ARITH_FASTPATH
+inline constexpr bool EnableEVMU64ArithFastPath = true;
+#else
+inline constexpr bool EnableEVMU64ArithFastPath = false;
+#endif
+
+#ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_PIPELINE
+inline constexpr bool EnableEVMMemoryPlanPipeline = true;
+#else
+inline constexpr bool EnableEVMMemoryPlanPipeline = false;
+#endif
+
 enum class EVMType : uint8_t {
   VOID,    // No value
   UINT8,   // Byte operations
@@ -422,7 +434,8 @@ public:
     // Phase 1: Range-based u64 fast path for ADD
     // When both operands provably fit in u64, emit single ADD + carry
     // instead of the full 4-limb ADC chain.  Result fits in u128.
-    if constexpr (Operator == BinaryOperator::BO_ADD) {
+    if constexpr (EnableEVMU64ArithFastPath &&
+                  Operator == BinaryOperator::BO_ADD) {
       if (Operand::bothFitU64(LHSOp, RHSOp) && !LHSOp.isConstant() &&
           !RHSOp.isConstant()) {
         MType *MirI64Type =
@@ -452,7 +465,8 @@ public:
     // borrow = (a0 <u b0). In i64, 0 - 1 = 0xFFFFFFFFFFFFFFFF, so on underflow
     // the upper limbs become all-ones (the wrapped 2^256 - (b - a)). The result
     // is NOT provably narrow, so it carries the default U256 range.
-    if constexpr (Operator == BinaryOperator::BO_SUB) {
+    if constexpr (EnableEVMU64ArithFastPath &&
+                  Operator == BinaryOperator::BO_SUB) {
       if (Operand::bothFitU64(LHSOp, RHSOp) && !LHSOp.isConstant() &&
           !RHSOp.isConstant()) {
         MType *MirI64Type =
@@ -484,7 +498,8 @@ public:
     }
 
     // Phase 2: u64 fast path for ADD - share zero const for upper RHS limbs
-    if constexpr (Operator == BinaryOperator::BO_ADD) {
+    if constexpr (EnableEVMU64ArithFastPath &&
+                  Operator == BinaryOperator::BO_ADD) {
       bool LHSIsU64 = LHSOp.isConstU64();
       bool RHSIsU64 = RHSOp.isConstU64();
       if (LHSIsU64 || RHSIsU64) {
@@ -499,7 +514,8 @@ public:
     }
 
     // Phase 2: u64 fast path for SUB (only when RHS is u64 const)
-    if constexpr (Operator == BinaryOperator::BO_SUB) {
+    if constexpr (EnableEVMU64ArithFastPath &&
+                  Operator == BinaryOperator::BO_SUB) {
       if (RHSOp.isConstU64()) {
 #ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
         ++MemStats.SubFastConstU64Count;
@@ -1074,9 +1090,14 @@ public:
   void setMemoryFacts(const MemoryFacts &Facts) {
     MemoryFactsData = Facts;
 #ifdef ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
-    MemoryAnalysis = std::make_unique<MemoryAnalysisView>(MemoryFactsData);
-    MemoryExpansionPlans =
-        std::make_unique<MemoryExpansionPlanner>(*MemoryAnalysis);
+    if constexpr (EnableEVMMemoryPlanPipeline) {
+      MemoryAnalysis = std::make_unique<MemoryAnalysisView>(MemoryFactsData);
+      MemoryExpansionPlans =
+          std::make_unique<MemoryExpansionPlanner>(*MemoryAnalysis);
+    } else {
+      MemoryAnalysis.reset();
+      MemoryExpansionPlans.reset();
+    }
 #else
     MemoryAnalysis.reset();
     MemoryExpansionPlans.reset();

@@ -22,6 +22,10 @@
 #include <evmc/helpers.h>
 
 #include <chrono>
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+#include <atomic>
+#include <mutex>
+#endif
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -31,6 +35,9 @@
 #ifdef ZEN_ENABLE_VIRTUAL_STACK
 #include "utils/virtual_stack.h"
 #endif // ZEN_ENABLE_VIRTUAL_STACK
+
+static_assert(sizeof(dtvm_evmc_hot_metrics) == 192,
+              "hot metrics schema size must remain versioned");
 
 namespace {
 
@@ -202,6 +209,10 @@ bool parseBoolEnvValue(const char *Value, bool &ParsedValue) {
   return false;
 }
 
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+enum class EVMActiveMode : uint8_t { None, JIT, Interpreter };
+#endif
+
 // VM interface for DTVM
 struct DTVM : evmc_vm {
   DTVM();
@@ -298,6 +309,34 @@ struct DTVM : evmc_vm {
   // Statistics: total execute() call count.
   uint64_t ExecuteCallCount = 0;
 
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+  zen::action::EVMJITCompileMetrics ForegroundCompileMetrics;
+  uint64_t TopLevelExecuteCount = 0;
+  uint64_t TopLevelExecuteWallNs = 0;
+  uint64_t ProfileGuidedJITTriggerBaseline = 0;
+  uint64_t ModuleCacheLookupCount = 0;
+  uint64_t ModuleCacheHitCount = 0;
+  uint64_t ModuleCacheMissCount = 0;
+  uint64_t ModuleCacheValidationRejectCount = 0;
+  uint64_t ModuleCacheEvictionCount = 0;
+  uint64_t ModuleCachePeakEntryCount = 0;
+  uint64_t TransientModuleLoadCount = 0;
+  uint64_t JITFrameCount = 0;
+  uint64_t JITActiveWallNs = 0;
+  uint64_t InterpreterFrameCount = 0;
+  uint64_t InterpreterActiveWallNs = 0;
+  uint64_t CreateInterpreterFallbackCount = 0;
+  uint64_t NewlyCreatedInterpreterFallbackCount = 0;
+  uint64_t SmallCodeInterpreterFallbackCount = 0;
+  uint64_t StickyInterpreterFallbackCount = 0;
+  std::mutex PhaseMetricsMutex;
+  std::atomic<uint32_t> ExecuteInFlight{0};
+  std::atomic<uint32_t> BackgroundJITCompileInFlight{0};
+  EVMActiveMode ActiveMode = EVMActiveMode::None;
+  std::chrono::steady_clock::time_point ActiveModeStart;
+  bool MeasureExecutionActive = false;
+#endif
+
   // Track addresses created via CREATE/CREATE2 in the current transaction.
   // Used to skip JIT compilation for contracts that were just deployed
   // (unlikely to be called enough times to benefit from JIT).
@@ -313,6 +352,97 @@ struct DTVM : evmc_vm {
     return false;
   }
 };
+
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+void accrueActiveWall(DTVM *VM, std::chrono::steady_clock::time_point Now) {
+  if (VM->ActiveMode == EVMActiveMode::JIT) {
+    VM->JITActiveWallNs += static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            Now - VM->ActiveModeStart)
+            .count());
+  } else if (VM->ActiveMode == EVMActiveMode::Interpreter) {
+    VM->InterpreterActiveWallNs += static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            Now - VM->ActiveModeStart)
+            .count());
+  }
+}
+
+class EVMExecutionActiveScope {
+public:
+  EVMExecutionActiveScope(DTVM *VM, EVMActiveMode Mode) : VM(VM) {
+    if (!VM->MeasureExecutionActive) {
+      return;
+    }
+    if (Mode == EVMActiveMode::JIT) {
+      ++VM->JITFrameCount;
+    } else {
+      ++VM->InterpreterFrameCount;
+    }
+    PreviousMode = VM->ActiveMode;
+    if (PreviousMode == Mode) {
+      return;
+    }
+    const auto Now = std::chrono::steady_clock::now();
+    accrueActiveWall(VM, Now);
+    VM->ActiveMode = Mode;
+    VM->ActiveModeStart = Now;
+    ChangedMode = true;
+  }
+
+  ~EVMExecutionActiveScope() {
+    if (!ChangedMode) {
+      return;
+    }
+    const auto Now = std::chrono::steady_clock::now();
+    accrueActiveWall(VM, Now);
+    VM->ActiveMode = PreviousMode;
+    VM->ActiveModeStart = Now;
+  }
+
+private:
+  DTVM *VM;
+  EVMActiveMode PreviousMode = EVMActiveMode::None;
+  bool ChangedMode = false;
+};
+
+class EVMCPhaseMetricsScope {
+public:
+  EVMCPhaseMetricsScope(DTVM *VM, const evmc_message *Msg) : VM(VM) {
+    std::lock_guard<std::mutex> Guard(VM->PhaseMetricsMutex);
+    const uint32_t Previous =
+        VM->ExecuteInFlight.fetch_add(1, std::memory_order_relaxed);
+    MeasureTopLevel = Previous == 0 && Msg != nullptr && Msg->depth == 0;
+    if (!MeasureTopLevel) {
+      return;
+    }
+    PreviousCompileMetrics = zen::action::exchangeEVMJITCompileMetrics(
+        &VM->ForegroundCompileMetrics);
+    VM->ActiveMode = EVMActiveMode::None;
+    VM->MeasureExecutionActive = true;
+    Start = std::chrono::steady_clock::now();
+  }
+
+  ~EVMCPhaseMetricsScope() {
+    if (MeasureTopLevel) {
+      VM->MeasureExecutionActive = false;
+      const auto Elapsed = std::chrono::steady_clock::now() - Start;
+      ++VM->TopLevelExecuteCount;
+      VM->TopLevelExecuteWallNs += static_cast<uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(Elapsed)
+              .count());
+      zen::action::exchangeEVMJITCompileMetrics(PreviousCompileMetrics);
+    }
+    VM->ExecuteInFlight.fetch_sub(1, std::memory_order_release);
+  }
+
+private:
+  DTVM *VM;
+  zen::action::EVMJITCompileMetrics *PreviousCompileMetrics = nullptr;
+  std::chrono::steady_clock::time_point Start;
+  bool MeasureTopLevel = false;
+};
+#endif
 
 ModuleGuard::~ModuleGuard() {
   if (ShouldUnload && Mod && VM && VM->RT) {
@@ -491,6 +621,9 @@ EVMModule *loadTransientModule(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   TransientConfig.Mode = RunMode::InterpMode;
   ScopedConfig InterpScope(VM->RT.get(), TransientConfig);
 
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+  ++VM->TransientModuleLoadCount;
+#endif
   std::string ModName = "tmp_mod_" + std::to_string(VM->ModCounter++);
   auto ModRet =
       loadEVMModuleWithRegAllocRetry(VM, ModName, Code, CodeSize, Rev);
@@ -512,6 +645,9 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   }
 
   IsTransient = false;
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+  ++VM->ModuleCacheLookupCount;
+#endif
   const EVMMemorySpecializationProfile Profile =
       deriveMemorySpecializationProfile(Msg);
 
@@ -538,13 +674,23 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
   if (It != VM->AddrCache.end() &&
       validateCodeMatch(Code, CodeSize, It->second.first,
                         VM->EnableStrictAddrCacheValidation)) {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    ++VM->ModuleCacheHitCount;
+#endif
     Mod = It->second.first;
     // LRU touch: move to front (most recently used)
     VM->LRUOrder.splice(VM->LRUOrder.begin(), VM->LRUOrder, It->second.second);
   } else {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    ++VM->ModuleCacheMissCount;
+#endif
     // Cold path: full module load
     // If validation failed for an existing entry, evict the stale module
     if (It != VM->AddrCache.end()) {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+      ++VM->ModuleCacheValidationRejectCount;
+      ++VM->ModuleCacheEvictionCount;
+#endif
       EVMModule *OldMod = It->second.first;
       if (VM->L0Mod == OldMod && Msg->depth == 0)
         VM->L0Mod = nullptr;
@@ -565,6 +711,9 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
         if (VM->L0Mod == VictimMod)
           VM->L0Mod = nullptr;
         VM->RT->unloadEVMModule(VictimMod);
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+        ++VM->ModuleCacheEvictionCount;
+#endif
         VM->AddrCache.erase(VictimIt);
       }
       VM->LRUOrder.pop_back();
@@ -579,6 +728,10 @@ EVMModule *findModuleCached(DTVM *VM, const uint8_t *Code, size_t CodeSize,
 
     VM->LRUOrder.push_front(AddrKey);
     VM->AddrCache[AddrKey] = {Mod, VM->LRUOrder.begin()};
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    VM->ModuleCachePeakEntryCount =
+        std::max<uint64_t>(VM->ModuleCachePeakEntryCount, VM->AddrCache.size());
+#endif
   }
 
   // Update L0 cache members. Even though L0 lookup is disabled, we maintain
@@ -708,7 +861,14 @@ evmc_result runInterpreterOnResolvedInstance(DTVM *VM, EVMModule *Mod,
   auto &Ctx = *CtxPtr;
   zen::evm::BaseInterpreter Interpreter(Ctx);
   Ctx.allocTopFrame(&MsgWithCode);
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+  {
+    EVMExecutionActiveScope ActiveScope(VM, EVMActiveMode::Interpreter);
+    Interpreter.interpret();
+  }
+#else
   Interpreter.interpret();
+#endif
 
   evmc::Result Result =
       std::move(const_cast<evmc::Result &>(Ctx.getExeResult()));
@@ -834,9 +994,26 @@ void updateProfileAndMaybeTriggerJIT(DTVM *VM, const evmc_message *Msg,
 
   // Trigger background JIT compilation via thread pool.
   auto &Pool = getOrCreateCompilePool(VM);
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+  VM->BackgroundJITCompileInFlight.fetch_add(1, std::memory_order_relaxed);
+  auto Future = Pool.submit([VM, Mod]() {
+    struct CompletionGuard {
+      DTVM *VM;
+      ~CompletionGuard() {
+        VM->BackgroundJITCompileInFlight.fetch_sub(1,
+                                                   std::memory_order_release);
+      }
+    } Guard{VM};
+    zen::action::performEVMJITCompile(*Mod);
+  });
+#else
   auto Future =
       Pool.submit([Mod]() { zen::action::performEVMJITCompile(*Mod); });
+#endif
   if (!Future.valid()) {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    VM->BackgroundJITCompileInFlight.fetch_sub(1, std::memory_order_release);
+#endif
     return;
   }
   CurrentProfile.JITTriggered = true;
@@ -866,6 +1043,9 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
                     const evmc_message *Msg, const uint8_t *Code,
                     size_t CodeSize) {
   auto *VM = static_cast<DTVM *>(EVMInstance);
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+  EVMCPhaseMetricsScope MetricsScope(VM, Msg);
+#endif
   VM->ExecuteCallCount++;
 
   // Clear created-address tracker at top-level call boundaries (new tx).
@@ -875,6 +1055,11 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
 
   // Interpreter mode: use optimized fast path (bypasses callEVMMain)
   if (VM->Config.Mode == RunMode::InterpMode || !isNonCreateOperation(Msg)) {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    if (!isNonCreateOperation(Msg)) {
+      ++VM->CreateInterpreterFallbackCount;
+    }
+#endif
     evmc_result createResult =
         executeInterpreterFastPath(VM, Host, Context, Rev, Msg, Code, CodeSize);
     // Track newly created contract addresses so we can skip JIT for them.
@@ -890,6 +1075,9 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
   // Skip JIT for contracts created in the current transaction.
   if (VM->CreatedAddrsInTx.count(
           static_cast<const evmc::address &>(Msg->code_address))) {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    ++VM->NewlyCreatedInterpreterFallbackCount;
+#endif
     return executeInterpreterFastPath(VM, Host, Context, Rev, Msg, Code,
                                       CodeSize);
   }
@@ -899,6 +1087,9 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
   // speedup for contracts with fewer than ~64 opcodes.
   static constexpr size_t kMinJITCodeSize = 64;
   if (CodeSize < kMinJITCodeSize) {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    ++VM->SmallCodeInterpreterFallbackCount;
+#endif
     return executeInterpreterFastPath(VM, Host, Context, Rev, Msg, Code,
                                       CodeSize);
   }
@@ -925,6 +1116,9 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
     // O(1) flag check replaces per-call O(n) EVMAnalyzer scans and remains
     // sticky if a later JIT compilation attempt fails.
     if (Mod->ShouldFallbackToInterp) {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+      ++VM->StickyInterpreterFallbackCount;
+#endif
       return executeInterpreterFastPath(VM, Host, Context, Rev, Msg, Code,
                                         CodeSize);
     }
@@ -959,6 +1153,9 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
         zen::action::performEVMJITCompile(*Mod);
         // If compilation failed, fall back to interpreter.
         if (!Mod->getJITCode()) {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+          ++VM->StickyInterpreterFallbackCount;
+#endif
           return executeInterpreterFastPath(VM, Host, Context, Rev, Msg, Code,
                                             CodeSize);
         }
@@ -975,6 +1172,9 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
     // nullptr here. Fall back to the interpreter fast path in that case
     // instead of jumping through a null function pointer.
     if (!Mod->getJITCode()) {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+      ++VM->StickyInterpreterFallbackCount;
+#endif
       return executeInterpreterFastPath(VM, Host, Context, Rev, Msg, Code,
                                         CodeSize);
     }
@@ -996,14 +1196,35 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
       StackInfo.SavedPtr2 = &MsgWithCode;
       StackInfo.SavedPtr3 = &Result;
       TheInst->pushVirtualStack(&StackInfo);
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+      {
+        EVMExecutionActiveScope ActiveScope(VM, EVMActiveMode::JIT);
+        StackInfo.runInVirtualStack(&callJITFromVirtualStack);
+      }
+#else
       StackInfo.runInVirtualStack(&callJITFromVirtualStack);
+#endif
       TheInst->popVirtualStack();
     } else {
       // depth>0: re-entered via EVMC host callback, already on physical stack
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+      {
+        EVMExecutionActiveScope ActiveScope(VM, EVMActiveMode::JIT);
+        VM->RT->callEVMInJITMode(*TheInst, MsgWithCode, Result);
+      }
+#else
+      VM->RT->callEVMInJITMode(*TheInst, MsgWithCode, Result);
+#endif
+    }
+#else
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    {
+      EVMExecutionActiveScope ActiveScope(VM, EVMActiveMode::JIT);
       VM->RT->callEVMInJITMode(*TheInst, MsgWithCode, Result);
     }
 #else
     VM->RT->callEVMInJITMode(*TheInst, MsgWithCode, Result);
+#endif
 #endif // ZEN_ENABLE_VIRTUAL_STACK
 
     zen::evm::setFrameGasLeft(Result, TheInst->getGas());
@@ -1075,6 +1296,11 @@ DTVM::DTVM()
     }
   }
 }
+
+bool isDTVMInstance(const evmc_vm *VM) {
+  return VM != nullptr && VM->abi_version == EVMC_ABI_VERSION &&
+         VM->destroy == ::destroy && VM->execute == ::execute;
+}
 } // namespace
 
 extern "C" evmc_vm *evmc_create_dtvmapi() { return new DTVM; }
@@ -1086,4 +1312,122 @@ extern "C" uint64_t dtvm_get_jit_trigger_count(evmc_vm *vm) {
 #else
   return 0;
 #endif // ZEN_ENABLE_MULTIPASS_JIT
+}
+
+extern "C" dtvm_evmc_phase_metrics_status
+dtvm_get_evmc_phase_metrics(evmc_vm *vm, dtvm_evmc_hot_metrics *metrics) {
+  if (!isDTVMInstance(vm) || metrics == nullptr) {
+    return DTVM_EVMC_PHASE_METRICS_INVALID_ARGUMENT;
+  }
+  if (metrics->version != DTVM_EVMC_PHASE_METRICS_VERSION ||
+      metrics->struct_size != sizeof(dtvm_evmc_hot_metrics)) {
+    return DTVM_EVMC_PHASE_METRICS_INCOMPATIBLE;
+  }
+#ifndef ZEN_ENABLE_EVMC_PHASE_METRICS
+  return DTVM_EVMC_PHASE_METRICS_DISABLED;
+#else
+  auto *VM = static_cast<DTVM *>(vm);
+  std::lock_guard<std::mutex> Guard(VM->PhaseMetricsMutex);
+  if (VM->ExecuteInFlight.load(std::memory_order_acquire) != 0 ||
+      VM->BackgroundJITCompileInFlight.load(std::memory_order_acquire) != 0 ||
+      VM->ForegroundCompileMetrics.InFlightDepth != 0) {
+    return DTVM_EVMC_PHASE_METRICS_BUSY;
+  }
+  const uint64_t ActiveWall = VM->JITActiveWallNs + VM->InterpreterActiveWallNs;
+  if (VM->ForegroundCompileMetrics.SuccessfulInstallCount >
+          VM->ForegroundCompileMetrics.AttemptCount ||
+      VM->ForegroundCompileMetrics.WallTimeNs > VM->TopLevelExecuteWallNs ||
+      ActiveWall > VM->TopLevelExecuteWallNs ||
+      VM->AddrCache.size() > VM->ModuleCachePeakEntryCount) {
+    return DTVM_EVMC_PHASE_METRICS_INCONSISTENT;
+  }
+
+  uint64_t ProfileGuidedJITTriggerCount = 0;
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+  if (VM->BackgroundJITTriggerCount < VM->ProfileGuidedJITTriggerBaseline) {
+    return DTVM_EVMC_PHASE_METRICS_INCONSISTENT;
+  }
+  ProfileGuidedJITTriggerCount =
+      VM->BackgroundJITTriggerCount - VM->ProfileGuidedJITTriggerBaseline;
+#endif
+
+  *metrics = dtvm_evmc_hot_metrics{
+      DTVM_EVMC_PHASE_METRICS_VERSION,
+      sizeof(dtvm_evmc_hot_metrics),
+      VM->TopLevelExecuteCount,
+      VM->TopLevelExecuteWallNs,
+      VM->ForegroundCompileMetrics.AttemptCount,
+      VM->ForegroundCompileMetrics.SuccessfulInstallCount,
+      VM->ForegroundCompileMetrics.WallTimeNs,
+      VM->TopLevelExecuteWallNs - VM->ForegroundCompileMetrics.WallTimeNs,
+      ProfileGuidedJITTriggerCount,
+      VM->ModuleCacheLookupCount,
+      VM->ModuleCacheHitCount,
+      VM->ModuleCacheMissCount,
+      VM->ModuleCacheValidationRejectCount,
+      VM->ModuleCacheEvictionCount,
+      VM->AddrCache.size(),
+      VM->ModuleCachePeakEntryCount,
+      VM->TransientModuleLoadCount,
+      VM->JITFrameCount,
+      VM->JITActiveWallNs,
+      VM->InterpreterFrameCount,
+      VM->InterpreterActiveWallNs,
+      VM->CreateInterpreterFallbackCount,
+      VM->NewlyCreatedInterpreterFallbackCount,
+      VM->SmallCodeInterpreterFallbackCount,
+      VM->StickyInterpreterFallbackCount,
+  };
+  return DTVM_EVMC_PHASE_METRICS_SUCCESS;
+#endif
+}
+
+extern "C" dtvm_evmc_phase_metrics_status
+dtvm_reset_evmc_phase_metrics(evmc_vm *vm, uint32_t version,
+                              uint32_t struct_size) {
+  if (!isDTVMInstance(vm)) {
+    return DTVM_EVMC_PHASE_METRICS_INVALID_ARGUMENT;
+  }
+  if (version != DTVM_EVMC_PHASE_METRICS_VERSION ||
+      struct_size != sizeof(dtvm_evmc_hot_metrics)) {
+    return DTVM_EVMC_PHASE_METRICS_INCOMPATIBLE;
+  }
+#ifndef ZEN_ENABLE_EVMC_PHASE_METRICS
+  return DTVM_EVMC_PHASE_METRICS_DISABLED;
+#else
+  auto *VM = static_cast<DTVM *>(vm);
+  std::lock_guard<std::mutex> Guard(VM->PhaseMetricsMutex);
+  if (VM->ExecuteInFlight.load(std::memory_order_acquire) != 0 ||
+      VM->BackgroundJITCompileInFlight.load(std::memory_order_acquire) != 0 ||
+      VM->ForegroundCompileMetrics.InFlightDepth != 0) {
+    return DTVM_EVMC_PHASE_METRICS_BUSY;
+  }
+
+  VM->TopLevelExecuteCount = 0;
+  VM->TopLevelExecuteWallNs = 0;
+  VM->ForegroundCompileMetrics = {};
+  VM->ModuleCacheLookupCount = 0;
+  VM->ModuleCacheHitCount = 0;
+  VM->ModuleCacheMissCount = 0;
+  VM->ModuleCacheValidationRejectCount = 0;
+  VM->ModuleCacheEvictionCount = 0;
+  VM->ModuleCachePeakEntryCount = VM->AddrCache.size();
+  VM->TransientModuleLoadCount = 0;
+  VM->JITFrameCount = 0;
+  VM->JITActiveWallNs = 0;
+  VM->InterpreterFrameCount = 0;
+  VM->InterpreterActiveWallNs = 0;
+  VM->CreateInterpreterFallbackCount = 0;
+  VM->NewlyCreatedInterpreterFallbackCount = 0;
+  VM->SmallCodeInterpreterFallbackCount = 0;
+  VM->StickyInterpreterFallbackCount = 0;
+  VM->ActiveMode = EVMActiveMode::None;
+  VM->MeasureExecutionActive = false;
+#ifdef ZEN_ENABLE_MULTIPASS_JIT
+  VM->ProfileGuidedJITTriggerBaseline = VM->BackgroundJITTriggerCount;
+#else
+  VM->ProfileGuidedJITTriggerBaseline = 0;
+#endif
+  return DTVM_EVMC_PHASE_METRICS_SUCCESS;
+#endif
 }

@@ -300,6 +300,93 @@ void expectPCList(const std::vector<uint64_t> &Actual,
   }
 }
 
+#ifdef ZEN_ENABLE_MULTIPASS_JIT_LOGGING
+TEST(EVMMirBuilderArithStatsTest, RoutesScopedU64CandidatesTogether) {
+  const std::vector<uint8_t> Bytecode = {
+      OP_CALLDATASIZE, OP_CALLDATASIZE,
+      OP_ADD,          OP_POP,
+      OP_CALLDATASIZE, OP_CALLDATASIZE,
+      OP_SUB,          OP_POP,
+      OP_CALLDATASIZE, OP_CALLDATASIZE,
+      OP_MUL,          OP_POP,
+      OP_CALLDATASIZE, OP_CALLDATASIZE,
+      OP_DIV,          OP_POP,
+      OP_CALLDATASIZE, OP_CALLDATASIZE,
+      OP_MOD,          OP_POP,
+      OP_PUSH1,        0x03,
+      OP_PUSH0,        OP_CALLDATALOAD,
+      OP_ADD,          OP_POP,
+      OP_PUSH1,        0x03,
+      OP_PUSH0,        OP_CALLDATALOAD,
+      OP_SUB,          OP_POP,
+      OP_PUSH1,        0x03,
+      OP_PUSH0,        OP_CALLDATALOAD,
+      OP_MUL,          OP_POP,
+      OP_PUSH1,        0x03,
+      OP_PUSH0,        OP_CALLDATALOAD,
+      OP_DIV,          OP_POP,
+      OP_PUSH1,        0x03,
+      OP_PUSH0,        OP_CALLDATALOAD,
+      OP_MOD,          OP_POP,
+      OP_STOP,
+  };
+
+  COMPILER::EVMFrontendContext Ctx;
+  Ctx.setRevision(EVMC_CANCUN);
+  Ctx.setBytecode(reinterpret_cast<const zen::common::Byte *>(Bytecode.data()),
+                  Bytecode.size());
+
+  COMPILER::MModule Mod(Ctx);
+  std::array<COMPILER::MType *, 1> ParamTypes = {
+      COMPILER::MPointerType::create(Ctx, Ctx.VoidType)};
+  COMPILER::MFunctionType *FuncType = COMPILER::MFunctionType::create(
+      Ctx, Ctx.VoidType, llvm::ArrayRef<COMPILER::MType *>(ParamTypes));
+  Mod.addFuncType(FuncType);
+
+  COMPILER::MFunction Func(Ctx, 0);
+  Func.setFunctionType(FuncType);
+  EVMMirBuilder Builder(Ctx, Func);
+  ASSERT_TRUE(Builder.compile(&Ctx));
+
+  auto Logger = std::make_shared<CapturingLogger>();
+  auto &Logging = zen::utils::Logging::getInstance();
+  auto PreviousLogger = Logging.getLogger();
+  Logging.setLogger(Logger);
+  Builder.dumpMemoryCompileStats();
+  Logging.setLogger(std::move(PreviousLogger));
+
+  auto Summary = std::find_if(
+      Logger->DebugMessages.begin(), Logger->DebugMessages.end(),
+      [](const std::string &Message) {
+        return Message.find("[EVM-ARITH-SUMMARY]") != std::string::npos;
+      });
+  ASSERT_NE(Summary, Logger->DebugMessages.end());
+
+  const std::string ExpectedCounts = COMPILER::EnableEVMU64ArithFastPath
+                                         ? "add_fast_range_u64=1 "
+                                           "add_fast_const_u64=1 add_full=0 "
+                                           "sub_fast_range_u64=1 "
+                                           "sub_fast_const_u64=1 sub_full=0 "
+                                           "mul_fast_range_u64=1 "
+                                           "mul_fast_const_u64=1 mul_full=0 "
+                                           "div_fast_range_u64=1 "
+                                           "div_fast_const_u64=1 div_full=0 "
+                                           "mod_fast_range_u64=1 "
+                                           "mod_fast_const_u64=1 mod_full=0"
+                                         : "add_fast_range_u64=0 "
+                                           "add_fast_const_u64=0 add_full=2 "
+                                           "sub_fast_range_u64=0 "
+                                           "sub_fast_const_u64=0 sub_full=2 "
+                                           "mul_fast_range_u64=0 "
+                                           "mul_fast_const_u64=0 mul_full=2 "
+                                           "div_fast_range_u64=0 "
+                                           "div_fast_const_u64=0 div_full=2 "
+                                           "mod_fast_range_u64=0 "
+                                           "mod_fast_const_u64=0 mod_full=2";
+  EXPECT_NE(Summary->find(ExpectedCounts), std::string::npos) << *Summary;
+}
+#endif
+
 #if defined(ZEN_ENABLE_MULTIPASS_JIT_LOGGING) &&                               \
     defined(ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK)
 size_t countRuntimeCalls(const COMPILER::MFunction &Func, uint64_t Address) {
@@ -1505,10 +1592,12 @@ TEST(EVMMirBuilderMemoryProofTest,
   ASSERT_TRUE(UncoveredMir.has_value());
 
   const auto &RuntimeFunctions = COMPILER::getRuntimeFunctionTable();
-  EXPECT_TRUE(containsKeccakRuntimeCall(*CoveredMir,
-                                        RuntimeFunctions.GetKeccak256NoExpand));
-  EXPECT_FALSE(
-      containsKeccakRuntimeCall(*CoveredMir, RuntimeFunctions.GetKeccak256));
+  EXPECT_EQ(containsKeccakRuntimeCall(*CoveredMir,
+                                      RuntimeFunctions.GetKeccak256NoExpand),
+            COMPILER::EnableEVMMemoryPlanPipeline);
+  EXPECT_EQ(
+      containsKeccakRuntimeCall(*CoveredMir, RuntimeFunctions.GetKeccak256),
+      !COMPILER::EnableEVMMemoryPlanPipeline);
   EXPECT_TRUE(
       containsKeccakRuntimeCall(*UncoveredMir, RuntimeFunctions.GetKeccak256));
   EXPECT_FALSE(containsKeccakRuntimeCall(
@@ -1533,8 +1622,9 @@ TEST(EVMMirBuilderMemoryProofTest, ReusesPriorKeccakProofAtExactOpcodePC) {
       containsKeccakRuntimeCall(*OneMir, RuntimeFunctions.GetKeccak256));
   EXPECT_TRUE(
       containsKeccakRuntimeCall(*TwoMir, RuntimeFunctions.GetKeccak256));
-  EXPECT_TRUE(containsKeccakRuntimeCall(*TwoMir,
-                                        RuntimeFunctions.GetKeccak256NoExpand));
+  EXPECT_EQ(
+      containsKeccakRuntimeCall(*TwoMir, RuntimeFunctions.GetKeccak256NoExpand),
+      COMPILER::EnableEVMMemoryPlanPipeline);
 }
 #endif
 
@@ -1691,8 +1781,10 @@ TEST(EVMMirBuilderMemoryStatsTest,
         return Message.find("[EVM-MEM-SUMMARY]") != std::string::npos;
       });
   ASSERT_NE(Summary, Logger->DebugMessages.end());
-  EXPECT_NE(Summary->find("copy_guaranteed_elision=2 "), std::string::npos)
-      << *Summary;
+  const std::string ExpectedElisions = COMPILER::EnableEVMMemoryPlanPipeline
+                                           ? "copy_guaranteed_elision=2 "
+                                           : "copy_guaranteed_elision=0 ";
+  EXPECT_NE(Summary->find(ExpectedElisions), std::string::npos) << *Summary;
   EXPECT_EQ(Summary->find("copy_guaranteed_elision=3 "), std::string::npos)
       << *Summary;
 }
@@ -3595,7 +3687,8 @@ TEST(EVMJITFrontendVisitorTest, ConservativelyAdmitsPotentialMultiBlockCFG) {
   COMPILER::EVMByteCodeVisitor<MemoryFactsCapturingBuilder> Visitor(Builder,
                                                                     &Ctx);
   EXPECT_TRUE(Visitor.compile());
-  EXPECT_EQ(Builder.SetMemoryFactsCount, 1u);
+  EXPECT_EQ(Builder.SetMemoryFactsCount,
+            COMPILER::EnableEVMMemoryPlanPipeline ? 1u : 0u);
 }
 
 TEST(EVMJITFrontendVisitorTest, PreservesDenseExactProofOpportunity) {
@@ -3613,12 +3706,18 @@ TEST(EVMJITFrontendVisitorTest, PreservesDenseExactProofOpportunity) {
   COMPILER::EVMByteCodeVisitor<MemoryFactsCapturingBuilder> Visitor(Builder,
                                                                     &Ctx);
   EXPECT_TRUE(Visitor.compile());
-  EXPECT_EQ(Builder.SetMemoryFactsCount, 1u);
-  EXPECT_EQ(Builder.CapturedFacts.Ops.size(), 2u);
+  EXPECT_EQ(Builder.SetMemoryFactsCount,
+            COMPILER::EnableEVMMemoryPlanPipeline ? 1u : 0u);
+  if constexpr (COMPILER::EnableEVMMemoryPlanPipeline) {
+    EXPECT_EQ(Builder.CapturedFacts.Ops.size(), 2u);
+  } else {
+    EXPECT_TRUE(Builder.CapturedFacts.empty());
+  }
 }
 #endif
 
-TEST(EVMJITFrontendVisitorTest, UsesActiveRevisionForMemoryEffectFacts) {
+TEST(EVMJITFrontendVisitorTest,
+     HonorsMemoryPlanPipelineSwitchAndActiveRevision) {
   const std::vector<uint8_t> Bytecode = {OP_PUSH0, OP_PUSH0, OP_PUSH0, OP_MCOPY,
                                          OP_STOP};
 
@@ -3631,6 +3730,13 @@ TEST(EVMJITFrontendVisitorTest, UsesActiveRevisionForMemoryEffectFacts) {
   COMPILER::EVMByteCodeVisitor<MemoryFactsCapturingBuilder> Visitor(Builder,
                                                                     &Ctx);
   EXPECT_TRUE(Visitor.compile());
+  EXPECT_EQ(Builder.SetMemoryFactsCount,
+            COMPILER::EnableEVMMemoryPlanPipeline ? 1u : 0u);
+  if constexpr (!COMPILER::EnableEVMMemoryPlanPipeline) {
+    EXPECT_TRUE(Builder.CapturedFacts.empty());
+    return;
+  }
+
   ASSERT_EQ(Builder.CapturedFacts.Ops.size(), 1u);
   const COMPILER::MemoryOp &Op = Builder.CapturedFacts.Ops[0];
   EXPECT_EQ(Op.Opcode, OP_MCOPY);

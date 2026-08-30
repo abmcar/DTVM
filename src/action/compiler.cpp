@@ -4,6 +4,10 @@
 #include "action/compiler.h"
 #include "common/enums.h"
 
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+#include <chrono>
+#endif
+
 #ifdef ZEN_ENABLE_SINGLEPASS_JIT
 #include "singlepass/singlepass.h"
 #endif
@@ -15,6 +19,58 @@
 #endif
 
 namespace zen::action {
+
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+namespace {
+thread_local EVMJITCompileMetrics *ActiveEVMJITCompileMetrics = nullptr;
+
+class EVMJITCompileMetricsScope {
+public:
+  explicit EVMJITCompileMetricsScope(runtime::EVMModule &Mod)
+      : Metrics(ActiveEVMJITCompileMetrics), Mod(Mod) {
+    if (!Metrics) {
+      return;
+    }
+    ++Metrics->AttemptCount;
+    MeasureWall = Metrics->InFlightDepth++ == 0;
+    HadJITCode = Mod.getJITCode() != nullptr;
+    if (MeasureWall) {
+      Start = std::chrono::steady_clock::now();
+    }
+  }
+
+  ~EVMJITCompileMetricsScope() {
+    if (!Metrics) {
+      return;
+    }
+    if (!HadJITCode && Mod.getJITCode() != nullptr) {
+      ++Metrics->SuccessfulInstallCount;
+    }
+    --Metrics->InFlightDepth;
+    if (MeasureWall) {
+      const auto Elapsed = std::chrono::steady_clock::now() - Start;
+      Metrics->WallTimeNs += static_cast<uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(Elapsed)
+              .count());
+    }
+  }
+
+private:
+  EVMJITCompileMetrics *Metrics;
+  runtime::EVMModule &Mod;
+  std::chrono::steady_clock::time_point Start;
+  bool MeasureWall = false;
+  bool HadJITCode = false;
+};
+} // namespace
+
+EVMJITCompileMetrics *
+exchangeEVMJITCompileMetrics(EVMJITCompileMetrics *Metrics) {
+  auto *Previous = ActiveEVMJITCompileMetrics;
+  ActiveEVMJITCompileMetrics = Metrics;
+  return Previous;
+}
+#endif
 
 void performJITCompile(runtime::Module &Mod) {
   switch (Mod.getRuntime()->getConfig().Mode) {
@@ -43,6 +99,9 @@ void performJITCompile(runtime::Module &Mod) {
 
 #ifdef ZEN_ENABLE_EVM
 void performEVMJITCompile(runtime::EVMModule &Mod) {
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+  EVMJITCompileMetricsScope MetricsScope(Mod);
+#endif
   switch (Mod.getRuntime()->getConfig().Mode) {
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
   case common::RunMode::MultipassMode: {

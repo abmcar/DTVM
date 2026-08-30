@@ -58,6 +58,12 @@ option(ZEN_ENABLE_EVM_MEM_LARGE_STATIC_WORKSPACE_LOWERING
 option(ZEN_ENABLE_EVM_MEMORY_PLAN_FRAMEWORK
        "Enable EVM memory expansion plan framework in multipass frontend" ON
 )
+option(ZEN_ENABLE_EVM_U64_ARITH_FASTPATH
+       "Enable EVM u64 arithmetic fast paths in the multipass frontend" ON
+)
+option(ZEN_ENABLE_EVM_MEMORY_PLAN_PIPELINE
+       "Enable EVM memory-plan fact production and optimization consumers" ON
+)
 
 # Blockchain options
 option(ZEN_ENABLE_CHECKED_ARITHMETIC "Enable checked arithmetic" OFF)
@@ -79,6 +85,9 @@ option(
   ZEN_EVM_CACHE_PROFILE
   "Enable per-phase wall-clock instrumentation in EVM bytecode-cache build (stderr CSV)"
   OFF
+)
+option(ZEN_ENABLE_EVMC_PHASE_METRICS
+       "Enable diagnostic EVMC replay phase metrics" OFF
 )
 
 # Test options

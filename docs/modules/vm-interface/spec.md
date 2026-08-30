@@ -65,6 +65,20 @@ This module does not include: EVM bytecode compilation (compiler), interpreter/J
 
 - With `ZEN_ENABLE_JIT_PRECOMPILE_FALLBACK`, for bytecode unsuited to JIT (per `EVMAnalyzer`), use `ScopedConfig` to temporarily switch to interpreter
 
+### 9. Replay Phase Metrics (Optional)
+
+- `dtvm_get_evmc_phase_metrics()` and `dtvm_reset_evmc_phase_metrics()` use
+  schema version 2 and a fixed 192-byte request structure.
+- Metrics-enabled builds report top-level execute, synchronous compile, cache,
+  JIT/interpreter active wall, and fallback counters. Snapshot is
+  non-destructive; reset preserves live cache entries and resets their peak
+  baseline to the current entry count.
+- Snapshot and reset return `BUSY` during execution or background compilation,
+  `INCOMPATIBLE` for a version/size mismatch, and `INCONSISTENT` when accounting
+  invariants fail.
+- Metrics-off production builds retain the symbols and return `DISABLED`; they
+  do not collect diagnostic clocks or counters.
+
 ## External Contracts
 
 | Dependent Module | Contract |
@@ -92,12 +106,18 @@ This module does not include: EVM bytecode compilation (compiler), interpreter/J
 | EVMC_SET_OPTION_INVALID_NAME | set_option | Unknown option name |
 | EVMC_SET_OPTION_INVALID_VALUE | set_option | Invalid option value |
 | EVMC_CAPABILITY_EVM1 | get_capabilities | EVM1 capability |
+| DTVM_EVMC_PHASE_METRICS_DISABLED | metrics ABI | Diagnostic collection is not compiled in |
+| DTVM_EVMC_PHASE_METRICS_BUSY | metrics ABI | Execute or background compile is in flight |
+| DTVM_EVMC_PHASE_METRICS_INCOMPATIBLE | metrics ABI | Version or struct size mismatch |
+| DTVM_EVMC_PHASE_METRICS_INCONSISTENT | metrics ABI | Counter invariants do not hold |
 
 ## Compatibility Strategy
 
 - **EVMC ABI**: Follow EVMC ABI 12; compatible with common EVM clients (e.g. Geth, Erigon)
 - **Cross-platform**: Static link C++ stdlib and libgcc via `-static-libstdc++`, `-static-libgcc` to reduce libstdc++ version dependency
-- **Symbol export**: `EVMC_EXPORT` for `evmc_create_dtvmapi`; other symbols hidden; `-Wl,--exclude-libs,ALL` for static libs
+- **Symbol export**: `EVMC_EXPORT` for `evmc_create_dtvmapi` and the versioned
+  phase-metrics snapshot/reset functions; other symbols hidden;
+  `-Wl,--exclude-libs,ALL` for static libs
 
 ## Cross-References
 

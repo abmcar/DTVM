@@ -65,6 +65,10 @@ EVM bytecode ──► EVMModuleLoader ──► runtime::EVMModule
 
 - **performJITCompile(runtime::Module &)**: Dispatch by `RunMode` to Singlepass or Multipass JIT; supports Lazy/Eager modes.
 - **performEVMJITCompile(runtime::EVMModule &)** (`ZEN_ENABLE_EVM`): Multipass EVM JIT only; singlepass not supported.
+- With `ZEN_ENABLE_EVMC_PHASE_METRICS`, `performEVMJITCompile()` updates only
+  the caller-installed thread-local diagnostic accumulator. Nested synchronous
+  compilation contributes one outer wall interval; background compilation is
+  excluded from the foreground accumulator.
 
 ### 5. Bytecode Visitors
 
