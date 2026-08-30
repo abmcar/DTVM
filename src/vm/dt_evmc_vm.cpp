@@ -217,7 +217,20 @@ enum class EVMActiveMode : uint8_t { None, JIT, Interpreter };
 struct DTVM : evmc_vm {
   DTVM();
   ~DTVM() {
-    // Drain the JIT compile thread pool first: wait for all in-flight
+
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    // Measurement build only: the per-replay ABI reports jitActiveWallNs already net
+    // of nested module lookups, so print the raw totals once here to say how much was
+    // taken out. Gated so it never appears in a normal run.
+    if (std::getenv("DTVM_EVM_DUMP_LOOKUP_TOTALS") != nullptr) {
+      std::fprintf(stderr,
+                   "[dtvm] lookupTotals nestedWallNs=%llu nestedCount=%llu "
+                   "allWallNs=%llu\n",
+                   (unsigned long long)ModuleLookupNestedWallNs,
+                   (unsigned long long)ModuleLookupNestedCount,
+                   (unsigned long long)ModuleLookupWallNs);
+    }
+#endif    // Drain the JIT compile thread pool first: wait for all in-flight
     // compilation tasks to finish before unloading modules they reference.
 #ifdef ZEN_ENABLE_MULTIPASS_JIT
     CompilePool.reset();
@@ -314,6 +327,14 @@ struct DTVM : evmc_vm {
   uint64_t TopLevelExecuteCount = 0;
   uint64_t TopLevelExecuteWallNs = 0;
   uint64_t ProfileGuidedJITTriggerBaseline = 0;
+  // Measurement-only (never upstreamed): wall time spent inside
+  // findModuleCached, i.e. the L1 hash lookup plus validateCodeMatch's full
+  // bytecode memcmp. Split by whether the JIT clock was already running, because
+  // EVMExecutionActiveScope does not reopen on a nested JIT frame -- so nested
+  // lookups sit INSIDE jitActiveWallNs and only those must be subtracted from it.
+  uint64_t ModuleLookupWallNs = 0;
+  uint64_t ModuleLookupNestedWallNs = 0;
+  uint64_t ModuleLookupNestedCount = 0;
   uint64_t ModuleCacheLookupCount = 0;
   uint64_t ModuleCacheHitCount = 0;
   uint64_t ModuleCacheMissCount = 0;
@@ -896,8 +917,24 @@ evmc_result executeInterpreterFastPath(DTVM *VM,
 
   // Module lookup: L1 address-based cache -> Cold load
   bool IsTransientMod = false;
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+  const bool LookupNested0 = (VM->ActiveMode == EVMActiveMode::JIT);
+  const auto LookupStart0 = std::chrono::steady_clock::now();
+#endif
   EVMModule *Mod =
       findModuleCached(VM, Code, CodeSize, Rev, Msg, IsTransientMod);
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+  {
+    const uint64_t Elapsed0 = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - LookupStart0).count());
+    VM->ModuleLookupWallNs += Elapsed0;
+    if (LookupNested0) {
+      VM->ModuleLookupNestedWallNs += Elapsed0;
+      ++VM->ModuleLookupNestedCount;
+    }
+  }
+#endif
   if (!Mod) {
     return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
   }
@@ -1105,8 +1142,24 @@ evmc_result execute(evmc_vm *EVMInstance, const evmc_host_interface *Host,
 
     // Module lookup: L1 address-based cache -> Cold load
     bool IsTransientMod = false;
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    const bool LookupNested1 = (VM->ActiveMode == EVMActiveMode::JIT);
+    const auto LookupStart1 = std::chrono::steady_clock::now();
+#endif
     EVMModule *Mod =
         findModuleCached(VM, Code, CodeSize, Rev, Msg, IsTransientMod);
+#ifdef ZEN_ENABLE_EVMC_PHASE_METRICS
+    {
+      const uint64_t Elapsed1 = static_cast<uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now() - LookupStart1).count());
+      VM->ModuleLookupWallNs += Elapsed1;
+      if (LookupNested1) {
+        VM->ModuleLookupNestedWallNs += Elapsed1;
+        ++VM->ModuleLookupNestedCount;
+      }
+    }
+#endif
     if (!Mod) {
       return evmc_make_result(EVMC_FAILURE, 0, 0, nullptr, 0);
     }
@@ -1333,7 +1386,16 @@ dtvm_get_evmc_phase_metrics(evmc_vm *vm, dtvm_evmc_hot_metrics *metrics) {
       VM->ForegroundCompileMetrics.InFlightDepth != 0) {
     return DTVM_EVMC_PHASE_METRICS_BUSY;
   }
-  const uint64_t ActiveWall = VM->JITActiveWallNs + VM->InterpreterActiveWallNs;
+  // Measurement build: report jitActiveWallNs NET of the module lookups that ran
+  // while the JIT clock was already going. EVMExecutionActiveScope does not reopen
+  // on a nested JIT frame, so without this every nested findModuleCached -- the L1
+  // hash probe plus validateCodeMatch's full-bytecode memcmp -- is charged to
+  // execution. Saturating, because the two accumulators are updated independently.
+  const uint64_t JitActiveNet =
+      VM->JITActiveWallNs > VM->ModuleLookupNestedWallNs
+          ? VM->JITActiveWallNs - VM->ModuleLookupNestedWallNs
+          : 0;
+  const uint64_t ActiveWall = JitActiveNet + VM->InterpreterActiveWallNs;
   if (VM->ForegroundCompileMetrics.SuccessfulInstallCount >
           VM->ForegroundCompileMetrics.AttemptCount ||
       VM->ForegroundCompileMetrics.WallTimeNs > VM->TopLevelExecuteWallNs ||
@@ -1370,7 +1432,7 @@ dtvm_get_evmc_phase_metrics(evmc_vm *vm, dtvm_evmc_hot_metrics *metrics) {
       VM->ModuleCachePeakEntryCount,
       VM->TransientModuleLoadCount,
       VM->JITFrameCount,
-      VM->JITActiveWallNs,
+      JitActiveNet,
       VM->InterpreterFrameCount,
       VM->InterpreterActiveWallNs,
       VM->CreateInterpreterFallbackCount,
@@ -1415,6 +1477,9 @@ dtvm_reset_evmc_phase_metrics(evmc_vm *vm, uint32_t version,
   VM->TransientModuleLoadCount = 0;
   VM->JITFrameCount = 0;
   VM->JITActiveWallNs = 0;
+  VM->ModuleLookupWallNs = 0;
+  VM->ModuleLookupNestedWallNs = 0;
+  VM->ModuleLookupNestedCount = 0;
   VM->InterpreterFrameCount = 0;
   VM->InterpreterActiveWallNs = 0;
   VM->CreateInterpreterFallbackCount = 0;
